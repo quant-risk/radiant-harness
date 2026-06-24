@@ -1,0 +1,24 @@
+# Build artifacts
+bin/
+dist/
+*.test
+*.out
+coverage.out
+
+# Local test scaffolding
+.tmp-*/
+.tmp-smoke/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+!.vscode-extension/
+
+# Go
+vendor/
+
+# Node (vscode-extension build)
+node_modules/
+*.tsbuildinfo

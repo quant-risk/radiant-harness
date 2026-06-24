@@ -1,0 +1,373 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/spf13/cobra"
+	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/engine"
+	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/quality"
+	"github.com/quant-risk/radiant-harness/internal/scaffold"
+)
+
+var version = "0.2.0"
+
+func main() {
+	root := &cobra.Command{
+		Use:     "radiant",
+		Short:   "Universal SDD harness for any AI model or agent",
+		Long:    "Spec-Driven Development harness that works with any LLM via OpenRouter, OpenAI, Anthropic, or custom providers. No agent dependency.",
+		Version: version,
+	}
+
+	// ── init ──
+	var initAgents string
+	var initForce bool
+	var initYes bool
+
+	initCmd := &cobra.Command{
+		Use:   "init [dir]",
+		Short: "Scaffold the SDD pipeline",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "."
+			if len(args) > 0 {
+				target = args[0]
+			}
+
+			initAll, _ := cmd.Flags().GetBool("all")
+			var agents []radiant.AgentID
+			if initAll {
+				agents = radiant.AllAgents()
+			} else {
+				agents = resolveAgents(initAgents, initYes)
+			}
+			if len(agents) == 0 {
+				return fmt.Errorf("no agents specified. Use --agent=claude,codex,copilot,cursor,gemini,windsurf (comma-separated) or --all")
+			}
+
+			cfg := scaffold.Config{
+				TargetDir: target,
+				Agents:    agents,
+				Force:     initForce,
+				Version:   version,
+			}
+
+			fmt.Printf("\n  radiant v%s — scaffold\n\n", version)
+			fmt.Printf("  Target: %s\n", target)
+			fmt.Printf("  Agents: %s\n\n", agentLabels(agents))
+
+			result := scaffold.Init(cfg)
+			if len(result.Errors) > 0 {
+				fmt.Printf("  ✗ Errors:\n")
+				for _, e := range result.Errors {
+					fmt.Printf("    • %s\n", e)
+				}
+				return fmt.Errorf("scaffold failed")
+			}
+
+			fmt.Printf("  ✓ %d files created", result.Written)
+			if result.Skipped > 0 {
+				fmt.Printf(" (%d kept)", result.Skipped)
+			}
+			fmt.Println()
+			fmt.Println("\n  Next steps:")
+			fmt.Println("    1. git init")
+			fmt.Println("    2. Configure your LLM: radiant config --provider=openrouter --model=deepseek-v4-pro --api-key=YOUR_KEY")
+			fmt.Println("    3. Run: radiant run specs/0001-feature/")
+			return nil
+		},
+	}
+	initCmd.Flags().StringVar(&initAgents, "agent", "", "agents to generate (claude,codex,cursor,copilot,gemini,windsurf)")
+	initCmd.Flags().BoolVar(&initForce, "force", false, "overwrite existing files")
+	initCmd.Flags().BoolVar(&initYes, "yes", false, "skip confirmation")
+	initCmd.Flags().Bool("all", false, "generate all agents")
+	root.AddCommand(initCmd)
+
+	// ── validate ──
+	var validateGates bool
+	validateCmd := &cobra.Command{
+		Use:   "validate [dir]",
+		Short: "Validate SDD pipeline conformity",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := "."
+			if len(args) > 0 {
+				root = args[0]
+			}
+
+			fmt.Println("  Validating pipeline...")
+
+			audit := quality.AuditPipeline(root)
+			fidelity := quality.EvalSpecFidelity(root)
+
+			if !audit.OK {
+				fmt.Printf("\n  ✗ Audit: %d problem(s)\n", len(audit.Errors))
+				for _, e := range audit.Errors {
+					fmt.Printf("    • %s\n", e)
+				}
+			} else {
+				fmt.Println("  ✓ Audit: OK")
+			}
+
+			if !fidelity.OK {
+				fmt.Printf("\n  ✗ Fidelity: %d issue(s)\n", len(fidelity.Errors))
+				for _, e := range fidelity.Errors {
+					fmt.Printf("    • %s\n", e)
+				}
+			} else {
+				fmt.Println("  ✓ Fidelity: OK")
+			}
+
+			if len(fidelity.Warnings) > 0 {
+				fmt.Printf("\n  ⚠ Warnings:\n")
+				for _, w := range fidelity.Warnings {
+					fmt.Printf("    • %s\n", w)
+				}
+			}
+
+			// --gates: also exercise the task gates found in tasks.md. This
+			// turns `validate` into a real UAT: spec → fidelity → tests.
+			if validateGates {
+				fmt.Println("\n  Running gates (--gates)...")
+				specsDir := filepath.Join(root, "specs")
+				entries, err := os.ReadDir(specsDir)
+				if err != nil {
+					fmt.Printf("  ⚠ cannot read specs/ (%v) — skipping gates\n", err)
+				} else {
+					featureDirRe := regexp.MustCompile(`^\d{4}-`)
+					anyFailed := false
+					for _, e := range entries {
+						if !e.IsDir() {
+							continue
+						}
+						// Only auto-discover numbered feature dirs (NNNN-name).
+						if !featureDirRe.MatchString(e.Name()) {
+							continue
+						}
+						specDir := filepath.Join(specsDir, e.Name())
+						results := quality.RunGates(root, specDir)
+						if len(results) == 0 {
+							continue
+						}
+						fmt.Printf("\n  [%s]\n", e.Name())
+						for _, g := range results {
+							switch {
+							case g.Skipped:
+								fmt.Printf("    ⚠ %s — %s\n", g.Command, g.Reason)
+							case g.Passed:
+								fmt.Printf("    ✓ %s\n", g.Command)
+							default:
+								anyFailed = true
+								fmt.Printf("    ✗ %s — %s\n", g.Command, g.Reason)
+								if g.Output != "" {
+									// Indent output so it stays attached to the gate.
+									for _, line := range strings.Split(strings.TrimRight(g.Output, "\n"), "\n") {
+										fmt.Printf("        %s\n", line)
+									}
+								}
+							}
+						}
+					}
+					if anyFailed {
+						return fmt.Errorf("gate execution failed")
+					}
+				}
+			}
+
+			if !audit.OK || !fidelity.OK {
+				return fmt.Errorf("validation failed")
+			}
+			return nil
+		},
+	}
+	validateCmd.Flags().BoolVar(&validateGates, "gates", false, "execute task gates in addition to static validation")
+	root.AddCommand(validateCmd)
+
+	// ── run ──
+	var runModel string
+	var runProvider string
+	var runAPIKey string
+	var runRetries int
+	var runVerbose bool
+
+	runCmd := &cobra.Command{
+		Use:   "run <spec-dir>",
+		Short: "Run the SDD harness on a feature (uses LLM API directly)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			specDir := args[0]
+			projectDir := "."
+
+			// Resolve model
+			model, err := resolveModel(runModel, runProvider, runAPIKey)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("\n  radiant harness v%s\n\n", version)
+			fmt.Printf("  Spec: %s\n", specDir)
+			fmt.Printf("  Model: %s/%s\n", model.Provider, model.Model)
+			fmt.Printf("  Retries: %d\n\n", runRetries)
+
+			cfg := engine.Config{
+				Model:      model,
+				ProjectDir: projectDir,
+				MaxRetries: runRetries,
+				Verbose:    runVerbose,
+			}
+
+			e := engine.New(cfg)
+			result, err := e.Run(context.Background(), specDir)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println()
+			if result.Success {
+				fmt.Printf("  ✓ Feature completed (%d attempts, %s)\n", result.Attempts, result.Duration())
+			} else {
+				fmt.Printf("  ✗ Feature failed after %d attempts (%s)\n", result.Attempts, result.Duration())
+				for _, e := range result.Errors {
+					fmt.Printf("    • %s\n", e)
+				}
+			}
+			return nil
+		},
+	}
+	runCmd.Flags().StringVar(&runModel, "model", "", "LLM model ID (any OpenAI-compatible model, e.g. claude-sonnet-4.5, gpt-5, gemini-2.5-pro, deepseek-v4-pro)")
+	runCmd.Flags().StringVar(&runProvider, "provider", "openrouter", "LLM provider (openrouter, openai, anthropic, custom)")
+	runCmd.Flags().StringVar(&runAPIKey, "api-key", "", "API key (or set OPENROUTER_API_KEY env var)")
+	runCmd.Flags().IntVar(&runRetries, "retries", 3, "max correction retries")
+	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
+	root.AddCommand(runCmd)
+
+	// ── config ──
+	var configProvider string
+	var configModel string
+	var configAPIKey string
+
+	configCmd := &cobra.Command{
+		Use:   "config",
+		Short: "Configure LLM provider and model",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if configProvider == "" && configModel == "" {
+				// Show current config
+				fmt.Println("  Available presets:")
+				for _, name := range llm.ListPresets() {
+					fmt.Printf("    • %s\n", name)
+				}
+				fmt.Println("\n  Configure with:")
+				fmt.Println("    radiant config --provider=openrouter --model=deepseek-v4-pro --api-key=YOUR_KEY")
+				return nil
+			}
+
+			fmt.Printf("  Provider: %s\n", configProvider)
+			fmt.Printf("  Model: %s\n", configModel)
+			fmt.Println("  ✓ Configuration saved")
+			return nil
+		},
+	}
+	configCmd.Flags().StringVar(&configProvider, "provider", "openrouter", "LLM provider")
+	configCmd.Flags().StringVar(&configModel, "model", "", "LLM model name")
+	configCmd.Flags().StringVar(&configAPIKey, "api-key", "", "API key")
+	root.AddCommand(configCmd)
+
+	// ── models ──
+	modelsCmd := &cobra.Command{
+		Use:   "models",
+		Short: "List available model presets",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("  Available model presets:\n")
+			for _, name := range llm.ListPresets() {
+				m, _ := llm.GetPreset(name, "")
+				fmt.Printf("    %-20s %s/%s\n", name, m.Provider, m.Model)
+			}
+			fmt.Println("\n  Use with: radiant run specs/0001/ --model=deepseek-v4-pro --api-key=YOUR_KEY")
+		},
+	}
+	root.AddCommand(modelsCmd)
+
+	// ── version ──
+	root.SetVersionTemplate("{{.Version}}\n")
+
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func resolveAgents(flag string, yes bool) []radiant.AgentID {
+	if flag == "all" {
+		return radiant.AllAgents()
+	}
+	if flag == "" {
+		if yes {
+			// --yes without --agent means "do the default thing": generate
+			// for every supported agent. The user opted into bulk.
+			return radiant.AllAgents()
+		}
+		// No flag, no --yes: refuse to guess. The operator must declare
+		// which agent(s) they want — the harness is vendor-neutral and
+		// doesn't privilege any particular CLI.
+		return nil
+	}
+	var agents []radiant.AgentID
+	for _, s := range strings.Split(flag, ",") {
+		s = strings.TrimSpace(s)
+		if radiant.IsValidAgent(s) {
+			agents = append(agents, radiant.AgentID(s))
+		}
+	}
+	return agents
+}
+
+func agentLabels(agents []radiant.AgentID) string {
+	var labels []string
+	for _, a := range agents {
+		adapter := scaffold.GetAdapter(a)
+		if adapter != nil {
+			labels = append(labels, adapter.Label)
+		} else {
+			labels = append(labels, string(a))
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+func resolveModel(modelName, provider, apiKey string) (llm.Model, error) {
+	// Check environment variables for API key first
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENROUTER_API_KEY")
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+
+	// Try preset
+	if preset, ok := llm.GetPreset(modelName, apiKey); ok {
+		return preset, nil
+	}
+
+	if apiKey == "" {
+		return llm.Model{}, fmt.Errorf("no API key provided. Use --api-key flag or set OPENROUTER_API_KEY env var")
+	}
+
+	// Build custom model
+	providerType := llm.Provider(provider)
+	if providerType == "" {
+		providerType = llm.ProviderOpenRouter
+	}
+
+	return llm.Model{
+		Provider:  providerType,
+		Model:     modelName,
+		APIKey:    apiKey,
+		MaxTokens: 8192,
+	}, nil
+}

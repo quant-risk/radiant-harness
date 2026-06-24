@@ -1,0 +1,92 @@
+{
+  "name": "radiant-harness",
+  "displayName": "Radiant Harness",
+  "description": "SDD Pipeline integration for VS Code",
+  "version": "0.1.0",
+  "publisher": "quant-risk",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:**/CLAUDE.md",
+    "workspaceContains:**/AGENTS.md",
+    "workspaceContains:**/.radiant-harness/progress.json"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "radiant-harness",
+          "title": "Radiant Harness",
+          "icon": "media/radiant.svg"
+        }
+      ]
+    },
+    "views": {
+      "radiant-harness": [
+        {
+          "id": "radiant.specs",
+          "name": "Specs"
+        },
+        {
+          "id": "radiant.tasks",
+          "name": "Tasks"
+        },
+        {
+          "id": "radiant.progress",
+          "name": "Progress"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "radiant.init",
+        "title": "Radiant: Init SDD Pipeline"
+      },
+      {
+        "command": "radiant.validate",
+        "title": "Radiant: Validate Pipeline"
+      },
+      {
+        "command": "radiant.run",
+        "title": "Radiant: Run Harness"
+      },
+      {
+        "command": "radiant.runGate",
+        "title": "Radiant: Run Gate",
+        "when": "editorLangId == markdown"
+      },
+      {
+        "command": "radiant.showProgress",
+        "title": "Radiant: Show Progress",
+        "icon": "$(pulse)"
+      }
+    ],
+    "menus": {
+      "editor/title/context": [
+        {
+          "command": "radiant.runGate",
+          "when": "editorLangId == markdown && resourcePath =~ /tasks\\.md$/",
+          "group": "radiant"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "radiant.runGate",
+          "when": "editorLangId == markdown"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
