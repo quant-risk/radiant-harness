@@ -48,6 +48,18 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(mdWatcher, progressWatcher);
 
+    // ── CodeLens on tasks.md ──
+    // Show a "▶ Run gate" inline action above any task row whose last
+    // table cell contains a backtick-quoted shell command. Click it and
+    // the command runs in a terminal — no copy/paste needed.
+    const codeLensProvider = new TasksCodeLensProvider();
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider(
+            { scheme: 'file', pattern: '**/specs/*/tasks.md' },
+            codeLensProvider
+        )
+    );
+
     // First-paint refresh.
     specsProvider.refresh();
     tasksProvider.refresh();
@@ -295,5 +307,59 @@ class ProgressItem extends vscode.TreeItem {
     constructor(label: string) {
         super(label, vscode.TreeItemCollapsibleState.None);
         this.iconPath = new vscode.ThemeIcon('pulse');
+    }
+}
+
+// ── CodeLens ──
+
+// TasksCodeLensProvider surfaces a "▶ Run gate" CodeLens above any
+// task row in tasks.md whose last table cell contains a backtick-quoted
+// shell command. Matches the `\`...\`` convention used in `radiant init`
+// templates. The CodeLens calls the existing `radiant.runGate` command,
+// which already handles the shell-quoting + terminal plumbing.
+class TasksCodeLensProvider implements vscode.CodeLensProvider {
+    private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+    readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+    constructor() {
+        // Re-evaluate CodeLenses whenever a markdown file changes — the
+        // gate commands are often the first thing a user edits while
+        // iterating on a spec.
+        vscode.workspace.onDidChangeTextDocument((e) => {
+            if (e.document.fileName.endsWith('/tasks.md')) {
+                this._onDidChangeCodeLenses.fire();
+            }
+        });
+    }
+
+    provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+        const lenses: vscode.CodeLens[] = [];
+        for (let i = 0; i < document.lineCount; i++) {
+            const line = document.lineAt(i).text;
+            // Only consider table rows; first cell numeric (task id),
+            // last cell contains a backtick-quoted command.
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('|')) continue;
+            const cells = trimmed.split('|').map(c => c.trim());
+            if (cells.length < 6) continue;
+            if (!/^\d+$/.test(cells[1])) continue;
+            const cmdMatch = /`([^`]+)`/.exec(line);
+            if (!cmdMatch) continue;
+
+            const range = new vscode.Range(i, 0, i, 0);
+            const lens = new vscode.CodeLens(range, {
+                title: `▶ Run gate  (${cmdMatch[1]})`,
+                command: 'radiant.runGate',
+                arguments: [document.uri]
+            });
+            // Trick: `uri.line` is undefined here, so runGate falls back
+            // to reading the line from the file. We rewrite uri.line
+            // by wrapping the command via a closure-bound argument:
+            (lens.command as vscode.Command).arguments = [
+                { fsPath: document.uri.fsPath, line: i } as unknown as vscode.Uri
+            ];
+            lenses.push(lens);
+        }
+        return lenses;
     }
 }

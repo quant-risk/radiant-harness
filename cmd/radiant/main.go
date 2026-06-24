@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.3.1"
+var version = "0.3.2"
 
 func main() {
 	root := &cobra.Command{
@@ -203,6 +203,8 @@ func main() {
 	var runRetries int
 	var runVerbose bool
 	var runAutoRoute bool
+	var runPlanner string
+	var runImplementer string
 
 	runCmd := &cobra.Command{
 		Use:   "run <spec-dir>",
@@ -234,6 +236,20 @@ func main() {
 				ProjectDir: projectDir,
 				MaxRetries: runRetries,
 				Verbose:    runVerbose,
+			}
+			// Optional multi-agent routing: --planner and --implementer
+			// override the model used at each phase. Both are resolved via
+			// the same preset mechanism as --model, so the same OpenRouter
+			// key covers all three.
+			if runPlanner != "" {
+				if p, ok := resolveModelSilent(runPlanner, runProvider, runAPIKey); ok {
+					cfg.PlannerModel = p
+				}
+			}
+			if runImplementer != "" {
+				if impl, ok := resolveModelSilent(runImplementer, runProvider, runAPIKey); ok {
+					cfg.ImplementerModel = impl
+				}
 			}
 
 			e := engine.New(cfg)
@@ -281,6 +297,8 @@ func main() {
 	runCmd.Flags().IntVar(&runRetries, "retries", 3, "max correction retries")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
 	runCmd.Flags().BoolVar(&runAutoRoute, "auto-route", false, "automatically pick the right model per RPI phase (research uses top-tier, implement uses mid-tier)")
+	runCmd.Flags().StringVar(&runPlanner, "planner", "", "LLM used for planning (defaults to --model). E.g. claude-opus-4.1 for planning while claude-sonnet-4.5 implements.")
+	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
 	root.AddCommand(runCmd)
 
 	// ── bench ──
@@ -475,6 +493,20 @@ func agentLabels(agents []radiant.AgentID) string {
 		}
 	}
 	return strings.Join(labels, ", ")
+}
+
+// resolveModelSilent is a swallow-error variant of resolveModel used by
+// the multi-agent --planner / --implementer flags. The reasoning: if a
+// user explicitly types a model name that doesn't resolve, we'd rather
+// emit a clear runtime warning and fall back to the default model than
+// abort the entire run. The error is printed so the user can fix it.
+func resolveModelSilent(modelName, provider, apiKey string) (llm.Model, bool) {
+	m, err := resolveModel(modelName, provider, apiKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ could not resolve --planner/--implementer model %q: %v\n  → falling back to default --model\n", modelName, err)
+		return llm.Model{}, false
+	}
+	return m, true
 }
 
 func resolveModel(modelName, provider, apiKey string) (llm.Model, error) {

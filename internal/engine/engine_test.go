@@ -306,3 +306,93 @@ func TestAccountUsageIsConcurrencySafe(t *testing.T) {
 		t.Errorf("OutputTokens = %d, want %d", e.runUsage.OutputTokens, want*2)
 	}
 }
+
+// TestPlannerImplementerFallbackToDefault verifies that when only the
+// default Model is set, both planner and implementer clients point at
+// it. This is the backward-compatibility guarantee: existing users who
+// pass only --model must see no change in behaviour.
+func TestPlannerImplementerFallbackToDefault(t *testing.T) {
+	m := llm.Model{Provider: llm.ProviderOpenAI, Model: "gpt-4"}
+	e := New(Config{Model: m, ProjectDir: t.TempDir()})
+
+	if e.plannerModelName != "gpt-4" {
+		t.Errorf("plannerModelName = %q, want gpt-4 (fallback to default Model)", e.plannerModelName)
+	}
+	if e.plannerClient == nil {
+		t.Error("plannerClient should be initialized even when PlannerModel is unset")
+	}
+	if e.implementerClient == nil {
+		t.Error("implementerClient should be initialized even when ImplementerModel is unset")
+	}
+}
+
+// TestPlannerImplementerOverride verifies that when explicit planner
+// and implementer models are supplied, each client points at the
+// correct model — and the default Model is left alone (it stays the
+// fallback for any phase that doesn't have its own client yet).
+func TestPlannerImplementerOverride(t *testing.T) {
+	e := New(Config{
+		Model:            llm.Model{Provider: llm.ProviderOpenAI, Model: "gpt-4"},
+		PlannerModel:     llm.Model{Provider: llm.ProviderAnthropic, Model: "claude-opus-4.1"},
+		ImplementerModel: llm.Model{Provider: llm.ProviderAnthropic, Model: "claude-sonnet-4.5"},
+		ProjectDir:       t.TempDir(),
+	})
+
+	if e.plannerModelName != "claude-opus-4.1" {
+		t.Errorf("plannerModelName = %q, want claude-opus-4.1 (explicit override)", e.plannerModelName)
+	}
+	if e.plannerClient == nil {
+		t.Error("plannerClient should be initialized")
+	}
+	if e.implementerClient == nil {
+		t.Error("implementerClient should be initialized")
+	}
+}
+
+// TestRecordTraceAppends verifies the in-memory trace log is populated
+// in FIFO order and DumpTrace returns a snapshot (not the live slice —
+// mutating the slice must not retroactively affect DumpTrace output).
+func TestRecordTraceAppends(t *testing.T) {
+	e := New(Config{ProjectDir: t.TempDir()})
+
+	e.recordTrace(TraceEvent{Type: "chat", Phase: "implement"})
+	e.recordTrace(TraceEvent{Type: "chat", Phase: "correct"})
+
+	got := e.DumpTrace()
+	if len(got) != 2 {
+		t.Fatalf("DumpTrace returned %d events, want 2", len(got))
+	}
+	if got[0].Phase != "implement" || got[1].Phase != "correct" {
+		t.Errorf("trace order: got [%q, %q], want [implement, correct]", got[0].Phase, got[1].Phase)
+	}
+	// Snapshot safety: appending more events must not change the
+	// already-returned slice.
+	e.recordTrace(TraceEvent{Type: "gate"})
+	if len(got) != 2 {
+		t.Errorf("DumpTrace snapshot was mutated by subsequent recordTrace (got len=%d, want 2)", len(got))
+	}
+}
+
+// TestRecordTraceIsConcurrencySafe stresses the trace log under 50
+// concurrent appenders to catch lost updates (race detector via -race).
+func TestRecordTraceIsConcurrencySafe(t *testing.T) {
+	e := New(Config{ProjectDir: t.TempDir()})
+
+	const goroutines = 50
+	const perGoroutine = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perGoroutine; j++ {
+				e.recordTrace(TraceEvent{Type: "chat", Phase: "implement"})
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := len(e.DumpTrace()); got != goroutines*perGoroutine {
+		t.Errorf("trace len = %d, want %d (lost updates)", got, goroutines*perGoroutine)
+	}
+}

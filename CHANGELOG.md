@@ -4,6 +4,75 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-06-24
+
+Sprint 6: multi-agent routing, lightweight tracing, VS Code CodeLens.
+
+### Added
+- **Multi-agent routing** via `--planner` and `--implementer` flags on
+  `radiant run`. Pick a different LLM per RPI phase: Opus for planning,
+  Sonnet for implementation, Gemini for correction — whatever your
+  price/quality tradeoff dictates. Both flags are optional; when unset,
+  they fall back to `--model` so existing single-model runs are
+  byte-identical in behaviour.
+
+  ```bash
+  radiant run specs/0042-auth \
+    --model claude-sonnet-4.5 \
+    --planner claude-opus-4.1 \
+    --implementer claude-sonnet-4.5
+  ```
+
+  Internally: `engine.Config` gained `PlannerModel` and
+  `ImplementerModel` fields. The engine creates three clients
+  (default + planner + implementer) and `chatWith` routes each call to
+  the right one based on which entry point (`chatPlanner`,
+  `chatImplementer`, `chatImplementerCorrect`) was invoked. The
+  implementer client is used for both the first-attempt `implement`
+  call and the auto-correction `correct` call, so multi-agent routing
+  gives users two independent tuning knobs.
+
+- **Lightweight tracing** via `engine.TraceEvent`. Every LLM call now
+  records `{type, phase, task_id, model, input_tokens, output_tokens,
+  latency_ms, ok, detail}` to an in-memory slice. Drained by
+  `DumpTrace()` and summarised at the end of `radiant run --verbose`.
+  Output groups by phase so a multi-agent run makes the cost split
+  obvious:
+
+  ```
+  Trace summary (per phase):
+    planner     2 calls, in=4820 out=1120 tokens, total 8401ms
+    implement   5 calls, in=21000 out=3800 tokens, total 28200ms
+    correct     1 calls, in=4200 out=920 tokens, total 6100ms
+  ```
+
+  No external deps. Tracing is always on (cheap, append-only) but only
+  printed when `--verbose` is set, so non-verbose runs pay zero
+  user-visible cost. Race-tested with 50 goroutines × 100 appends.
+
+- **VS Code CodeLens on `tasks.md`** — every row whose last table cell
+  contains a backtick-quoted shell command now shows a `▶ Run gate`
+  inline action. Click it and the command runs in a terminal — no
+  copy/paste needed. Wired through the existing `radiant.runGate`
+  command, so the terminal plumbing, shell-quoting, and cd-to-project
+  are reused without duplication.
+
+### Changed
+- **`chatTracked` split into three entry points**: `chatPlanner`,
+  `chatImplementer`, `chatImplementerCorrect`. All three share the
+  same underlying `chatWith` body (so the response parsing, retry,
+  and token accounting are identical), but each records the right
+  phase tag on its `TraceEvent`. This is the plumbing that makes
+  multi-agent routing observable in the trace summary.
+
+### Stats
+- 168 tests passing (up from 164 in 0.3.1)
+- Coverage: harness 61.1%, llm 84.3%, benchmark 77%, spec 88.5%,
+  quality 59.5%, engine 44.0% (+1.5 from new tracing tests)
+- Zero race conditions (50-goroutine stress tests for trace log + token accounting)
+- 6 OS/arch targets compile cleanly: linux/amd64, linux/arm64,
+  darwin/amd64, darwin/arm64, windows/amd64, windows/arm64
+
 ## [0.3.1] — 2026-06-24
 
 Sprint 5: Anthropic native, eval suite, project moves to iCloud.

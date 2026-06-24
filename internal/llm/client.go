@@ -110,6 +110,12 @@ type Client struct {
 	client *http.Client
 }
 
+// Model returns the model the client was configured with. Used by the
+// engine's trace logger to record which model produced each call.
+func (c *Client) Model() Model {
+	return c.model
+}
+
 // NewClient creates a new LLM client with sensible defaults applied.
 func NewClient(model Model) *Client {
 	if model.MaxTokens == 0 {

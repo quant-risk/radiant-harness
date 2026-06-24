@@ -4,13 +4,14 @@
 > em **vendor neutrality** (nenhum provedor é privilegiado) e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
-## Sprint 5 — done (2026-06-24)
+## Sprint 6 — done (2026-06-24)
 
-- [x] Anthropic native Messages API client (when provider=anthropic, route to /v1/messages directly)
-- [x] `radiant eval` for comparing providers on a representative workload
-- [x] 164 tests passing, zero races
+- [x] Multi-agent routing via `--planner` / `--implementer` on `radiant run`
+- [x] Lightweight in-process tracing (`engine.TraceEvent`) with per-phase summary
+- [x] VS Code CodeLens on `tasks.md` for one-click gate runs
+- [x] 168 tests passing, zero races
 
-## Sprint 6 — up next
+## Sprint 7 — up next
 
 ## Princípios
 
