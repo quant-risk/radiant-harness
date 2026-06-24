@@ -1,0 +1,109 @@
+name: nova-feature
+version: 1.0.0
+description: |
+  Starts a new feature through the SDD pipeline: tiers it
+  (trivial/feature/architecture), scaffolds specs/<NNNN>-<slug>/,
+  conducts the spec/tasks authoring with the user, and hands off
+  to radiant run. Reads state.md and glossary.md before any action
+  so the session context carries over.
+when_to_use: |
+  User says they want a feature, has an intent but no concrete
+  ACs yet, and the project has not yet decided the tier for it.
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+
+inputs:
+  - name: intent
+    type: string
+    required: true
+    description: |
+      What the user wants, in 1-3 sentences. Should be specific
+      enough to derive ACs from, but no need to pre-format.
+  - name: context
+    type: string
+    required: false
+    description: |
+      Optional background: project constraints, related modules,
+      stakeholders, deadlines, MCP-connected tools.
+  - name: priority
+    type: enum
+    required: false
+    description: |
+      "now" | "next" | "later". Drives tier ceiling — "now" forces
+      trivial or feature; architecture needs "later" or "next".
+
+outputs:
+  - path: specs/<NNNN>-<slug>/spec.md
+    type: artifact
+    description: |
+      Spec with ACs in Given/When/Then. Non-goals section.
+      Testable, traceable, single source of truth.
+  - path: specs/<NNNN>-<slug>/tasks.md
+    type: artifact
+    description: |
+      Markdown table of tasks with task id, name, coverage
+      (ACs), and gate command. Each AC must appear in at least
+      one task's coverage column.
+
+gates:
+  - name: tier-decided
+    description: |
+      Tier chosen (trivial/feature/architecture). Logged in
+      state.md so the next session knows the scope.
+    on_failure: |
+      Ask the user 1-2 clarifying questions. Do NOT default to
+      "feature" silently — wrong tier wastes a session.
+
+  - name: spec-testable
+    description: |
+      Every AC has Given/When/Then. Verifiable as a test, not
+      "should work correctly" or "is fast enough".
+    on_failure: |
+      Re-write the AC. If still ambiguous, invoke skill
+      /clarificar for a structured interview.
+
+  - name: ac-coverage
+    description: |
+      Every AC in spec.md appears in at least one task's coverage
+      column in tasks.md. 1:1 mapping is the goal.
+    on_failure: |
+      Re-decompose tasks. Don't drop ACs.
+
+  - name: dor-completed
+    description: |
+      Definition of Ready satisfied: spec.md + tasks.md present,
+      glossary terms used, non-goals explicit, tier chosen.
+    on_failure: |
+      List which DoR items are missing and ask the user.
+
+context_provides:
+  - state.md
+  - glossary.md
+  - docs/architecture/context-map.md
+
+commands_available:
+  - radiant spec <intent>
+
+related_skills:
+  - clarificar
+  - validar
+  - kickoff
+
+anti_patterns:
+  - |
+    Skipping the tier decision and assuming "feature". Wrong
+    tier wastes an entire session of implementation.
+  - |
+    Writing ACs as "should work correctly" or "is fast". Not
+    testable. Use Given/When/Then with measurable conditions.
+  - |
+    Producing a spec without non-goals. Non-goals prevent
+    scope creep more than ACs prevent under-implementation.
+  - |
+    Re-using the planning context for implementation. Open a
+    fresh context window for run; the spec is self-contained.
+
+author: radiant-harness contributors
+license: MIT

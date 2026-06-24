@@ -4,6 +4,83 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-06-24
+
+Sprint 10 (first batch): vendor-neutral skill runtime. Foundation
+of the methodology merge documented in `docs/HARNESS-PLAN.md`.
+
+### Added
+- **`internal/skill/` package** — the runtime for the open skill
+  format (`docs/SKILL-SCHEMA.md`). Implements:
+  - `Skill` struct: parsed representation of a skill (frontmatter +
+    SKILL.md)
+  - `Load`, `LoadFromFS`: parse a skill from disk or embedded FS
+  - `Validate`: enforces the 10 schema rules, returns
+    `[]ValidationError`
+  - `Bundle`: enumerates the skills embedded in the CLI binary
+  - `ExtractTo`: writes the bundle to a project dir
+    (`.radiant-harness/skills/`); respects `force` flag
+  - All 15 validation rules from `docs/SKILL-SCHEMA.md` §6 enforced
+  - Single dependency: `gopkg.in/yaml.v3` (parse frontmatter.yaml)
+- **Embedded skills** via `//go:embed all:skills` — bundled in the
+  CLI binary, extracted during `radiant init`. No network needed
+  for skill installation.
+- **`nova-feature` skill** — first showcase skill, rewritten
+  top-of-line to match the new schema. Includes decision tree,
+  workflow (7 steps), 3 worked examples (trivial/feature/
+  architecture), 6 anti-patterns, 5 failure-mode recovery
+  procedures, related-skill cross-references. Validates cleanly
+  against the schema.
+- **`radiant skills` CLI command** — `radiant skills list` shows
+  bundled skills with name/version/tier/description;
+  `radiant skills validate <dir>` validates a skill against the
+  10 schema rules.
+- **`radiant --help` advertises** the skill runtime — agents
+  reading the help text can see what's available.
+
+### Defaults set on 5 open questions
+- **Distribution**: keep `@quant-risk/radiant-harness` (npm) +
+  `radiant-harness` (go install) — no change
+- **Tier language**: English (Trivial/Feature/Architecture) —
+  matches our docs and is internationally accessible
+- **CLI skill execution**: Both — CLI emits skills for agents AND
+  provides equivalent subcommands for power users
+- **Update channel**: just `latest` for now; stable/beta is a
+  future-sprint problem
+- **MCP integration**: discover + list only; auto-configure is
+  more invasive and lives in a later sprint
+
+### Changed
+- Skills directory moved from `internal/scaffold/templates/skills/`
+  to `internal/skill/skills/` — single source of truth for bundled
+  skills. `internal/skill` is now the canonical home.
+- Version bumped from `0.3.5` to `0.4.0` — minor → minor because
+  the methodology merge is a **new capability**, not a breaking
+  change. Existing CLI commands and flags work identically.
+
+### Stats
+- 207 tests passing (up from 188 in 0.3.5)
+- New package: `internal/skill/` with 19 dedicated tests
+- 1 new skill rewritten top-of-line (`nova-feature`); 14
+  remaining to migrate to the new schema (queued for next sprints)
+- Coverage: harness 61%, llm 84%, benchmark 77%, spec 88%, quality
+  60%, engine 47%, policy 100%, **skill NEW (100% of rules + load
+  + bundle + extract)**
+- 6/6 cross-compile clean
+
+### What's next (Sprint 10 second batch)
+- Rewrite the remaining 14 skills (clarificar, validar, kickoff,
+  integrar, mapear, diagramar, adr, handoff, metricas, audit,
+  setup-ci, camada-agentica, evals, revisar-pr) to match the new
+  schema
+- `radiant init` updated to extract skills to
+  `.radiant-harness/skills/`
+- `radiant spec <intent>` command (interactive interview)
+- `AGENTS.md` auto-generated
+- `radiant state` + `radiant handoff`
+- `--tier` flag with auto-detect
+- Native view generation opt-in via `--agent=<list>`
+
 ## [0.3.5] — 2026-06-24
 
 Sprint 9: gate command allowlist deduplication. Closes the drift
