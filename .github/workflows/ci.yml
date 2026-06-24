@@ -93,8 +93,24 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
-      - run: go test ./... -coverprofile=coverage.out -covermode=atomic
-      - run: go tool cover -func=coverage.out | tail -1
+      - run: CGO_ENABLED=0 go test ./... -coverprofile=coverage.out -covermode=atomic
+      - name: Per-package coverage report
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic > coverage.txt 2>&1 || true
+          tail -20 coverage.txt
+      - name: Threshold check (60% for stable packages, 40% for engine)
+        run: |
+          # Stable packages: hard 60% threshold (gate fails CI).
+          # Engine is allowed 40% because it has subprocess/LLM glue that's
+          # exercised end-to-end but not unit-tested; tightening this would
+          # require mocking exec.CommandContext which is brittle.
+          STABLE=$(go test ./... -coverprofile=coverage.out -covermode=atomic 2>&1 | \
+            awk '/coverage:/ && !/0.0%/ && !/internal\/engine/ { gsub("%", "", $NF); if ($NF+0 < 60) { print "FAIL: " $0; exit 1 } }')
+          echo "Stable packages >= 60%"
+
+          # Engine: warn (not fail) below 40%.
+          go test ./... -coverprofile=coverage.out -covermode=atomic 2>&1 | \
+            awk '/internal\/engine.*coverage:/ { gsub("%", "", $NF); if ($NF+0 < 40) { print "WARN: engine coverage is " $NF "% (target: 40%)" } }'
       - uses: actions/upload-artifact@v4
         with:
           name: coverage

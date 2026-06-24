@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/benchmark"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
+	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0"
+var version = "0.2.1"
 
 func main() {
 	root := &cobra.Command{
@@ -248,6 +251,76 @@ func main() {
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
 	root.AddCommand(runCmd)
 
+	// ── bench ──
+	var benchOutput string
+	benchCmd := &cobra.Command{
+		Use:   "bench <spec-dir>",
+		Short: "Run radiant-harness against comparable frameworks (TLC, GitHub Spec Kit, OpenSpec, Superpowers) and report metrics",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			specDir := args[0]
+			if _, err := os.Stat(specDir); err != nil {
+				return fmt.Errorf("spec dir not found: %w", err)
+			}
+
+			suite := benchmark.NewBenchmarkSuite()
+
+			// Always benchmark radiant-harness against itself first (sanity
+			// check — if this fails the harness is broken).
+			fmt.Println("  → radiant-harness (reference)")
+			if _, err := suite.RunRadiantHarness(context.Background(), specDir); err != nil {
+				fmt.Printf("    (warning) reference run failed: %v\n", err)
+			}
+
+			// Then try each comparable framework. Failures are recorded but
+			// don't stop the suite — a missing framework shouldn't block
+			// the others from running.
+			for _, fw := range benchmark.KnownFrameworks {
+				if fw.Name == "radiant-harness" {
+					continue
+				}
+				if _, err := exec.LookPath(strings.Fields(fw.Command)[0]); err != nil {
+					fmt.Printf("  → %s (skipped — %q not on $PATH)\n", fw.Name, strings.Fields(fw.Command)[0])
+					continue
+				}
+				fmt.Printf("  → %s\n", fw.Name)
+				if _, err := suite.RunCommand(context.Background(), fw, specDir); err != nil {
+					fmt.Printf("    (warning) %s run failed: %v\n", fw.Name, err)
+				}
+			}
+
+			fmt.Println()
+			fmt.Println(suite.Summary())
+
+			if benchOutput != "" {
+				if err := suite.SaveResults(benchOutput); err != nil {
+					return fmt.Errorf("save results: %w", err)
+				}
+				fmt.Printf("\n  Saved to %s\n", benchOutput)
+			}
+			return nil
+		},
+	}
+	benchCmd.Flags().StringVar(&benchOutput, "output", "", "save JSON results to this path")
+	root.AddCommand(benchCmd)
+
+	// ── doctor ──
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Diagnose the local environment for radiant-harness",
+		Long: "Checks PATH, agents, LLM providers, gates, and the .radiant-harness\n" +
+			"directory. Useful before running `radiant run` to surface missing\n" +
+			"tools or misconfigured API keys.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := "."
+			if len(args) > 0 {
+				root = args[0]
+			}
+			return runDoctor(root)
+		},
+	}
+	root.AddCommand(doctorCmd)
+
 	// ── config ──
 	var configProvider string
 	var configModel string
@@ -284,7 +357,7 @@ func main() {
 		Use:   "models",
 		Short: "List available model presets",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("  Available model presets:\n")
+			fmt.Print("  Available model presets:\n\n")
 			for _, name := range llm.ListPresets() {
 				m, _ := llm.GetPreset(name, "")
 				fmt.Printf("    %-20s %s/%s\n", name, m.Provider, m.Model)
@@ -370,4 +443,99 @@ func resolveModel(modelName, provider, apiKey string) (llm.Model, error) {
 		APIKey:    apiKey,
 		MaxTokens: 8192,
 	}, nil
+}
+
+// runDoctor prints a diagnostic report of the local environment. Each
+// check prints ✓ / ⚠ / ✗ and explains what to do if something's wrong.
+// The function never returns an error — diagnostics are informational.
+func runDoctor(root string) error {
+	fmt.Println("  radiant doctor — environment diagnostic")
+	fmt.Println()
+
+	checkOK := func(label string) {
+		fmt.Printf("  ✓ %s\n", label)
+	}
+	checkWarn := func(label, advice string) {
+		fmt.Printf("  ⚠ %s\n    %s\n", label, advice)
+	}
+	checkFail := func(label, advice string) {
+		fmt.Printf("  ✗ %s\n    %s\n", label, advice)
+	}
+
+	// 1. PATH
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		checkFail("PATH not set", "export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin")
+	} else {
+		checkOK("PATH set (" + strconv.Itoa(len(pathEnv)) + " chars)")
+	}
+
+	// 2. Supported agents on PATH
+	fmt.Println("\n  Agents:")
+	agents := []string{"claude", "codex", "copilot", "cursor", "gemini"}
+	for _, name := range agents {
+		if _, err := exec.LookPath(name); err == nil {
+			checkOK(name + " available")
+		} else {
+			checkWarn(name+" not found", "agent is optional — install only the ones you use")
+		}
+	}
+
+	// 3. LLM provider API keys
+	fmt.Println("\n  LLM providers:")
+	providers := []struct {
+		name   string
+		envKey string
+		note   string
+	}{
+		{"OpenRouter", "OPENROUTER_API_KEY", "covers all OpenRouter presets"},
+		{"OpenAI", "OPENAI_API_KEY", "for direct OpenAI access"},
+		{"Anthropic", "ANTHROPIC_API_KEY", "for direct Anthropic (requires native client)"},
+		{"Groq", "GROQ_API_KEY", "for Groq-hosted models (ultra-low latency)"},
+		{"Mistral", "MISTRAL_API_KEY", "for Mistral-hosted models"},
+		{"xAI", "XAI_API_KEY", "for Grok models"},
+	}
+	anyKey := false
+	for _, p := range providers {
+		if os.Getenv(p.envKey) != "" {
+			checkOK(p.name + ": " + p.envKey + " set")
+			anyKey = true
+		} else {
+			checkWarn(p.name+": "+p.envKey+" not set", p.note)
+		}
+	}
+	if !anyKey {
+		fmt.Println("\n  ⚠ No LLM API key set. `radiant run` will fail without one.")
+		fmt.Println("    Set one of the env vars above, or pass --api-key=… to `radiant run`.")
+	}
+
+	// 4. Gate binaries (test runners, type checkers)
+	fmt.Println("\n  Gate binaries:")
+	gates := []string{"node", "npm", "pnpm", "yarn", "go", "make", "pytest", "python3", "cargo"}
+	for _, name := range gates {
+		if _, err := exec.LookPath(name); err == nil {
+			checkOK(name + " available")
+		} else {
+			checkWarn(name+" not found", "install if you plan to use it as a gate command")
+		}
+	}
+
+	// 5. .radiant-harness state directory
+	fmt.Println("\n  Project state:")
+	stateDir := filepath.Join(root, ".radiant-harness")
+	if info, err := os.Stat(stateDir); err == nil {
+		if info.IsDir() {
+			checkOK(stateDir + " exists")
+		}
+	} else {
+		checkWarn(stateDir+" not found", "run `radiant init .` to create the harness state directory")
+	}
+
+	// 6. Version
+	fmt.Println("\n  Version:")
+	fmt.Printf("    radiant v%s\n", version)
+	fmt.Printf("    Go module: github.com/quant-risk/radiant-harness\n")
+
+	fmt.Println()
+	return nil
 }

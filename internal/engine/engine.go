@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
+	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/quality"
-	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/spec"
 )
 
@@ -382,30 +382,56 @@ var gateAllowlist = map[string]struct{}{
 	"jest": {}, "vitest": {},
 	"tsc": {}, "eslint": {},
 	"shellcheck": {},
+	// Read-only / no-side-effect commands (mirror of harness allowlist).
+	"echo": {}, "printf": {}, "true": {}, "false": {},
+	"pwd": {}, "cat": {}, "head": {}, "tail": {}, "wc": {},
 }
 
-// validateGateCommand rejects any gate whose executable token isn't in the
-// allowlist. Splits on shell metacharacters so `npm test && go test` is
-// fully validated, both sides.
+// validateGateCommand rejects any gate whose binary isn't in the
+// allowlist. For compound expressions like `npm test && go test`, each
+// binary (npm, go) is validated. Pipes, redirects, and bare command
+// separators are rejected for safety. Mirrors the version in
+// internal/harness/agent.go and internal/quality/validate.go.
 func validateGateCommand(gate string) error {
 	gate = strings.TrimSpace(gate)
 	if gate == "" {
 		return nil
 	}
-	repl := strings.NewReplacer(
-		"&&", " ", "||", " ", "|", " ",
-		";", " ", ">", " ", "<", " ",
-		"(", " ", ")", " ",
-	)
-	parts := strings.Fields(repl.Replace(gate))
-	for _, part := range parts {
-		switch {
-		case part == "":
-			continue
-		case isShellOp(part), strings.HasPrefix(part, "-"), strings.Contains(part, "="):
+	for _, op := range []string{"|", "<", ">", ";", "&"} {
+		idx := strings.Index(gate, op)
+		if idx < 0 {
 			continue
 		}
-		base := part
+		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
+			continue
+		}
+		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
+			continue
+		}
+		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
+	}
+	expressions := splitOnLogicalOps(gate)
+	for _, expr := range expressions {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			continue
+		}
+		parts := splitShellTokens(expr)
+		if len(parts) == 0 {
+			continue
+		}
+		var binary string
+		for _, part := range parts {
+			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
+				continue
+			}
+			binary = part
+			break
+		}
+		if binary == "" {
+			continue
+		}
+		base := binary
 		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
 			base = base[idx+1:]
 		}
@@ -414,6 +440,69 @@ func validateGateCommand(gate string) error {
 		}
 	}
 	return nil
+}
+
+// splitOnLogicalOps splits a string on `&&` and `||` only.
+func splitOnLogicalOps(s string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+			current.WriteRune(r)
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+			current.WriteRune(r)
+		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++
+		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++
+		default:
+			current.WriteRune(r)
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
+}
+
+// splitShellTokens is a tiny shell tokenizer that respects single and double
+// quotes so quoted arguments aren't treated as binary names. Mirrors the
+// version in internal/harness/agent.go and internal/quality/validate.go.
+func splitShellTokens(cmd string) []string {
+	var tokens []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	flush := func() {
+		if current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+		}
+	}
+	for _, r := range cmd {
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
+			flush()
+			tokens = append(tokens, string(r))
+		default:
+			current.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
 }
 
 func isShellOp(s string) bool {

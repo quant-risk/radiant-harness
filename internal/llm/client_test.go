@@ -136,7 +136,8 @@ func TestListPresetsIsSorted(t *testing.T) {
 
 func TestListPresetsContainsExpectedModels(t *testing.T) {
 	got := ListPresets()
-	want := []string{"claude-sonnet-4.5", "gpt-5", "gemini-2.5-pro"}
+	want := []string{"claude-sonnet-4.5", "gpt-5", "gemini-2.5-pro",
+		"mistral-large-2", "codestral-22b", "groq-llama-3.3-70b", "grok-2"}
 	for _, w := range want {
 		found := false
 		for _, g := range got {
@@ -178,6 +179,27 @@ func TestNewClientAppliesDefaults(t *testing.T) {
 	}
 	if c.model.Temperature != DefaultTemperature {
 		t.Errorf("Temperature default not applied: %f", c.model.Temperature)
+	}
+}
+
+func TestBaseURLForAllProviders(t *testing.T) {
+	// Make sure every documented provider resolves to a non-empty,
+	// well-formed URL. Adding a new Provider without a baseURL switch
+	// case would silently route to OpenRouter — this test catches it.
+	cases := map[Provider]string{
+		ProviderOpenRouter: "openrouter.ai",
+		ProviderOpenAI:     "api.openai.com",
+		ProviderAnthropic:  "api.anthropic.com",
+		ProviderGroq:       "api.groq.com",
+		ProviderMistral:    "api.mistral.ai",
+		ProviderXAI:        "api.x.ai",
+	}
+	for prov, fragment := range cases {
+		c := NewClient(Model{Provider: prov, Model: "x", APIKey: "k"})
+		url := c.baseURL()
+		if !strings.Contains(url, fragment) {
+			t.Errorf("baseURL for %s = %q, expected to contain %q", prov, url, fragment)
+		}
 	}
 }
 

@@ -422,14 +422,22 @@ func TestDetectAgentReturnsInstalled(t *testing.T) {
 }
 
 func TestIsAgentAvailable(t *testing.T) {
-	// 'sh' should always be available
-	if !IsAgentAvailable("sh") {
-		t.Error("sh should be available")
+	// A binary not in the allowlist should return false even if it's
+	// installed on $PATH — `sh` is a shell, not an AI agent.
+	if IsAgentAvailable("sh") {
+		t.Error("`sh` is not an allowlisted agent and must return false")
 	}
 
-	// Nonexistent should not be available
+	// A binary in the allowlist that's not installed must return false.
 	if IsAgentAvailable("nonexistent-agent-xyz") {
 		t.Error("nonexistent agent should not be available")
+	}
+
+	// Allowlisted but installed: if any of {claude, codex, copilot, cursor,
+	// gemini} is on $PATH in this CI environment, the call should return
+	// true. We don't assert either way — just that no panic happens.
+	for _, name := range []string{"claude", "codex", "copilot", "cursor", "gemini"} {
+		_ = IsAgentAvailable(name)
 	}
 }
 

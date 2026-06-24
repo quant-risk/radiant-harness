@@ -21,14 +21,16 @@ const scannerBufferSize = 1024 * 1024
 
 // Regular expressions. All of them are case-insensitive (we lower-case the
 // line before matching when applicable) so "GIVEN", "given", "Given" all
-// parse the same way.
+// parse the same way. The colon after the keyword is optional — both
+// "- **Given** text" and "- **Given**: text" are accepted, so the parser
+// tolerates real-world specs that omit the punctuation.
 var (
-	acRe     = regexp.MustCompile(`(?i)^###\s+(AC[-_]?\d+)\s*:?\s*(.*)$`)
-	givenRe  = regexp.MustCompile(`(?i)^[-\s]*\*?\*?Given\*?\*?\s*[:：]\s*(.+)$`)
-	whenRe   = regexp.MustCompile(`(?i)^[-\s]*\*?\*?When\*?\*?\s*[:：]\s*(.+)$`)
-	thenRe   = regexp.MustCompile(`(?i)^[-\s]*\*?\*?Then\*?\*?\s*[:：]\s*(.+)$`)
-	andRe    = regexp.MustCompile(`(?i)^[-\s]*\*?\*?And\*?\*?\s*[:：]\s*(.+)$`)
-	fmRe     = regexp.MustCompile(`^([a-zA-Z][\w-]*)\s*:\s*(.+)$`)
+	acRe      = regexp.MustCompile(`(?i)^###\s+(AC[-_]?\d+)\s*:?\s*(.*)$`)
+	givenRe   = regexp.MustCompile(`(?i)^[-\s]*\*?\*?Given\*?\*?\s*[:：]?\s*(.+)$`)
+	whenRe    = regexp.MustCompile(`(?i)^[-\s]*\*?\*?When\*?\*?\s*[:：]?\s*(.+)$`)
+	thenRe    = regexp.MustCompile(`(?i)^[-\s]*\*?\*?Then\*?\*?\s*[:：]?\s*(.+)$`)
+	andRe     = regexp.MustCompile(`(?i)^[-\s]*\*?\*?And\*?\*?\s*[:：]?\s*(.+)$`)
+	fmRe      = regexp.MustCompile(`^([a-zA-Z][\w-]*)\s*:\s*(.+)$`)
 	summaryRe = regexp.MustCompile(`(?i)^#+\s*Summary\s*$`)
 )
 

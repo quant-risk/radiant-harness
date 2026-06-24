@@ -190,20 +190,31 @@ func (s *State) CurrentState() radiant.HarnessState {
 	return s.data.State
 }
 
-// Progress returns the current progress percentage (0.0 to 1.0).
+// Progress returns the current progress percentage (0.0 to 1.0). Counts
+// distinct task IDs that have at least one "completed" entry — re-runs of
+// the same task (start → complete → start → complete) count once. Clamped
+// to [0, 1] so transient over-counting from concurrent mutations can't
+// produce a 900% progress bar in the UI.
 func (s *State) Progress() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.data.TotalTasks == 0 {
 		return 0
 	}
-	completed := 0
+	completed := make(map[int]struct{})
 	for _, entry := range s.data.Log {
 		if entry.Action == "completed" {
-			completed++
+			completed[entry.TaskID] = struct{}{}
 		}
 	}
-	return float64(completed) / float64(s.data.TotalTasks)
+	p := float64(len(completed)) / float64(s.data.TotalTasks)
+	if p < 0 {
+		return 0
+	}
+	if p > 1 {
+		return 1
+	}
+	return p
 }
 
 // Snapshot returns a deep copy of the current Progress. Safe for concurrent

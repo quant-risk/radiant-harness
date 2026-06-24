@@ -8,10 +8,10 @@ import (
 
 // ContextWindow manages context window budget for AI agents.
 type ContextWindow struct {
-	MaxTokens int
+	MaxTokens  int
 	UsedTokens int
-	SmartZone float64
-	DumbZone  float64
+	SmartZone  float64
+	DumbZone   float64
 }
 
 // NewContextWindow creates a new context window with sensible defaults.

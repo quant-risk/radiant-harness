@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-
 )
 
 // AgentProtocol defines how to communicate with a specific AI agent.
@@ -171,12 +170,12 @@ func (p *GenericProtocol) DefaultCommand() string { return p.command }
 // ── Protocol Registry ──
 
 var protocols = map[AgentID]AgentProtocol{
-	AgentClaude:                &ClaudeProtocol{},
-	AgentCursor:                &CursorProtocol{},
-	AgentCodex:                 &CodexProtocol{},
-	"copilot":                  &CopilotProtocol{},
-	"gemini":                   &GeminiProtocol{},
-	"windsurf":                 &WindsurfProtocol{},
+	AgentClaude: &ClaudeProtocol{},
+	AgentCursor: &CursorProtocol{},
+	AgentCodex:  &CodexProtocol{},
+	"copilot":   &CopilotProtocol{},
+	"gemini":    &GeminiProtocol{},
+	"windsurf":  &WindsurfProtocol{},
 }
 
 // GetProtocol returns the protocol for an agent ID.
@@ -263,11 +262,11 @@ func (m *MultiAgentRunner) AvailableAgents() []AgentID {
 
 // AgentCapability represents what an agent can do.
 type AgentCapability struct {
-	SupportsStreaming  bool
-	SupportsModel      bool
-	SupportsTools      bool
-	SupportsMCP        bool
-	MaxContextTokens   int
+	SupportsStreaming bool
+	SupportsModel     bool
+	SupportsTools     bool
+	SupportsMCP       bool
+	MaxContextTokens  int
 }
 
 // DetectCapabilities detects what an agent supports.

@@ -32,6 +32,9 @@ var allowedGateBinaries = map[string]struct{}{
 	"jest": {}, "vitest": {},
 	"tsc": {}, "eslint": {},
 	"shellcheck": {},
+	// Read-only / no-side-effect commands (mirror of harness allowlist).
+	"echo": {}, "printf": {}, "true": {}, "false": {},
+	"pwd": {}, "cat": {}, "head": {}, "tail": {}, "wc": {},
 }
 
 // ValidateFeature runs full UAT validation on a feature directory. Pure: does
@@ -179,8 +182,9 @@ func runShellGate(ctx context.Context, projectDir, gate string) (string, error) 
 var gateRowRe = regexp.MustCompile("`([^`]+)`")
 
 // extractGates pulls unique gate commands out of tasks.md. The convention is
-// `| <task> | <gate> | ...` per row; we capture anything inside backticks
-// that looks like a shell command (has at least one word boundary).
+// `| <task> | <gate> | ...` per row; we capture anything inside backticks.
+// Single-token commands like `true` and `pwd` are valid gates too, so we
+// don't filter by whitespace — validation is the allowlist's job.
 func extractGates(content string) []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -198,7 +202,7 @@ func extractGates(content string) []string {
 		matches := gateRowRe.FindAllStringSubmatch(line, -1)
 		for _, m := range matches {
 			cmd := strings.TrimSpace(m[1])
-			if cmd == "" || !strings.ContainsAny(cmd, " \t") {
+			if cmd == "" {
 				continue
 			}
 			if _, dup := seen[cmd]; dup {
@@ -213,18 +217,48 @@ func extractGates(content string) []string {
 
 // validateGateCommand mirrors harness.validateGateCommand; duplicated here
 // so quality.RunGates can be called independently of the orchestrator (e.g.
-// by `radiant validate --gates` in CI).
+// by `radiant validate --gates` in CI). Each binary in a compound
+// expression is validated; pipes/redirects/separators are rejected.
 func validateGateCommand(gate string) error {
 	gate = strings.TrimSpace(gate)
 	if gate == "" {
 		return nil
 	}
-	parts := splitShellTokens(gate)
-	for _, part := range parts {
-		if isShellOp(part) || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
+	for _, op := range []string{"|", "<", ">", ";", "&"} {
+		idx := strings.Index(gate, op)
+		if idx < 0 {
 			continue
 		}
-		base := part
+		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
+			continue
+		}
+		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
+			continue
+		}
+		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
+	}
+	expressions := splitOnLogicalOps(gate)
+	for _, expr := range expressions {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			continue
+		}
+		parts := splitShellTokens(expr)
+		if len(parts) == 0 {
+			continue
+		}
+		var binary string
+		for _, part := range parts {
+			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
+				continue
+			}
+			binary = part
+			break
+		}
+		if binary == "" {
+			continue
+		}
+		base := binary
 		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
 			base = base[idx+1:]
 		}
@@ -235,13 +269,64 @@ func validateGateCommand(gate string) error {
 	return nil
 }
 
+// splitOnLogicalOps splits on `&&` and `||` only, respecting quotes.
+func splitOnLogicalOps(s string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+			current.WriteRune(r)
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+			current.WriteRune(r)
+		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++
+		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++
+		default:
+			current.WriteRune(r)
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
+}
+
 func splitShellTokens(cmd string) []string {
-	repl := strings.NewReplacer(
-		"&&", " ", "||", " ", "|", " ",
-		";", " ", ">", " ", "<", " ",
-		"(", " ", ")", " ",
-	)
-	return strings.Fields(repl.Replace(cmd))
+	var tokens []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	flush := func() {
+		if current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+		}
+	}
+	for _, r := range cmd {
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
+			flush()
+			tokens = append(tokens, string(r))
+		default:
+			current.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
 }
 
 func isShellOp(s string) bool {
@@ -261,15 +346,20 @@ type ACDetail struct {
 	Then  string
 }
 
-// extractACDetails extracts full AC details from spec content.
+// extractACDetails extracts full AC details from spec content. Handles
+// "And" clauses by appending to the most recent non-empty Given/When/Then.
 func extractACDetails(content string) []ACDetail {
 	var acs []ACDetail
 	scanner := bufio.NewScanner(strings.NewReader(content))
 
 	acRe := regexp.MustCompile("^###\\s+(AC-\\d+):\\s*(.+)$")
-	givenRe := regexp.MustCompile("(?i)^[-\\s]*\\*\\*Given\\*\\*\\s+(.+)$")
-	whenRe := regexp.MustCompile("(?i)^[-\\s]*\\*\\*When\\*\\*\\s+(.+)$")
-	thenRe := regexp.MustCompile("(?i)^[-\\s]*\\*\\*Then\\*\\*\\s+(.+)$")
+	// Regexes are permissive: accept with or without markdown bold (`**`),
+	// with or without trailing colon, and case-insensitive. Matches both
+	// "- **Given** x" and "- Given: x".
+	givenRe := regexp.MustCompile("(?i)^[-\\s]*\\*?\\*?Given\\*?\\*?\\s*[:：]?\\s*(.+)$")
+	whenRe := regexp.MustCompile("(?i)^[-\\s]*\\*?\\*?When\\*?\\*?\\s*[:：]?\\s*(.+)$")
+	thenRe := regexp.MustCompile("(?i)^[-\\s]*\\*?\\*?Then\\*?\\*?\\s*[:：]?\\s*(.+)$")
+	andRe := regexp.MustCompile("(?i)^[-\\s]*\\*?\\*?And\\*?\\*?\\s*[:：]?\\s*(.+)$")
 
 	var current *ACDetail
 
@@ -287,12 +377,27 @@ func extractACDetails(content string) []ACDetail {
 		if current != nil {
 			if m := givenRe.FindStringSubmatch(line); m != nil {
 				current.Given = strings.TrimSpace(m[1])
+				continue
 			}
 			if m := whenRe.FindStringSubmatch(line); m != nil {
 				current.When = strings.TrimSpace(m[1])
+				continue
 			}
 			if m := thenRe.FindStringSubmatch(line); m != nil {
 				current.Then = strings.TrimSpace(m[1])
+				continue
+			}
+			if m := andRe.FindStringSubmatch(line); m != nil {
+				extra := " and " + strings.TrimSpace(m[1])
+				switch {
+				case current.Then != "":
+					current.Then += extra
+				case current.When != "":
+					current.When += extra
+				case current.Given != "":
+					current.Given += extra
+				}
+				continue
 			}
 		}
 	}

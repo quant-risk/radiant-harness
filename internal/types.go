@@ -74,8 +74,8 @@ type Task struct {
 
 // TaskPlan is the full task breakdown.
 type TaskPlan struct {
-	Tasks   []Task
-	Phases  []Phase // sequential groups
+	Tasks  []Task
+	Phases []Phase // sequential groups
 }
 
 // Phase groups tasks that can run in parallel.

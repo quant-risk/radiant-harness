@@ -27,6 +27,9 @@ const (
 	ProviderOpenRouter Provider = "openrouter"
 	ProviderOpenAI     Provider = "openai"
 	ProviderAnthropic  Provider = "anthropic"
+	ProviderGroq       Provider = "groq"
+	ProviderMistral    Provider = "mistral"
+	ProviderXAI        Provider = "xai"
 	ProviderCustom     Provider = "custom"
 )
 
@@ -367,6 +370,12 @@ func (c *Client) baseURL() string {
 		// endpoint works for OpenRouter-routed Claude traffic. For direct
 		// Anthropic, use a custom BaseURL or a future Anthropic-native client.
 		return "https://api.anthropic.com/v1"
+	case ProviderGroq:
+		return "https://api.groq.com/openai/v1"
+	case ProviderMistral:
+		return "https://api.mistral.ai/v1"
+	case ProviderXAI:
+		return "https://api.x.ai/v1"
 	default:
 		return "https://openrouter.ai/api/v1"
 	}
@@ -382,6 +391,11 @@ func (c *Client) baseURL() string {
 // intentionally small: a few well-curated options beat a sprawling menu of
 // half-broken aliases. Add to this list when a model proves its worth over
 // at least a sprint of real SDD workloads.
+//
+// All presets use OpenRouter by default (one API key covers everything),
+// but a preset can be redirected to its native provider by editing the
+// `Provider` field — e.g. set `mistral-large-2` to `Provider: ProviderMistral`
+// if the operator wants the Mistral-native endpoint with its own API key.
 var PresetModels = map[string]Model{
 	// Anthropic — strong at SDD: long context, precise instruction following.
 	"claude-opus-4.1": {
@@ -436,6 +450,37 @@ var PresetModels = map[string]Model{
 	"mimo-v2.5-pro": {
 		Provider:  ProviderOpenRouter,
 		Model:     "xiaomi/mimo-v2.5-pro",
+		MaxTokens: 16000,
+	},
+	// Mistral — European-hosted, strong on code, competitive price.
+	// Use Mistral-native by default; switch to OpenRouter if you want
+	// access through a single API key.
+	"mistral-large-2": {
+		Provider:  ProviderMistral,
+		Model:     "mistral-large-latest",
+		MaxTokens: 16000,
+	},
+	"codestral-22b": {
+		Provider:  ProviderMistral,
+		Model:     "codestral-latest",
+		MaxTokens: 16000,
+	},
+	// Groq — ultra-low latency. Best for CI / fast feedback loops where
+	// you can trade a small quality loss for ~300 tok/s throughput.
+	"groq-llama-3.3-70b": {
+		Provider:  ProviderGroq,
+		Model:     "llama-3.3-70b-versatile",
+		MaxTokens: 16000,
+	},
+	"groq-mixtral-8x7b": {
+		Provider:  ProviderGroq,
+		Model:     "mixtral-8x7b-32768",
+		MaxTokens: 16000,
+	},
+	// xAI — Grok 2, native API.
+	"grok-2": {
+		Provider:  ProviderXAI,
+		Model:     "grok-2-latest",
 		MaxTokens: 16000,
 	},
 }

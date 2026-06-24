@@ -4,6 +4,21 @@
 > em **vendor neutrality** (nenhum provedor é privilegiado) e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
+## Sprint 2 — done (2026-06-24)
+
+- [x] `radiant doctor` — environment diagnostic
+- [x] `radiant bench` — cross-framework benchmark with `internal/benchmark/`
+- [x] Mistral presets (`mistral-large-2`, `codestral-22b`)
+- [x] Groq presets (`groq-llama-3.3-70b`, `groq-mixtral-8x7b`)
+- [x] xAI preset (`grok-2`)
+- [x] CI coverage thresholds
+- [x] 118 tests passing, 6/6 packages > 0% coverage
+- [x] `internal/plugin/` removed (dead code)
+- [x] `internal/benchmark/` implemented
+- [x] Empirical validation (Go installed, build/vet/test run, smoke green)
+
+## Sprint 3 — up next
+
 ## Princípios
 
 1. **Presets são opcionais, não obrigatórios.** Qualquer modelo OpenAI-

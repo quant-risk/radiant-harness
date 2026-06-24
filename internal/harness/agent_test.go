@@ -92,9 +92,9 @@ func TestAgentRunnerTimeoutFires(t *testing.T) {
 	// timeout. `sleep` is not in the agent allowlist — so we test the
 	// underlying timeout mechanism indirectly via ValidateTimeout plumbing.
 	r, err := NewAgentRunner(AgentConfig{
-		ID:         AgentClaude,
-		Command:    "claude",
-		Timeout:    50 * time.Millisecond,
+		ID:      AgentClaude,
+		Command: "claude",
+		Timeout: 50 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,14 +107,18 @@ func TestAgentRunnerTimeoutFires(t *testing.T) {
 }
 
 func TestSplitShellTokensHandlesCompound(t *testing.T) {
+	// splitShellTokens now preserves shell operators as their own tokens so
+	// validateGateCommand can find && and || without losing them. Operators
+	// are emitted as single-rune tokens; everything else stays verbatim.
 	cases := []struct {
 		in   string
 		want []string
 	}{
 		{"npm test", []string{"npm", "test"}},
-		{"npm test && go test ./...", []string{"npm", "test", "go", "test", "./..."}},
-		{"a | b", []string{"a", "b"}},
-		{"a;b", []string{"a", "b"}},
+		{"npm test && go test ./...", []string{"npm", "test", "&", "&", "go", "test", "./..."}},
+		{"a | b", []string{"a", "|", "b"}},
+		{"a;b", []string{"a", ";", "b"}},
+		{"echo \"hello world\"", []string{"echo", "hello world"}},
 		{"", nil},
 	}
 	for _, c := range cases {

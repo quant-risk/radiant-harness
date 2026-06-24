@@ -1,20 +1,25 @@
 # Radiant Harness — Makefile
 .PHONY: build test lint clean install release
 
+# CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
+# "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
+# uses CGO_ENABLED=0; this keeps `make` consistent with `docker build`.
+CGO_ENABLED ?= 0
+
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 build:
-	go build $(LDFLAGS) -o bin/radiant ./cmd/radiant/
+	CGO_ENABLED=$(CGO_ENABLED) go build $(LDFLAGS) -o bin/radiant ./cmd/radiant/
 
 test:
-	go test ./... -v -count=1
+	CGO_ENABLED=$(CGO_ENABLED) go test ./... -v -count=1
 
 test-short:
-	go test ./... -short
+	CGO_ENABLED=$(CGO_ENABLED) go test ./... -short
 
 lint:
-	go vet ./...
+	CGO_ENABLED=$(CGO_ENABLED) go vet ./...
 	@echo "✓ vet passed"
 
 clean:
