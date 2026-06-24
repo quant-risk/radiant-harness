@@ -1,226 +1,190 @@
-# Roadmap — Multi-Platform & Multi-LLM
+# Roadmap — Vendor-Neutral SDD Harness
 
-> Backlog estruturado para a próxima sprint. Tudo aqui foi escrito pensando
-> em **vendor neutrality** (nenhum provedor é privilegiado) e
+> Este roadmap é vivo e orientado por **princípios**, não por backlog
+> de features. Tudo aqui é escrito pensando em **vendor neutrality**
+> (nenhum LLM, IDE ou provedor é privilegiado), **agent agnosticism**
+> (qualquer agente moderno consome o workflow sem plugin), e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
-## Sprint 6 — done (2026-06-24)
-
-- [x] Multi-agent routing via `--planner` / `--implementer` on `radiant run`
-- [x] Lightweight in-process tracing (`engine.TraceEvent`) with per-phase summary
-- [x] VS Code CodeLens on `tasks.md` for one-click gate runs
-- [x] 168 tests passing, zero races
-
-## Sprint 7 — done (2026-06-24)
-
-- [x] **Planner LLM now fires** via `runPlannerAdvisory` — `--planner` was advertised but never used; now it scans the spec + tasks for ambiguities before execution starts and surfaces concerns as advisory warnings (never blocking)
-- [x] **JSONL trace export** via `--trace-out <file>` — drains the trace log to disk, atomic write via temp + fsync + rename, `jq`-able line-delimited JSON
-- [x] **Race fix** on `Engine.currentTaskID` — locked the read in `chatWith` to match the writes in `executeTask`'s preamble/cleanup
-- [x] **Two new cross-compile targets**: `linux/arm64` (Graviton, Raspberry Pi) + `windows/arm64` (Surface Pro X); release now covers all 6 OS/arch pairs
-- [x] 172 tests passing, zero races
-
-## Sprint 8 — done (2026-06-24)
-
-- [x] **Gate command output cap** via `--max-gate-output <bytes>` (default 10 MiB). Closes the OOM vector flagged in the Sprint 6 audit — all 3 gate runners (`engine/`, `harness/`, `quality/`, both POSIX and Windows) switched from `CombinedOutput()` to `StdoutPipe + StderrPipe + io.LimitReader`. Gates writing more than the cap are truncated and killed via broken-pipe.
-- [x] 176 tests passing, zero races, 6/6 cross-compile clean
-
-## Sprint 9 — done (2026-06-24)
-
-- [x] **Gate command allowlist deduplication** — extracted `internal/policy/` as the single source of truth for `AgentCommands`, `GateBinaries`, `ValidateGateCommand`, `SplitOnLogicalOps`, `SplitShellTokens`, `IsShellOp`. The three consumer packages (`internal/engine/`, `internal/harness/`, `internal/quality/`) now use thin delegations — drift risk eliminated.
-- [x] 188 tests passing, zero races, 6/6 cross-compile clean
-
-## Sprint 10 — up next
-
-## Princípios
-
-1. **Presets são opcionais, não obrigatórios.** Qualquer modelo OpenAI-
-   compatible funciona via `--model=...` sem precisar estar na lista.
-2. **Detecção é alfabética.** Sem viés "Claude first" — só porque alguém
-   instalou o CLI não significa que o harness prefere.
-3. **Plataforma detectada em runtime.** PATH, $HOME, env vars. Nada de
-   hardcoded `/usr/local/bin` ou `~/Library`.
-4. **Sem SDKs pesados.** HTTP puro via `net/http`. Adicionar um provedor
-   novo é uma entrada em `PresetModels` + (se preciso) um `baseURL()`.
+O plano completo (com fases, deliverables e critérios de aceitação)
+vive em [`docs/HARNESS-PLAN.md`](./HARNESS-PLAN.md). O schema aberto
+de skills vive em [`docs/SKILL-SCHEMA.md`](./SKILL-SCHEMA.md).
 
 ---
 
-## Multi-LLM — adicionar provedores
+## Princípios (não negociáveis)
 
-### 1. Mistral / Codestral
-
-- Adicionar em `PresetModels`:
-  - `mistral-large-2` (OpenRouter: `mistralai/mistral-large-2`)
-  - `codestral-22b` (OpenRouter: `mistralai/codestral-22b`, code-specialized)
-- Vantagem: latency baixo na Europa, preços agressivos.
-- Esforço: 30 min.
-
-### 2. Cohere Command R+
-
-- Adicionar em `PresetModels`:
-  - `command-r-plus` (OpenRouter: `cohere/command-r-plus`)
-- Forte em RAG (útil pro `/integracoes` e `/mapear`).
-- Esforço: 15 min.
-
-### 3. Groq (latência ultra-baixa)
-
-- Adicionar provider `ProviderGroq` com baseURL `https://api.groq.com/openai/v1`.
-- Adicionar presets:
-  - `llama-3.3-70b` (Groq: `llama-3.3-70b-versatile`)
-  - `mixtral-8x7b` (Groq: `mixtral-8x7b-32768`)
-- Vantagem: ~300 tokens/segundo para inferência rápida em CI.
-- Esforço: 1h (incluindo testes).
-
-### 4. xAI Grok
-
-- Adicionar provider `ProviderXAI` com baseURL `https://api.x.ai/v1`.
-- Adicionar `grok-2` preset.
-- Esforço: 30 min.
-
-### 5. Together AI / Fireworks / OpenRouter (já tem)
-
-- OpenRouter já funciona. Together/Fireworks são OpenAI-compatible —
-  basta adicionar provider com baseURL custom e presets.
-- Esforço: 1h cada.
-
-### 6. Native Anthropic Messages API
-
-- O client atual assume OpenAI-compatible shape (`/chat/completions`).
-- Anthropic tem shape diferente (`/messages` com `system`, `messages`).
-- Implementar adapter separado em `internal/llm/anthropic.go` quando o
-  provedor for `ProviderAnthropic`. Usar header `x-api-key` em vez de
-  `Authorization: Bearer`.
-- Esforço: 4h (incluindo testes com httptest).
-
-### 7. Streaming paralelo multi-provider
-
-- Quando `radiant run` invoca múltiplos modelos em paralelo (research
-  com Opus, implementation com Sonnet), hoje cada chamada é seq dentro
-  do orchestrator.
-- Adicionar `--parallel-models` flag que dispara N requests simultâneas
-  e vota/consolida respostas.
-- Esforço: 6h. Requer agregação inteligente (não é só primeiro a
-  responder — é "qual tem menos alucinação").
+1. **Zero Claude-centrism.** Skills, artifacts e configuração vivem em
+   `.radiant-harness/` e `AGENTS.md` (universal). Views nativas
+   (`.claude/`, `.cursor/`, etc.) são **opt-in** via `--agent=<list>`.
+2. **Vendor-neutral LLM.** Presets são opcionais. Qualquer modelo
+   OpenAI-compatible funciona via `--model=...`. Nenhum viés "Claude
+   first" no código, na documentação, nem nos defaults.
+3. **Cross-platform real.** 6 targets (linux/amd64, linux/arm64,
+   darwin/amd64, darwin/arm64, windows/amd64, windows/arm64) buildam
+   limpo a cada release.
+4. **Sem SDKs pesados.** HTTP puro via `net/http`. Adicionar provedor
+   é uma entrada em `PresetModels` + (se preciso) um `baseURL()`.
+5. **Skills como contrato machine-readable.** Toda skill tem
+   `frontmatter.yaml` com inputs/outputs/gates explícitos. Qualquer
+   LLM parseia sem convenção proprietária.
+6. **Detecção em runtime.** PATH, $HOME, env vars. Nada de hardcoded
+   `/usr/local/bin` ou `~/Library`.
 
 ---
 
-## Multi-Platform — hardening cross-OS
+## Sprints concluídos
 
-### 1. Detecção de PATH cross-platform
+### Sprint 0 — Fundação (commit `cfe074f`, v0.2.0)
+- Segurança (allowlists, atomic state, sandboxing, flock, timeouts)
+- Vendor-neutral scaffolds
+- VS Code extension skeleton
+- CI workflow
 
-- Hoje `exec.LookPath` é usado direto, que já é cross-platform.
-- MAS: o `agent.go` faz `LastIndexAny(base, "/\\")` — não considera
-  Windows path quirks (drive letters `C:\`, UNC `\\server\share`).
-- Adicionar helper `basename(path)` em `internal/harness/agent.go` que
-  lida com `/`, `\`, drive letters, e UNC paths.
-- Esforço: 1h.
+### Sprint 1 — Roadmap (commit `974d513`)
+- `docs/ROADMAP.md` criado
 
-### 2. Windows: console encoding
+### Sprint 2 — Validação empírica (commit `6a50cdd`, 118 testes)
+- 5 bugs reais corrigidos via validação empírica
+- 7 provedores LLM (Mistral, Groq, xAI)
+- `radiant doctor`, `radiant bench`
 
-- `fmt.Printf` no Windows consert pode quebrar com acentos (PT-BR).
-- Setar `cmd.Stdout = console.ConsoleWriter{...}` ou setar code page
-  antes de imprimir.
-- Workaround pragmático: usar `golang.org/x/text/encoding/charmap` pra
-  converter UTF-8 → CP850 quando GOOS=windows.
-- Esforço: 2h.
+### Sprint 3 — Cross-platform + auto-routing (commit `a505b87`, 150 testes)
+- Cross-platform lock via atomic rename
+- `--auto-route` + `llm.AutoRoute()`
+- Pricing table USD
 
-### 3. Windows: shell `sh -c` não existe
+### Sprint 4 — Cost + rate limit + manifests (commit `313a591`, 157 testes)
+- Token accounting (mutex, 50-goroutine stress)
+- Cost display no `run`
+- Rate-limit awareness (`Retry-After`)
+- Homebrew/Scoop/AUR manifests
 
-- `runGate` e `engine.runGate` usam `sh -c <gate>`. No Windows não tem
-  `sh` por padrão (tem Git Bash em alguns ambientes, mas não confiável).
-- Detectar GOOS. No Windows, usar `cmd /c <gate>` ou exigir que o gate
-  seja um .exe/.bat/.cmd direto (sem shell).
-- Esforço: 4h. Requer testes cross-OS via `GOOS=windows go test`.
+### Sprint 5 — Anthropic nativo (commit `653c51e`, 164 testes)
+- `internal/llm/anthropic.go` — POST `/v1/messages`, SSE streaming
+- `radiant eval` — comparador de providers
 
-### 4. Windows: flock via LockFileEx
+### Sprint 6 — Multi-agent + tracing + CodeLens (commit `7fb5262`, 168 testes)
+- `--planner` / `--implementer` flags
+- `engine.TraceEvent` + per-phase summary
+- VS Code CodeLens em `tasks.md`
 
-- `syscall.Flock` é Unix-only. No Windows, equivalente é
-  `LockFileEx`/`UnlockFileEx` via golang.org/x/sys/windows.
-- Adicionar build tag: `state_unix.go` (FLOCK) + `state_windows.go`
-  (LockFileEx).
-- Esforço: 4h.
+### Sprint 7 — Planner fires + JSONL + race fix (commit `f20e94e`, 172 testes)
+- `runPlannerAdvisory` — planner LLM agora é chamado de verdade
+- `--trace-out` — JSONL export atômico
+- Race fix em `Engine.currentTaskID`
+- Cross-compile: adicionado `linux/arm64` + `windows/arm64`
 
-### 5. macOS ARM64 (M1/M2/M3)
+### Sprint 8 — Gate output cap (commit `7fb5b54`, 176 testes)
+- `--max-gate-output` (10 MiB default)
+- `io.LimitReader` em todos os gate runners (3 packages × POSIX + Windows)
+- Truncation marker + broken-pipe kill
 
-- Já compilado via goreleaser com `GOARCH=arm64`. Mas precisa testar:
-  - `syscall.Flock` no macOS ARM — OK, mesmo BSD-style.
-  - AppleScript nas skills de scaffold — verificar.
-- Esforço: 2h (testes em runner arm64).
-
-### 6. Linux: cgroups v2 awareness
-
-- O harness spawna N goroutines pra paralelismo. Em containers com
-  CPU shares limitados, isso pode saturar.
-- Detectar `/sys/fs/cgroup/cpu.max` e auto-throttle o `MaxParallelTasks`.
-- Esforço: 4h. Nice-to-have, não crítico.
-
-### 7. Homebrew / Scoop / Chocolatey / apt formulas
-
-- Distribuir via package managers acelera adoção.
-- `brew install fortvna/tap/radiant` — formula simples.
-- `scoop install radiant` — manifest JSON.
-- `apt install radiant` — deb package via ghcr.io.
-- Esforço: 1 dia por package manager.
+### Sprint 9 — Allowlist dedup (commit `a9614b7`, 188 testes)
+- Novo package `internal/policy/`
+- Single source of truth: `AgentCommands`, `GateBinaries`, `ValidateGateCommand`
+- Eliminadas 3 cópias paralelas em `engine/`, `harness/`, `quality/`
 
 ---
 
-## DX (Developer Experience)
+## Sprints planejados
 
-### 1. `radiant models --provider=mistral`
+### Sprint 10 — Skill runtime + spec authoring (PRÓXIMO)
 
-- Listar modelos filtrados por provedor.
-- `--all` mostra todos os provedores disponíveis.
-- Esforço: 4h.
+**Tema**: Fundação metodológica. Skills universais, spec authoring,
+tier system, state machine.
 
-### 2. `radiant doctor`
+| # | Deliverable | Effort |
+|---|-------------|--------|
+| 1 | Skill schema v1 documentado (`docs/SKILL-SCHEMA.md`) | S |
+| 2 | 3 skills escritas do zero: `nova-feature`, `clarificar`, `validar` | M |
+| 3 | Skills bundled no CLI binary; `init` extrai pra `.radiant-harness/skills/` | M |
+| 4 | `AGENTS.md` gerado pelo `init` | S |
+| 5 | `radiant spec <intent>` — entrevista interativa | M |
+| 6 | `--tier` flag + auto-detect (trivial/feature/architecture) | S |
+| 7 | `radiant state` + `radiant handoff` | S |
+| 8 | Native view generation opt-in via `--agent=<list>` | M |
 
-- Diagnóstico de ambiente: PATH, $SHELL, version do Go usada pra
-  build, agents detectados, providers disponíveis com chave API
-  setada.
-- Esforço: 4h.
+Ver detalhes completos em [`docs/HARNESS-PLAN.md` §5.1](./HARNESS-PLAN.md).
 
-### 3. `radiant config --global`
+### Sprint 11 — Discovery + Design (Lean + DDD + RFC)
 
-- Hoje o `--api-key` é per-run. Adicionar config persistente em
-  `~/.config/radiant/config.yaml` (XDG) ou `~/Library/Application Support`
-  (macOS) ou `%APPDATA%\Radiant` (Windows).
-- Esforço: 4h.
+**Tema**: `radiant product`, `radiant adr`, `radiant diagramar`,
+`radiant update`, skills `kickoff` + `integrations`.
 
-### 4. Auto model routing
+### Sprint 12 — Brownfield + Governance
 
-- Quando `radiant run` detecta fase "research" ou "plan", usar Opus
-  / Sonnet-large automaticamente. Quando fase "implement", usar
-  Sonnet/Haiku.
-- Toggle via `--auto-route` flag.
-- Esforço: 1 dia.
+**Tema**: `radiant mapear`, `radiant audit`, `radiant metrics`,
+skills `mapear` + `audit` + `metricas`.
 
----
+### Sprint 13 — PR + Multi-agent views
 
-## Priorização sugerida
-
-| # | Item | Esforço | Valor |
-|---|---|---|---|
-| 1 | Anthropic native client | 4h | ⭐⭐⭐ (Melhora DX com Claude direto) |
-| 2 | Mistral / Codestral presets | 30min | ⭐⭐ (Mais opções) |
-| 3 | Groq provider | 1h | ⭐⭐⭐ (Velocidade em CI) |
-| 4 | Windows shell + flock | 4h + 4h | ⭐⭐⭐ (Adoção Windows) |
-| 5 | `radiant doctor` | 4h | ⭐⭐ (DX) |
-| 6 | Auto model routing | 1d | ⭐⭐ (Qualidade) |
-| 7 | Homebrew tap | 1d | ⭐⭐⭐ (Distribuição) |
-| 8 | Cohere / Grok presets | 45min | ⭐ (Mais opções) |
-
-**Próximo sprint sugerido:** 1, 2, 3, 5, 7 — cobre provider diversity +
-distribuição em 3-4 dias de trabalho focado.
+**Tema**: `radiant review-pr`, native views para 6 agentes
+(Claude/Cursor/Codex/Copilot/Gemini/Windsurf), `radiant setup-ci`,
+`radiant camada-agentica`, `radiant evals`.
 
 ---
 
 ## Métricas de sucesso
 
-Ao final da próxima sprint:
+A cada sprint:
 
-- [ ] `go test ./...` passa em Linux/amd64, Linux/arm64, macOS/amd64,
-      macOS/arm64, Windows/amd64
-- [ ] `radiant doctor` roda nos 5 OSes e retorna OK
-- [ ] Pelo menos 6 provedores LLM documentados com exemplo funcional
-- [ ] Pelo menos 3 package managers oferecendo `radiant` (brew, scoop, apt)
-- [ ] Nenhum comentário no código menciona "Claude first" ou "best for SDD"
-- [ ] CI matrix expandida para incluir `windows-latest` e `macos-latest`
+- [ ] `go test ./... -race -count=1` 100% verde
+- [ ] `go vet ./...` zero warnings
+- [ ] `gofmt -l .` zero unformatted files
+- [ ] `make release` produz os 6 targets (linux/{amd64,arm64},
+      darwin/{amd64,arm64}, windows/{amd64,arm64})
+- [ ] Smoke (`init` + `validate`) verde
+- [ ] Validation report commitado em
+      `docs/validation-report-sprint-N.md`
+- [ ] Nenhuma regressão de vendor-neutrality — se uma nova view
+      nativa de agente aparecer, ela é gerada a partir de
+      `.radiant-harness/skills/`, não duplicada
+- [ ] Teste de fogo: `rm -rf .claude .cursor .windsurf .gemini .github/copilot-instructions.md AGENTS.md.specialized` deve deixar
+      o projeto ainda funcional via `AGENTS.md` + `.radiant-harness/skills/`
+
+A cada fase:
+
+- [ ] Sprint 10: skill schema ratificado, 3 skills prontas, qualquer
+      LLM pode consumir o projeto sem nada proprietário
+- [ ] Sprint 11: discovery (greenfield + brownfield) ponta a ponta
+- [ ] Sprint 12: governance (audit + metrics) ponta a ponta
+- [ ] Sprint 13: 6 views nativas geradas, PR review automatizado
+
+---
+
+## Anti-backlog
+
+Itens **explicitamente fora do roadmap** até segunda ordem:
+
+- ❌ Suporte preferencial a Claude (qualquer feature nova deve
+  funcionar igual em qualquer agente que consuma `AGENTS.md`)
+- ❌ Claude Code hooks como dependência obrigatória (são opt-in
+  via `--agent=claude`)
+- ❌ `CLAUDE.md` como arquivo de namespace (o arquivo se chama
+  `AGENTS.md`, é universal)
+- ❌ Slash commands como única entry point (CLI commands são o
+  canônico, slash commands são view opcional)
+- ❌ Vendor lock-in de qualquer tipo (open spec, MIT, qualquer
+  implementação é bem-vinda)
+
+---
+
+## Mudança de direção registrada (2026-06-24)
+
+Antes deste sprint, o projeto seguia um roadmap focado em
+"multi-platform/multi-LLM hardening". Após a comparação com
+[spec-driven](https://github.com/igoruehara/spec-driven) (137⭐,
+45 forks, comunidade ativa), o rumo muda:
+
+- **Antes**: CLI que executa SDD quando a spec já existe.
+- **Agora**: CLI que entrega o workflow SDD completo (Lean
+  Inception → DDD → TDD/RFC → SDD → CODE → PR), vendor-neutral,
+  agent-agnostic, com skill schema aberto.
+
+Esta mudança preserva todo o trabalho de Sprints 0-9 (engine,
+execução, segurança, multi-LLM, tracing) — o roadmap novo
+**acrescenta** a camada metodológica sobre essa base.
+
+O plano detalhado (4 fases, 4 sprints, 24 deliverables) vive em
+[`docs/HARNESS-PLAN.md`](./HARNESS-PLAN.md).
