@@ -22,10 +22,11 @@ var bundledFS embed.FS
 // list` and by AGENTS.md generation so any agent can scan what's
 // available without parsing every SKILL.md.
 type SkillInfo struct {
-	Name         string
-	Version      string
-	Description  string
-	TierEligible []string
+	Name              string
+	Version           string
+	Description       string
+	TierEligible      []string
+	CommandsAvailable []string
 }
 
 // Bundle returns one SkillInfo per valid skill directory embedded
@@ -62,10 +63,11 @@ func Bundle() ([]SkillInfo, error) {
 				e.Name(), len(errs), errs[0].Error())
 		}
 		out = append(out, SkillInfo{
-			Name:         s.Name,
-			Version:      s.Version,
-			Description:  s.Description,
-			TierEligible: s.TierEligible,
+			Name:              s.Name,
+			Version:           s.Version,
+			Description:       s.Description,
+			TierEligible:      s.TierEligible,
+			CommandsAvailable: s.CommandsAvailable,
 		})
 	}
 	return out, nil

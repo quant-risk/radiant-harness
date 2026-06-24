@@ -107,6 +107,15 @@ tier system, state machine.
 
 Ver detalhes completos em [`docs/HARNESS-PLAN.md` §5.1](./HARNESS-PLAN.md).
 
+### Sprint 10 — DONE (2026-06-24)
+
+All 8 deliverables shipped across 3 batches (`f0f4546`, `b98e503`,
+this batch). See `docs/validation-report-sprint-10-batch1.md`,
+`docs/validation-report-sprint-10-batch2.md`, and the third-batch
+report (this commit) for per-deliverable acceptance.
+
+Total: **216 tests, 16 skills bundled, 0 races, 6/6 cross-compile**.
+
 ### Sprint 11 — Discovery + Design (Lean + DDD + RFC)
 
 **Tema**: `radiant product`, `radiant adr`, `radiant diagramar`,

@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.1"
+var version = "0.4.2"
 
 func main() {
 	root := &cobra.Command{
@@ -208,6 +208,7 @@ func main() {
 	var runImplementer string
 	var runTraceOut string
 	var runMaxGateOutput int
+	var runValidator string
 
 	runCmd := &cobra.Command{
 		Use:   "run <spec-dir>",
@@ -240,6 +241,11 @@ func main() {
 				MaxRetries:         runRetries,
 				Verbose:            runVerbose,
 				GateMaxOutputBytes: runMaxGateOutput,
+			}
+			if runValidator != "" {
+				if v, ok := resolveModelSilent(runValidator, runProvider, runAPIKey); ok {
+					cfg.ValidatorModel = v
+				}
 			}
 			// Optional multi-agent routing: --planner and --implementer
 			// override the model used at each phase. Both are resolved via
@@ -329,6 +335,7 @@ func main() {
 	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
 	runCmd.Flags().StringVar(&runTraceOut, "trace-out", "", "write per-LLM-call trace events to this file as JSONL (one event per line). Useful for cost debugging and observability.")
 	runCmd.Flags().IntVar(&runMaxGateOutput, "max-gate-output", 10*1024*1024, "cap stdout+stderr captured from each gate command, in bytes (default 10 MiB). Gates writing more than this are truncated and killed.")
+	runCmd.Flags().StringVar(&runValidator, "validator", "", "separate LLM that reviews each task's implementation against its ACs. Defaults to no validator (the gate command is the only check). Pass a model ID (e.g. 'claude-opus-4.1') to enable. Per video research: separate agents by role — implementer produces code, validator reviews against the spec.")
 	root.AddCommand(runCmd)
 
 	// ── bench ──
@@ -479,6 +486,184 @@ func main() {
 	evalCmd.Flags().StringVar(&evalOutput, "output", "", "save JSON results to this path")
 	root.AddCommand(evalCmd)
 
+	// ── spec (Sprint 10 third batch — interview + AC→test pré-check) ──
+	// `radiant spec "<intent>" --tier=feature --ac=... --task=... --gate=...`
+	//
+	// Non-interactive mode (flag-driven). The interactive interview
+	// lives in `nova-feature` SKILL.md — agents can run that. The CLI
+	// version is for power users who already know what they want.
+	//
+	// Pré-check: every AC must be matched to at least one task, and
+	// every task must have a gate command. This is the lesson from
+	// video #1: TLC won the benchmark by forcing AC→test mapping.
+	specCmd := &cobra.Command{
+		Use:   "spec <intent>",
+		Short: "Create spec.md + tasks.md for a new feature (tier-driven, AC→test mapping)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			intent := args[0]
+			tier, _ := cmd.Flags().GetString("tier")
+			slug, _ := cmd.Flags().GetString("slug")
+			acsRaw, _ := cmd.Flags().GetStringArray("ac")
+			tasksRaw, _ := cmd.Flags().GetStringArray("task")
+			gatesRaw, _ := cmd.Flags().GetStringArray("gate")
+			coversRaw, _ := cmd.Flags().GetStringArray("covers")
+
+			// Validate tier
+			switch tier {
+			case "trivial", "feature", "architecture":
+				// ok
+			case "":
+				tier = "feature" // sensible default
+			default:
+				return fmt.Errorf("invalid --tier=%q (use trivial, feature, or architecture)", tier)
+			}
+
+			if slug == "" {
+				slug = slugify(intent)
+				if slug == "" {
+					return fmt.Errorf("could not derive slug from intent; pass --slug=explicit")
+				}
+			}
+
+			// Pré-check: every AC mapped to at least one task; every
+			// task has a gate. (Video research #1: TLC won because it
+			// forced AC→test mapping.)
+			if len(acsRaw) == 0 {
+				return fmt.Errorf("no --ac provided; pass each AC as a separate --ac flag (Given/When/Then format recommended)")
+			}
+			if len(tasksRaw) == 0 {
+				return fmt.Errorf("no --task provided; pass each task as a separate --task flag")
+			}
+			if len(gatesRaw) != len(tasksRaw) {
+				return fmt.Errorf("--task count (%d) != --gate count (%d); every task needs a gate command", len(tasksRaw), len(gatesRaw))
+			}
+			if len(coversRaw) != len(tasksRaw) {
+				return fmt.Errorf("--task count (%d) != --covers count (%d); every task must declare which ACs it covers (comma-separated AC numbers, e.g. '1,2')", len(tasksRaw), len(coversRaw))
+			}
+
+			// Compute next sequence number
+			seq, err := nextSpecSeq("specs")
+			if err != nil {
+				return err
+			}
+			specDir := filepath.Join("specs", fmt.Sprintf("%04d-%s", seq, slug))
+
+			if err := os.MkdirAll(specDir, 0o755); err != nil {
+				return err
+			}
+
+			// Write spec.md
+			specMD := renderSpecMD(seq, slug, intent, tier, acsRaw)
+			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(specMD), 0o644); err != nil {
+				return err
+			}
+			// Write tasks.md
+			tasksMD := renderTasksMD(seq, slug, tier, tasksRaw, gatesRaw, coversRaw, acsRaw)
+			if err := os.WriteFile(filepath.Join(specDir, "tasks.md"), []byte(tasksMD), 0o644); err != nil {
+				return err
+			}
+
+			// Update state.md with the new feature in flight
+			statePath := filepath.Join(".radiant-harness", "state.md")
+			if _, err := os.Stat(statePath); err == nil {
+				body, _ := os.ReadFile(statePath)
+				updated := upsertStateCurrentFeature(string(body), fmt.Sprintf("%04d-%s", seq, slug), tier, fmt.Sprintf("radiant run %s", specDir))
+				atomicWrite(statePath, updated)
+			}
+
+			fmt.Printf("  ✓ created %s/spec.md (%d ACs)\n", specDir, len(acsRaw))
+			fmt.Printf("  ✓ created %s/tasks.md (%d tasks)\n", specDir, len(tasksRaw))
+			fmt.Printf("  ✓ state.md updated: current_feature=%04d-%s tier=%s\n", seq, slug, tier)
+			fmt.Printf("\n  Next: radiant run %s --model <model>\n", specDir)
+			return nil
+		},
+	}
+	specCmd.Flags().String("tier", "", "tier: trivial | feature | architecture (default: feature)")
+	specCmd.Flags().String("slug", "", "kebab-case slug (auto-derived from intent if empty)")
+	specCmd.Flags().StringArray("ac", nil, "acceptance criterion (repeatable); \"Given ... When ... Then ...\" recommended")
+	specCmd.Flags().StringArray("task", nil, "task name (repeatable, must match --ac coverage)")
+	specCmd.Flags().StringArray("gate", nil, "gate command per task (must match --task count)")
+	specCmd.Flags().StringArray("covers", nil, "comma-separated AC numbers per task (e.g. '1,2'); AC→test mapping enforced")
+	root.AddCommand(specCmd)
+
+	// ── state + handoff (session continuity, see handoff skill) ──
+	// `radiant state` shows the current resume point.
+	// `radiant handoff` writes a new resume point before closing the
+	// session. Both read/write `.radiant-harness/state.md`. Pure
+	// file I/O — no LLM call, no network, sub-second.
+	stateCmd := &cobra.Command{
+		Use:   "state",
+		Short: "Show the current session state (resume point)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := filepath.Join(".radiant-harness", "state.md")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					fmt.Printf("  ✗ %s not found — run 'radiant init .' first\n", path)
+					return fmt.Errorf("state not initialized")
+				}
+				return err
+			}
+			fmt.Printf("  %s\n", path)
+			fmt.Println("  ---")
+			fmt.Print(string(data))
+			return nil
+		},
+	}
+	handoffCmd := &cobra.Command{
+		Use:   "handoff",
+		Short: "Pause: write the current session state to .radiant-harness/state.md",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			currentFeature, _ := cmd.Flags().GetString("feature")
+			tierFlag, _ := cmd.Flags().GetString("tier")
+			note, _ := cmd.Flags().GetString("note")
+			nextCmd, _ := cmd.Flags().GetString("next-command")
+
+			path := filepath.Join(".radiant-harness", "state.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+
+			var b strings.Builder
+			b.WriteString("# State\n\n")
+			b.WriteString("## Current position\n")
+			fmt.Fprintf(&b, "- current_feature: %s\n", strOrEmpty(currentFeature))
+			fmt.Fprintf(&b, "- tier: %s\n", strOrEmpty(tierFlag))
+			fmt.Fprintf(&b, "- next_command: %s\n", strOrEmpty(nextCmd))
+			if note != "" {
+				fmt.Fprintf(&b, "- note: %s\n", note)
+			}
+			b.WriteString("- blockers: []\n")
+			b.WriteString("- open_questions: []\n\n")
+			fmt.Fprintf(&b, "## Last session\n")
+			fmt.Fprintf(&b, "- last_updated: %s\n", time.Now().UTC().Format(time.RFC3339))
+			fmt.Fprintf(&b, "- last_summary: %q\n", summaryFor(note, currentFeature))
+
+			// Atomic write: temp + rename
+			tmp := path + ".tmp"
+			if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+				return err
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				os.Remove(tmp)
+				return err
+			}
+			fmt.Printf("  ✓ handoff written to %s\n", path)
+			if nextCmd != "" {
+				fmt.Printf("  Resume with: %s\n", nextCmd)
+			}
+			return nil
+		},
+	}
+	handoffCmd.Flags().String("feature", "", "current feature in flight (e.g. 0002-jwt-auth)")
+	handoffCmd.Flags().String("tier", "", "tier: trivial | feature | architecture")
+	handoffCmd.Flags().String("note", "", "one-line summary of the session")
+	handoffCmd.Flags().String("next-command", "", "literal CLI command to resume (e.g. 'radiant run specs/0002-jwt-auth --continue')")
+	root.AddCommand(stateCmd, handoffCmd)
+
 	// ── skills (vendor-neutral skill runtime) ──
 	// `radiant skills list` shows bundled skills.
 	// `radiant skills validate <dir>` validates a skill against the schema.
@@ -604,6 +789,174 @@ func agentLabels(agents []radiant.AgentID) string {
 // writeTraceToFile opens path (creating parent dirs as needed) and
 // drains the engine's trace log to it as JSONL. Atomic on POSIX via
 // temp + rename, so a crash mid-write leaves no torn file. On Windows
+// strOrEmpty renders a string or "(none)" if empty. Used in state.md
+// so a missing field is visually obvious to whoever reads it.
+func strOrEmpty(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}
+
+// slugify derives a kebab-case slug from free-form intent text. Best
+// effort — falls back to lowercased ASCII with non-alphanumerics
+// replaced by `-` and runs of `-` collapsed. Truncated to 48 chars.
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == ' ' || r == '-' || r == '_' || r == '/':
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	out := strings.TrimRight(b.String(), "-")
+	if len(out) > 48 {
+		out = out[:48]
+		out = strings.TrimRight(out, "-")
+	}
+	return out
+}
+
+// nextSpecSeq scans `specs/` for the highest NNNN- prefix and
+// returns next+1. Returns 1 if no specs exist or the directory
+// is empty.
+func nextSpecSeq(dir string) (int, error) {
+	max := 0
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 1, nil
+		}
+		return 0, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[4] != '-' {
+			continue
+		}
+		n, err := strconv.Atoi(name[:4])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1, nil
+}
+
+// renderSpecMD produces spec.md from the interview answers. Follows
+// the nova-feature skill template: Why, What, ACs, Non-goals.
+func renderSpecMD(seq int, slug, intent, tier string, acs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %04d — %s\n\n", seq, slug)
+	b.WriteString("## Why\n\n")
+	fmt.Fprintf(&b, "%s\n\n", intent)
+	b.WriteString("## What\n\n")
+	b.WriteString("[Describe the user-visible behavior introduced by this feature.]\n\n")
+	b.WriteString("## Acceptance criteria\n\n")
+	for i, ac := range acs {
+		fmt.Fprintf(&b, "### AC%d\n%s\n\n", i+1, ac)
+	}
+	b.WriteString("## Non-goals\n\n")
+	b.WriteString("- [List what this feature does NOT do. Prevents scope creep.]\n\n")
+	fmt.Fprintf(&b, "_Generated by `radiant spec` on %s (tier=%s)._\n", time.Now().UTC().Format("2006-01-02"), tier)
+	return b.String()
+}
+
+// renderTasksMD produces tasks.md as a Markdown table with the AC
+// coverage column. The coverage gate is enforced at command time —
+// every task must declare which ACs it covers.
+func renderTasksMD(seq int, slug, tier string, tasks, gates, covers, acs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %04d — Tasks: %s\n\n", seq, slug)
+	fmt.Fprintf(&b, "_Tier: %s. Total ACs: %d. Total tasks: %d._\n\n", tier, len(acs), len(tasks))
+	b.WriteString("| # | Task | Covers | Gate |\n")
+	b.WriteString("|---|------|--------|------|\n")
+	for i, t := range tasks {
+		fmt.Fprintf(&b, "| %d | %s | %s | `%s` |\n", i+1, t, covers[i], gates[i])
+	}
+	b.WriteString("\n## Coverage check\n\n")
+	b.WriteString("Every AC must appear in at least one task's Covers column:\n\n")
+	covered := make(map[string]bool)
+	for _, c := range covers {
+		for _, ac := range strings.Split(c, ",") {
+			ac = strings.TrimSpace(ac)
+			if ac != "" {
+				covered[ac] = true
+			}
+		}
+	}
+	for i := 1; i <= len(acs); i++ {
+		key := strconv.Itoa(i)
+		if covered[key] {
+			fmt.Fprintf(&b, "- ✓ AC%d covered\n", i)
+		} else {
+			fmt.Fprintf(&b, "- ✗ AC%d NOT covered\n", i)
+		}
+	}
+	b.WriteString("\n## Gates\n\n")
+	b.WriteString("Each task's Gate command must exit 0 for the task to count as done.\n")
+	b.WriteString("Commands must be in the gate allowlist (see `internal/policy`).\n")
+	return b.String()
+}
+
+// upsertStateCurrentFeature updates the `current_feature`, `tier`,
+// and `next_command` lines in state.md content. Idempotent — safe to
+// call repeatedly.
+func upsertStateCurrentFeature(body, feature, tier, nextCmd string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "- current_feature:"):
+			lines[i] = fmt.Sprintf("- current_feature: %s", feature)
+		case strings.HasPrefix(line, "- tier:"):
+			lines[i] = fmt.Sprintf("- tier: %s", tier)
+		case strings.HasPrefix(line, "- next_command:"):
+			lines[i] = fmt.Sprintf("- next_command: %s", nextCmd)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// atomicWrite writes data to path via temp + rename so a crash
+// mid-write leaves no torn file.
+func atomicWrite(path, data string) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(data), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// summaryFor produces the human-readable one-liner that goes into
+// state.md's `last_summary` field. Combines the user's note with the
+// feature slug (if any) so future sessions can grep it.
+func summaryFor(note, feature string) string {
+	if note != "" {
+		return note
+	}
+	if feature != "" {
+		return "Last session worked on " + feature
+	}
+	return "Last session"
+}
+
 // we fall back to a direct write — rename-over-existing is a no-op
 // there.
 func writeTraceToFile(e *engine.Engine, path string) error {

@@ -631,3 +631,57 @@ func TestRunShellGateReportsFailure(t *testing.T) {
 		t.Errorf("error should indicate failure; got: %v", err)
 	}
 }
+
+// TestValidatorClientEmptyWhenNotConfigured verifies the chatValidator
+// no-op behavior: when Config.ValidatorModel is empty, the validator
+// client is still non-nil (so callers don't nil-check) but has an
+// empty model name, and chatValidator returns ("", usage, nil) without
+// hitting the network.
+func TestValidatorClientEmptyWhenNotConfigured(t *testing.T) {
+	e := New(Config{
+		Model:      llm.Model{Provider: llm.ProviderOpenAI, Model: "gpt-4"},
+		ProjectDir: t.TempDir(),
+	})
+	if e.validatorClient == nil {
+		t.Fatal("validatorClient should be non-nil even when not configured (callers shouldn't nil-check)")
+	}
+	if e.validatorClient.Model().Model != "" {
+		t.Errorf("validatorClient.Model = %q, want empty", e.validatorClient.Model().Model)
+	}
+	// chatValidator should return empty + nil error without network.
+	text, usage, err := e.chatValidator(context.Background(), "sys", "user")
+	if err != nil {
+		t.Errorf("chatValidator with no model should return nil error, got %v", err)
+	}
+	if text != "" {
+		t.Errorf("text = %q, want empty", text)
+	}
+	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
+		t.Errorf("usage = %+v, want zero", usage)
+	}
+}
+
+// TestValidatorClientConfiguredWhenModelSet verifies that when
+// ValidatorModel is set, the client gets that specific model.
+func TestValidatorClientConfiguredWhenModelSet(t *testing.T) {
+	e := New(Config{
+		Model:          llm.Model{Provider: llm.ProviderOpenAI, Model: "gpt-4"},
+		ValidatorModel: llm.Model{Provider: llm.ProviderAnthropic, Model: "claude-opus-4.1"},
+		ProjectDir:     t.TempDir(),
+	})
+	if e.validatorClient.Model().Model != "claude-opus-4.1" {
+		t.Errorf("validatorClient.Model = %q, want claude-opus-4.1", e.validatorClient.Model().Model)
+	}
+}
+
+// TestConfigAcceptsValidatorModel checks the Config struct tag —
+// important for downstream code that reads config via reflection.
+func TestConfigAcceptsValidatorModel(t *testing.T) {
+	cfg := Config{
+		Model:          llm.Model{Model: "gpt-4"},
+		ValidatorModel: llm.Model{Model: "claude-opus-4.1"},
+	}
+	if cfg.ValidatorModel.Model != "claude-opus-4.1" {
+		t.Errorf("ValidatorModel.Model = %q, want claude-opus-4.1", cfg.ValidatorModel.Model)
+	}
+}

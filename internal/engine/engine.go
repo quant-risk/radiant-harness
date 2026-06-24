@@ -88,6 +88,7 @@ type Engine struct {
 	llmClient         *llm.Client
 	plannerClient     *llm.Client
 	implementerClient *llm.Client
+	validatorClient   *llm.Client // optional — reviews each task against ACs
 	plannerModelName  string
 	projectDir        string
 	maxRetries        int
@@ -145,6 +146,14 @@ type Config struct {
 	// implement + correct loop). When unset, falls back to Model.
 	ImplementerModel llm.Model
 
+	// ValidatorModel is an optional separate LLM that reviews each
+	// task's implementation against its ACs after the gate passes.
+	// Per video research #4: separate agents by role. The
+	// implementer produces code; the validator (typically a more
+	// capable model like Opus) checks it. Empty means no separate
+	// validator — the gate command alone decides pass/fail.
+	ValidatorModel llm.Model
+
 	ProjectDir string
 	MaxRetries int
 	Verbose    bool
@@ -177,6 +186,7 @@ func New(cfg Config) *Engine {
 		llmClient:         llm.NewClient(cfg.Model),
 		plannerClient:     llm.NewClient(planner),
 		implementerClient: llm.NewClient(implementer),
+		validatorClient:   llm.NewClient(cfg.ValidatorModel), // empty Model → falls back to Model
 		plannerModelName:  planner.Model,
 		projectDir:        cfg.ProjectDir,
 		maxRetries:        cfg.MaxRetries,
@@ -338,6 +348,19 @@ func (e *Engine) chatImplementerCorrect(ctx context.Context, systemPrompt, userP
 // chatImplementer.
 func (e *Engine) chatPlanner(ctx context.Context, systemPrompt, userPrompt string) (string, chatUsage, error) {
 	return e.chatWith(ctx, e.plannerClient, "planner", systemPrompt, userPrompt)
+}
+
+// chatValidator routes a call to the validator client. Returns
+// ("", usage, nil) if no validator is configured (empty model),
+// so callers can use this unconditionally without nil checks.
+// Per video research #4: separate agents by role — implementer
+// writes code, validator (typically Opus or a stronger model)
+// reviews it against the spec.
+func (e *Engine) chatValidator(ctx context.Context, systemPrompt, userPrompt string) (string, chatUsage, error) {
+	if e.validatorClient == nil || e.validatorClient.Model().Model == "" {
+		return "", chatUsage{}, nil
+	}
+	return e.chatWith(ctx, e.validatorClient, "validator", systemPrompt, userPrompt)
 }
 
 // chatWith is the underlying call — extract so all three entry points
