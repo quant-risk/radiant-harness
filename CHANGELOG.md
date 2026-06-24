@@ -4,6 +4,71 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-06-24
+
+Sprint 9: gate command allowlist deduplication. Closes the drift
+risk flagged in the Sprint 6 audit — three packages
+(`internal/engine/`, `internal/harness/`, `internal/quality/`)
+maintained their own copies of the gate allowlist, the gate
+validator, the logical-ops splitter, and the shell tokenizer.
+
+### Added
+- **`internal/policy/`** — new package. Single source of truth for
+  the harness's command allowlists and the gate-command tokenizer.
+  Exports:
+  - `AgentCommands`, `GateBinaries` — the two closed sets.
+  - `IsAgentAllowed`, `IsGateBinaryAllowed` — lookup helpers
+    (comma-ok form so presence and absence are distinguishable,
+    unlike the previous `!= struct{}{}` pattern which was always
+    false).
+  - `ValidateGateCommand` — replaces three duplicated validator
+    functions. Now handles double-quoted strings too (the harness
+    version was more thorough; engine/quality were not).
+  - `SplitOnLogicalOps`, `SplitShellTokens` — quote-aware
+    tokenizers used by the validator.
+  - `IsShellOp` — public helper for "is this token a shell
+    metacharacter".
+  - `AllowedAgentCommands()`, `AllowedGateBinaries()` — sorted
+    helpers used in error messages.
+
+- **`TestGateBinariesExcludeDestructive`** — locks the closed set
+  against accidental widening of `rm`, `mv`, `curl`, `wget`, `dd`,
+  `chmod`, `chown`, `sudo`, `bash`, `sh`, `zsh`, `fish`. If someone
+  adds one of these to the allowlist, this test fails and forces a
+  deliberate, reviewed change rather than a silent widening.
+
+- **`TestValidateGateCommandAcceptsAllowed`** — verifies the happy
+  path: every entry in `GateBinaries` is accepted when used as a
+  standalone gate. A failure here means the allowlist and validator
+  disagree — the exact bug the policy extraction is meant to
+  prevent.
+
+### Changed
+- `internal/engine/`: `gateAllowlist`, `validateGateCommand`,
+  `splitOnLogicalOps`, `splitShellTokens`, `isShellOp` are now
+  thin delegations to `internal/policy`. The duplicate definitions
+  were removed (≈140 lines deleted from engine.go).
+- `internal/harness/agent.go`: `allowedAgentCommands`,
+  `allowedGateBinaries` are now re-exports of `policy.AgentCommands`
+  and `policy.GateBinaries`. The five duplicate helper functions
+  are thin delegations (≈160 lines deleted from agent.go).
+- `internal/quality/validate.go`: same pattern as engine/harness
+  (≈100 lines deleted from validate.go).
+- All three packages now share a single error message format:
+  `"gate binary %q is not in the allowlist (allowed: %s)"` — so
+  the operator gets the full closed-set hint regardless of which
+  code path rejected the gate.
+
+### Stats
+- 188 tests passing (up from 176 in 0.3.4)
+- New package: `internal/policy/` with 12 dedicated tests
+- Lines deleted across the 3 consumer packages: ≈400
+- Lines added in `internal/policy/`: ≈490 (canonical + tests)
+- Net: a single source of truth where there were three near-copies
+- Coverage: harness 61.1%, llm 84.3%, benchmark 77%, spec 88.5%,
+  quality 59.5%, engine 47.0%, **policy NEW (full coverage of
+  closed set + validator + tokenizers)**
+
 ## [0.3.4] — 2026-06-24
 
 Sprint 8: gate command output cap. Closes the OOM vector flagged in

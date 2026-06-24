@@ -17,9 +17,43 @@ import (
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/policy"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/spec"
 )
+
+// gateAllowlist is the closed set of binaries the engine will allow
+// as a gate command. Re-exported from internal/policy — add new
+// binaries there. Kept as a package-level alias for backwards
+// compatibility with internal callers and tests that referenced
+// the variable directly.
+var gateAllowlist = policy.GateBinaries
+
+// validateGateCommand rejects any gate whose binary isn't in the
+// allowlist. Delegated to internal/policy — the canonical
+// implementation lives there so all three consumers (engine,
+// harness, quality) agree on the closed set.
+func validateGateCommand(gate string) error {
+	return policy.ValidateGateCommand(gate)
+}
+
+// splitOnLogicalOps splits a string on `&&` and `||` only.
+// Delegated to internal/policy.
+func splitOnLogicalOps(s string) []string {
+	return policy.SplitOnLogicalOps(s)
+}
+
+// splitShellTokens is a tiny shell tokenizer. Delegated to
+// internal/policy.
+func splitShellTokens(cmd string) []string {
+	return policy.SplitShellTokens(cmd)
+}
+
+// isShellOp reports whether s is a shell metacharacter.
+// Delegated to internal/policy.
+func isShellOp(s string) bool {
+	return policy.IsShellOp(s)
+}
 
 // MaxParallelTasks caps concurrent LLM calls during a parallel phase.
 // Most OpenRouter/Anthropic accounts have low rate limits (5–20 req/min)
@@ -728,150 +762,6 @@ func (e *Engine) runGate(ctx context.Context, gate string) error {
 		return fmt.Errorf("gate failed: %w\n%s", err, out)
 	}
 	return nil
-}
-
-// gateAllowlist mirrors the closed set in internal/quality/validate.go and
-// internal/harness/agent.go. Kept in sync deliberately: opening a binary
-// here must also open it in the harness allowlist, so a typo in one place
-// shows up immediately as an "agent not allowed" error rather than silently
-// running the wrong command.
-var gateAllowlist = map[string]struct{}{
-	"node": {}, "npm": {}, "pnpm": {}, "yarn": {}, "bun": {}, "deno": {},
-	"go": {}, "make": {},
-	"pytest": {}, "python": {}, "python3": {}, "pip": {},
-	"cargo": {}, "rustc": {},
-	"jest": {}, "vitest": {},
-	"tsc": {}, "eslint": {},
-	"shellcheck": {},
-	// Read-only / no-side-effect commands (mirror of harness allowlist).
-	"echo": {}, "printf": {}, "true": {}, "false": {},
-	"pwd": {}, "cat": {}, "head": {}, "tail": {}, "wc": {},
-}
-
-// validateGateCommand rejects any gate whose binary isn't in the
-// allowlist. For compound expressions like `npm test && go test`, each
-// binary (npm, go) is validated. Pipes, redirects, and bare command
-// separators are rejected for safety. Mirrors the version in
-// internal/harness/agent.go and internal/quality/validate.go.
-func validateGateCommand(gate string) error {
-	gate = strings.TrimSpace(gate)
-	if gate == "" {
-		return nil
-	}
-	for _, op := range []string{"|", "<", ">", ";", "&"} {
-		idx := strings.Index(gate, op)
-		if idx < 0 {
-			continue
-		}
-		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
-			continue
-		}
-		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
-			continue
-		}
-		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
-	}
-	expressions := splitOnLogicalOps(gate)
-	for _, expr := range expressions {
-		expr = strings.TrimSpace(expr)
-		if expr == "" {
-			continue
-		}
-		parts := splitShellTokens(expr)
-		if len(parts) == 0 {
-			continue
-		}
-		var binary string
-		for _, part := range parts {
-			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
-				continue
-			}
-			binary = part
-			break
-		}
-		if binary == "" {
-			continue
-		}
-		base := binary
-		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
-			base = base[idx+1:]
-		}
-		if _, ok := gateAllowlist[base]; !ok {
-			return fmt.Errorf("binary %q is not in the gate allowlist", base)
-		}
-	}
-	return nil
-}
-
-// splitOnLogicalOps splits a string on `&&` and `||` only.
-func splitOnLogicalOps(s string) []string {
-	var parts []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-			current.WriteRune(r)
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-			current.WriteRune(r)
-		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++
-		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++
-		default:
-			current.WriteRune(r)
-		}
-	}
-	parts = append(parts, current.String())
-	return parts
-}
-
-// splitShellTokens is a tiny shell tokenizer that respects single and double
-// quotes so quoted arguments aren't treated as binary names. Mirrors the
-// version in internal/harness/agent.go and internal/quality/validate.go.
-func splitShellTokens(cmd string) []string {
-	var tokens []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	flush := func() {
-		if current.Len() > 0 {
-			tokens = append(tokens, current.String())
-			current.Reset()
-		}
-	}
-	for _, r := range cmd {
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
-			flush()
-		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
-			flush()
-			tokens = append(tokens, string(r))
-		default:
-			current.WriteRune(r)
-		}
-	}
-	flush()
-	return tokens
-}
-
-func isShellOp(s string) bool {
-	switch s {
-	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
-		return true
-	}
-	return false
 }
 
 // log prints a message if verbose mode is enabled.

@@ -4,33 +4,22 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/policy"
 )
 
 // gateTimeout is defined in gate_unix.go / gate_windows.go.
 
-// allowedGateBinaries mirrors the allowlist enforced by the harness agent
-// runner. Validation is stricter than the agent (we're static-checking
-// tasks.md) so we use the same closed set — adding a binary here means
-// opening it up at both the orchestration and validation layers.
-var allowedGateBinaries = map[string]struct{}{
-	"node": {}, "npm": {}, "pnpm": {}, "yarn": {}, "bun": {}, "deno": {},
-	"go": {}, "make": {},
-	"pytest": {}, "python": {}, "python3": {}, "pip": {},
-	"cargo": {}, "rustc": {},
-	"jest": {}, "vitest": {},
-	"tsc": {}, "eslint": {},
-	"shellcheck": {},
-	// Read-only / no-side-effect commands (mirror of harness allowlist).
-	"echo": {}, "printf": {}, "true": {}, "false": {},
-	"pwd": {}, "cat": {}, "head": {}, "tail": {}, "wc": {},
-}
+// allowedGateBinaries is re-exported from internal/policy so existing
+// package-local references in validate.go and tests keep working
+// without a sweeping rename. The canonical definition lives in
+// internal/policy.
+var allowedGateBinaries = policy.GateBinaries
 
 // ValidateFeature runs full UAT validation on a feature directory. Pure: does
 // NOT execute gates. Call RunGates separately to also exercise the task gates.
@@ -199,126 +188,24 @@ func extractGates(content string) []string {
 	return out
 }
 
-// validateGateCommand mirrors harness.validateGateCommand; duplicated here
-// so quality.RunGates can be called independently of the orchestrator (e.g.
-// by `radiant validate --gates` in CI). Each binary in a compound
-// expression is validated; pipes/redirects/separators are rejected.
+// validateGateCommand is a thin delegation to internal/policy.
 func validateGateCommand(gate string) error {
-	gate = strings.TrimSpace(gate)
-	if gate == "" {
-		return nil
-	}
-	for _, op := range []string{"|", "<", ">", ";", "&"} {
-		idx := strings.Index(gate, op)
-		if idx < 0 {
-			continue
-		}
-		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
-			continue
-		}
-		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
-			continue
-		}
-		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
-	}
-	expressions := splitOnLogicalOps(gate)
-	for _, expr := range expressions {
-		expr = strings.TrimSpace(expr)
-		if expr == "" {
-			continue
-		}
-		parts := splitShellTokens(expr)
-		if len(parts) == 0 {
-			continue
-		}
-		var binary string
-		for _, part := range parts {
-			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
-				continue
-			}
-			binary = part
-			break
-		}
-		if binary == "" {
-			continue
-		}
-		base := binary
-		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
-			base = base[idx+1:]
-		}
-		if _, ok := allowedGateBinaries[base]; !ok {
-			return fmt.Errorf("binary %q is not in the gate allowlist", base)
-		}
-	}
-	return nil
+	return policy.ValidateGateCommand(gate)
 }
 
-// splitOnLogicalOps splits on `&&` and `||` only, respecting quotes.
+// splitOnLogicalOps is a thin delegation to internal/policy.
 func splitOnLogicalOps(s string) []string {
-	var parts []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-			current.WriteRune(r)
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-			current.WriteRune(r)
-		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++
-		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++
-		default:
-			current.WriteRune(r)
-		}
-	}
-	parts = append(parts, current.String())
-	return parts
+	return policy.SplitOnLogicalOps(s)
 }
 
+// splitShellTokens is a thin delegation to internal/policy.
 func splitShellTokens(cmd string) []string {
-	var tokens []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	flush := func() {
-		if current.Len() > 0 {
-			tokens = append(tokens, current.String())
-			current.Reset()
-		}
-	}
-	for _, r := range cmd {
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
-			flush()
-		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
-			flush()
-			tokens = append(tokens, string(r))
-		default:
-			current.WriteRune(r)
-		}
-	}
-	flush()
-	return tokens
+	return policy.SplitShellTokens(cmd)
 }
 
+// isShellOp is a thin delegation to internal/policy.
 func isShellOp(s string) bool {
-	switch s {
-	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
-		return true
-	}
-	return false
+	return policy.IsShellOp(s)
 }
 
 // ACDetail holds parsed AC information.

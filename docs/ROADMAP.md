@@ -24,7 +24,12 @@
 - [x] **Gate command output cap** via `--max-gate-output <bytes>` (default 10 MiB). Closes the OOM vector flagged in the Sprint 6 audit — all 3 gate runners (`engine/`, `harness/`, `quality/`, both POSIX and Windows) switched from `CombinedOutput()` to `StdoutPipe + StderrPipe + io.LimitReader`. Gates writing more than the cap are truncated and killed via broken-pipe.
 - [x] 176 tests passing, zero races, 6/6 cross-compile clean
 
-## Sprint 9 — up next
+## Sprint 9 — done (2026-06-24)
+
+- [x] **Gate command allowlist deduplication** — extracted `internal/policy/` as the single source of truth for `AgentCommands`, `GateBinaries`, `ValidateGateCommand`, `SplitOnLogicalOps`, `SplitShellTokens`, `IsShellOp`. The three consumer packages (`internal/engine/`, `internal/harness/`, `internal/quality/`) now use thin delegations — drift risk eliminated.
+- [x] 188 tests passing, zero races, 6/6 cross-compile clean
+
+## Sprint 10 — up next
 
 ## Princípios
 

