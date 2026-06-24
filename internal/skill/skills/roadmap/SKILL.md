@@ -1,67 +1,103 @@
----
-name: roadmap
-description: Build or review a Now/Next/Later roadmap with quick wins.
----
+# Skill: roadmap
 
-# Skill: Roadmap (Now / Next / Later)
+> Sequence features by value × effort, dependency graph,
+> quarterly milestones.
 
-Builds or reviews the project roadmap using Now/Next/Later horizons.
-Principle: **low-risk quick wins first** for traction and team confidence.
+## Decision tree
 
-## Phase 1 — Load context (Research)
+```
+Roadmap requested (initial | revise)
+        │
+        ▼
+Gather candidate features (specs/_templates/ + recent
+nova-feature invocations)
+        │
+        ▼
+For each feature: estimate value (H/M/L) and effort (S/M/L)
+        │
+        ▼
+Map dependencies (A blocks B?)
+        │
+        ▼
+Sequence: high value + low effort first; dependencies first
+        │
+        ▼
+Group by quarter (Q1, Q2, Q3, Q4)
+        │
+        ▼
+Write docs/product/roadmap.md
+```
 
-1. `read_file` `docs/product/roadmap.md` (if exists — this is a review run).
-2. `read_file` `docs/product/vision.md` — what we're building toward.
-3. `read_file` `docs/architecture/assessment.md` (brownfield) — known debts and gaps.
-4. Check `specs/` for in-progress features: `search_files` pattern `specs/*/spec.md`.
-5. If MCP connected (Jira/Linear), fetch current sprint items and backlog for cross-reference.
+## Workflow
 
-> Delegate Jira/Linear fetches to a subagent. Only bring the summary into this context.
+### Step 1: gather candidates
 
-## Phase 2 — Identify candidates (Plan)
+Read `specs/_templates/` for the next-up features. Also check
+`.radiant-harness/state.md` for the in-flight feature.
 
-List all items that could appear on the roadmap:
+### Step 2: estimate value
 
-1. **From vision/MVP:** features needed to reach MVP (greenfield).
-2. **From assessment:** debts/gaps that block SDD adoption (brownfield).
-3. **From specs in progress:** features currently being implemented.
-4. **From backlog:** items the user or Jira/Linear reports as queued.
+For each candidate, ask: "If we shipped ONLY this, would the
+customer notice?" High = yes, M = maybe, L = no.
 
-For each candidate, note:
-- **Value** — what the team/user gains (business value or risk reduction).
-- **Effort** — S/M/L rough estimate.
-- **Dependencies** — what must be done first.
-- **Risk** — low/med/high.
+### Step 3: estimate effort
 
-## Phase 3 — Prioritize into horizons (Plan)
+T-shirt size: S (≤1 sprint), M (1-2 sprints), L (3+ sprints).
+Default to the larger estimate; optimism kills roadmaps.
 
-Sort candidates into three horizons:
+### Step 4: map dependencies
 
-- **Now (current cycle):** items with highest value-to-effort ratio and low risk. Quick wins. Include any in-progress spec.
-- **Next (next cycle):** items that depend on "Now" items or have medium effort.
-- **Later (future):** large efforts, research items, nice-to-haves.
+For each pair of candidates, ask: "Does A block B?" Build the
+dependency graph.
 
-Rules for placement:
-- Brownfield: **SDD adoption goes in Now** — it's the foundation for everything else. Specifically: fill `TESTING.md`, set up CI gates (`/setup-ci`), generate `context-map.md`.
-- No item in "Now" without a defined "Done when" criteria.
-- Maximum 5 items in "Now" — force prioritization.
+### Step 5: sequence
 
-## Phase 4 — Generate roadmap.md (Implement)
+Sort by:
+1. No blockers go first
+2. Among unblocked, high value + low effort first
 
-1. Fill `docs/product/roadmap.md` from `docs/product/_templates/roadmap.template.md`.
-2. Each row: `| Item | Value | Effort | Owner | Dependencies | Done when |`
-3. Write the roadmap objective (1-2 sentences: what we aim to achieve this period and how we measure).
+### Step 6: write the roadmap
 
-## Phase 5 — Review with user
+```markdown
+# Roadmap
 
-1. Present the roadmap table.
-2. Ask: "Any item in the wrong horizon? Any missing candidate?"
-3. Adjust based on feedback.
-4. Update `docs/STATE.md`: roadmap reviewed, date.
+## Q1 (next)
+- [ ] 0001-jwt-auth (value: H, effort: S)
+- [ ] 0002-search (value: H, effort: M, depends on 0001)
 
-## Rules
+## Q2
+- [ ] 0003-billing (value: H, effort: L, depends on 0001, 0002)
 
-- **Idempotent:** re-running preserves existing items, updates status based on current `specs/` and progress.
-- **Quick wins first.** Don't let a large refactoring block small wins that build momentum.
-- Confirm with the user before committing the roadmap — it's a shared team artifact.
-- Keep effort estimates rough (S/M/L). Detailed estimation happens in `/nova-feature` per item.
+## Q3
+- [ ] 0004-refund-flow (value: M, effort: M)
+
+## Q4
+- [ ] 0005-multi-tenant (value: M, effort: L)
+
+## Risk register
+- 0005 multi-tenant: schema migrations across many tables — estimate may slip
+```
+
+## Examples
+
+See `examples/` directory in the bundled skill for worked examples
+covering common audit/eval/PR/roadmap scenarios.
+
+## Anti-patterns
+
+- ❌ Listing without ordering.
+- ❌ Optimistic estimates.
+- ❌ Ignoring dependencies.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `sequenced` | Just a list | Sort by value × effort. |
+| `estimated` | No estimates | Ask the team; use t-shirt sizes. |
+| `dependencies-mapped` | Implicit | Make explicit. |
+
+## Related skills
+
+- `kickoff` — produces initial roadmap
+- `nova-feature` — produces features for the roadmap

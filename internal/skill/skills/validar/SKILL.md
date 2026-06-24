@@ -1,87 +1,168 @@
----
-name: validar
-description: Validate implementation: gates, AC-to-test mapping, and DoD.
----
+# Skill: validar
 
-# Skill: Validate Feature (UAT)
+> Definition of Done check. Verifies that what was built matches
+> what was specified, with evidence.
 
-Closes the SDD loop: proves the implementation fulfills the **spec** via **executable gates**.
-Run after implementation, before merge.
-
-## Phase 1 — Load feature context (Research)
-
-1. Identify the feature: `search_files` pattern `specs/*/` to find active specs.
-2. `read_file` `specs/NNNN-<name>/spec.md` — the acceptance criteria (the contract).
-3. `read_file` `specs/NNNN-<name>/tasks.md` — task list and gate commands.
-4. `read_file` `docs/engineering/TESTING.md` — the gate command reference.
-5. Check `specs/NNNN-<name>/progress.md` (if exists) — what's been done so far.
-
-> Context budget: load only this feature's docs + TESTING.md. No need for the full research history.
-
-## Phase 2 — Run gates (Implement)
-
-1. Execute each gate command from `tasks.md` using `terminal`:
+## Decision tree
 
 ```
-terminal: <unit test command from TESTING.md>
-terminal: <integration test command>
-terminal: <lint command>
-terminal: <static analysis command>
-terminal: <coverage command>
+spec.md + tasks.md + implemented code in hand
+        │
+        ▼
+Parse spec.md → list of ACs
+        │
+        ▼
+For each AC, find the task that covers it (tasks.md)
+        │
+        ▼
+For each covered task, run its gate command
+        │
+        ├── Gate fails ──► Document in validation.md, do NOT pass
+        │
+        └── Gate passes ──► Continue
+        │
+        ▼
+Check: does the implementation match the spec?
+        │
+        ├── Match ──► AC green ✓
+        │
+        └── Drift ──► SPEC_DEVIATION entry required
+                       │
+                       ▼
+                 Document drift in spec.md under "Deviations"
+                 (with rationale) → user approves
+        │
+        ▼
+Write validation.md with all results
 ```
 
-2. Record pass/fail for each gate. If a gate fails, do NOT proceed to Phase 3 — fix first.
-3. Capture the coverage report output — this is evidence, not visual inspection.
+## Workflow
 
-## Phase 3 — Map AC → test (Plan + Implement)
+### Step 1: parse spec.md and tasks.md
 
-1. For each `AC-N` in `spec.md`, find the corresponding test:
+Extract:
+- ACs from spec.md (each AC's name + the AC text)
+- Tasks from tasks.md (each task's #, name, coverage list, gate)
 
-| AC | Test identifier | Gate command | Status |
-|----|----------------|-------------|--------|
-| AC-1 | `test_AC_1_*` or `AC-1: ...` | `<command>` | PASS / FAIL |
-| AC-2 | `test_AC_2_*` | `<command>` | PASS / FAIL |
+Build a map: `AC → task # → gate command`.
 
-2. Methods to find tests:
-   - `search_files` pattern `AC.?1|AC_1|test_AC_1` in test directories.
-   - Check naming convention from TESTING.md (`test_AC_N_*` or `AC-N: ...`).
-3. **Flag any AC without a test** — this is a coverage gap. The feature cannot pass validation.
-4. If spec has a decision matrix, verify every row has a test.
+### Step 2: run every gate
 
-## Phase 4 — Resolve SPEC_DEVIATION
+For each task, run its gate command. Capture stdout, stderr, exit
+code. Each gate that exits 0 is green; non-zero is red.
 
-1. `search_files` pattern `SPEC_DEVIATION` in `src/` and `specs/` — find all open deviations.
-2. For each deviation, present: what the spec says, what the code does, why it diverged.
-3. Resolve per CLAUDE.md rules:
-   - **Fix the code** (spec wins) → make the change, re-run gate.
-   - **Update the spec** (conscious decision) → edit `spec.md`, create ADR if hard-to-reverse.
-   - Decision has ramifications? → run `/clarificar` to resolve before proceeding.
-4. **No open SPEC_DEVIATION may remain** at end of validation.
+If a gate can't even run (command not found, permission denied),
+treat as red with a note in validation.md.
 
-## Phase 5 — Check Definition of Done
+### Step 3: AC-to-test mapping check
 
-Walk the DoD checklist from `CLAUDE.md`:
+For each AC, verify at least one task in its coverage column has a
+green gate. If not, that AC has no proof — flag it.
 
-- [ ] All ACs pass — verified by executable gate, not inspection.
-- [ ] Every AC has a test.
-- [ ] Gate commands actually ran (output captured).
-- [ ] Coverage ≥ project minimum, report attached.
-- [ ] Static analysis clean — no blocking findings.
-- [ ] No open SPEC_DEVIATION.
-- [ ] Hard-to-reverse decisions → ADRs registered.
-- [ ] Glossary and context-map updated if changed.
-- [ ] Spec reflects what was built (or deviation documented).
-- [ ] `docs/STATE.md` updated.
+### Step 4: spec-deviation scan
 
-## Phase 6 — Report and handoff
+For each AC, compare the AC text against the implementation:
+- Files referenced in the AC exist?
+- Behavior described matches actual behavior?
 
-1. Present validation summary: gates green/red, AC coverage table, deviations resolved, DoD status.
-2. If all green → update `docs/STATE.md`: "Feature NNNN validated, ready for PR."
-3. If any red → list blockers with specific fix needed. Do not mark as validated.
+If you find drift, write a `SPEC_DEVIATION` entry to spec.md:
 
-## Rules
+```markdown
+## Deviations
 
-- **Gates are executable, not decorative.** `node --test` must actually run and pass.
-- **Each AC maps to exactly one test.** No AC without coverage — non-negotiable.
-- **No open deviations.** Resolve or escalate before declaring validation complete.
-- Evidence (test output, coverage report) must be captured, not described from memory.
+### DEV-001: AC3 says "p95 < 200ms" but tests cover only 10 users
+- **Status**: documented, awaiting user decision
+- **Rationale**: load test infrastructure not yet built
+- **Next step**: add load test, or revise AC3 to match current
+  test coverage
+```
+
+### Step 5: write validation.md
+
+```markdown
+# Validation: <NNNN> — <short title>
+
+## Summary
+
+| Category | Pass | Fail | Skip |
+|----------|------|------|------|
+| ACs      | 5    | 1    | 0    |
+| Gates    | 6    | 1    | 0    |
+
+## ACs
+
+| AC | Title | Status | Test |
+|----|-------|--------|------|
+| AC1 | login returns JWT | ✓ green | tasks/2 |
+| AC2 | invalid login 401  | ✓ green | tasks/2 |
+| AC3 | expired JWT 401    | ✗ red   | tasks/3 (gate failed: assertion at line 47) |
+| AC4 | tampered JWT 401   | ✓ green | tasks/3 |
+
+## Gate results
+
+| Task | Gate | Exit | Time | Status |
+|------|------|------|------|--------|
+| 1 | go build | 0 | 1.2s | ✓ |
+| 2 | go test ./auth | 0 | 4.1s | ✓ |
+| 3 | go test ./auth | 1 | 3.8s | ✗ (see AC3) |
+
+## SPEC_DEVIATION
+
+- DEV-001 (if any)
+
+## Recommendation
+
+- [ ] Ready to merge / Ready for PR review
+- [ ] Fix AC3 before merge
+- [ ] Re-scope (feature is incomplete)
+```
+
+## Examples
+
+### Example 1: feature passes validation
+
+**Input**: spec with 5 ACs, tasks with 5 green gates.
+
+**Output**: validation.md shows all 5 ACs green, 5 gates green,
+zero deviations. Recommendation: "Ready to merge."
+
+### Example 2: feature has 1 failing AC
+
+**Input**: 5 ACs, 4 gates green, 1 gate fails on AC3.
+
+**Output**: validation.md shows AC3 red with the gate output.
+Recommendation: "Fix AC3 before merge."
+
+### Example 3: feature with documented SPEC_DEVIATION
+
+**Input**: 5 ACs, 5 gates green, but the implementation skipped
+one edge case described in AC4.
+
+**Output**: validation.md flags the deviation, AC4 marked as
+"documented deviation". User must decide: ship as documented, or
+extend the implementation.
+
+## Anti-patterns
+
+- ❌ Marking "looks right" as green. Run the actual test.
+- ❌ Skipping SPEC_DEVIATION documentation. Drift without record is
+  silent scope creep that compounds.
+- ❌ Passing with vague summary ("all looks good"). Include actual
+  test output.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `ac-testable` | AC is not Given/When/Then | Call clarificar skill; do NOT pass validation. |
+| `ac-tested` | No task covers an AC | Add a task + gate; do NOT mark green. |
+| `gates-pass` | Gate exits non-zero | Surface which task + which assertion failed. Do NOT pass. |
+| `spec-deviation` | Code drifted, no doc | Reject validation. Force the deviation to be documented. |
+
+## Related skills
+
+| Skill | When to chain |
+|-------|---------------|
+| `nova-feature` | When validating a spec that doesn't exist yet — this skill needs a real spec. |
+| `revisar-pr` | Called after this skill — PR review checks the spec/code alignment in a different way. |
+| `metricas` | Pulled metrics from validation reports over time. |

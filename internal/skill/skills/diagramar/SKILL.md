@@ -1,83 +1,89 @@
----
-name: diagramar
-description: Draw C4 and context-map architecture diagrams in Mermaid.
----
+# Skill: diagramar
 
-# Skill: Diagram (Mermaid Architecture)
+> C4 architecture diagrams (Context / Container / Component) as
+> Mermaid. Pick the right level for the question.
 
-Generates high-level architecture diagrams using the C4 model in Mermaid syntax.
-Reads existing docs to ensure diagrams reflect the current understanding.
+## Decision tree
 
-## Phase 1 — Load context (Research)
-
-1. `read_file` these docs (pull only what exists):
-   - `docs/product/vision.md` — what the system does, who uses it.
-   - `docs/architecture/context-map.md` — bounded contexts and relations.
-   - `docs/architecture/overview.md` — any existing architecture description.
-   - `docs/architecture/assessment.md` — detected stack and architecture (brownfield).
-   - `docs/architecture/diagrams.md` — existing diagrams (re-run updates these).
-2. If greenfield with no docs yet, interview briefly: "What are the main external actors/systems and the core containers?"
-
-> Context budget: this phase should be under 15k tokens. If diagrams.md is large, read only the sections relevant to the requested diagram level.
-
-## Phase 2 — Generate C4 L1: System Context (Plan + Implement)
-
-1. Draw actors (people, external systems) interacting with the central system.
-2. Keep it to one system in the center — this is the highest zoom level.
-
-```mermaid
-C4Context
-    title System Context — <project name>
-    Person(user, "User", "A user of the system")
-    System(sys, "<System>", "What it does")
-    System_Ext(ext, "External API", "Third-party service")
-    Rel(user, sys, "uses")
-    Rel(sys, ext, "calls")
+```
+User wants to understand the architecture
+        │
+        ▼
+What question are they answering?
+        │
+        ├── "What's in/out of this system?" ──► Context
+        │
+        ├── "How is it deployed?" ──► Container
+        │
+        ├── "How does billing work internally?" ──► Component
+        │
+        └── "What does THIS function do?" ──► Code (rarely; defer to inline comments)
 ```
 
-3. Validate: every actor from `vision.md` appears. No implementation detail at this level.
+## Workflow
 
-## Phase 3 — Generate C4 L2: Containers (Plan + Implement)
+### Step 1: pick the level
 
-1. Break the central system into containers: web app, API, database, message queue, etc.
-2. Show inter-container relationships and external system calls.
+Match the level to the question. Don't start at Code — too much
+detail to see the system. Don't start at Context if the user wants
+to refactor billing.
 
-```mermaid
-C4Context
-    title Container View — <project name>
-    System_Boundary(sys, "<System>") {
-        Container(web, "Web App", "tech", "UI")
-        Container(api, "API", "tech", "Business logic")
-        ContainerDb(db, "Database", "tech", "Persistence")
-    }
-    Rel(web, api, "HTTPS")
-    Rel(api, db, "reads/writes")
-```
+### Step 2: gather inputs
 
-3. Keep high-level: containers, not classes. One diagram per system boundary.
+- For Context: read `docs/product/vision.md` + assessment.md's
+  external dependencies
+- For Container: read Dockerfile, k8s manifests, deployment scripts
+- For Component: read `docs/architecture/context-map.md` + the
+  module's top-level package structure
 
-## Phase 4 — Generate Bounded Context Map (Plan + Implement)
+### Step 3: write the diagram
 
-1. Read `context-map.md` for the list of contexts and their relations (DDD patterns).
-2. Render as a graph showing upstream/downstream relationships and integration patterns.
+Use Mermaid syntax. Validate by rendering mentally before
+committing:
 
 ```mermaid
-graph LR
-    A[Context A] -->|Customer/Supplier| B[Context B]
-    B -->|ACL| C[Context C]
+graph TB
+    User --> WebApp
+    WebApp --> AuthAPI
+    WebApp --> BillingAPI
+    BillingAPI --> Postgres
 ```
 
-3. If `context-map.md` doesn't exist, generate it from the diagram and save both.
+### Step 4: add narrative
 
-## Phase 5 — Save and validate
+After each diagram, write 2-3 sentences explaining what to look
+at and what the diagram does NOT show.
 
-1. Write all diagrams to `docs/architecture/diagrams.md`.
-2. Run `node scripts/validate-mermaid.mjs .` if available — fix any syntax errors.
-3. Update `docs/STATE.md` with: diagrams updated, date.
+## Examples
 
-## Rules
+### Example 1: Context diagram
 
-- **Keep it high-level.** C4 L1 and L2 only. No class diagrams, no sequence diagrams here.
-- **Reflect reality.** If code differs from docs, note the discrepancy in STATE.md for review.
-- **Idempotent:** re-running updates existing diagrams, doesn't duplicate them.
-- Mermaid only — no external diagram tools. Version-controlled, diff-friendly.
+**Question**: "What systems does billing-api talk to?"
+
+**Output**: diagram showing `billing-api`, `stripe`, `postgres`,
+`email-service`, with arrows for each integration.
+
+### Example 2: Container diagram
+
+**Question**: "How is this deployed?"
+
+**Output**: diagram showing the API server, worker, postgres,
+redis, with technology choices and protocols.
+
+## Anti-patterns
+
+- ❌ Starting at Code level. Too much detail to see the system.
+- ❌ Diagram without narrative. Just decoration.
+- ❌ Mixing levels in one diagram. Confusing.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `level-chosen` | User can't articulate the question | Default to Context. Refine. |
+| `diagram-renders` | Mermaid syntax broken | Re-write, render in mermaid.live. |
+
+## Related skills
+
+- `mapear` — provides input data
+- `adr` — diagrams sometimes accompany ADRs

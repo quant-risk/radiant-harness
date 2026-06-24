@@ -1,0 +1,83 @@
+name: handoff
+version: 1.0.0
+description: |
+  Pauses or resumes a session via .radiant-harness/state.md.
+  Writes the current position (feature, tier, next step, blockers,
+  open questions) so any agent or human can pick up where the
+  previous one left off.
+when_to_use: |
+  End of a session (before closing the agent window). Start
+  of a session (to read where the previous one left off). Also
+  when switching agents or machines.
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+
+inputs:
+  - name: mode
+    type: enum
+    required: true
+    description: |
+      "pause" | "resume". Pause writes state.md with current
+      position; resume reads it and returns a summary.
+  - name: note
+    type: string
+    required: false
+    description: |
+      For pause mode: optional one-line note ("blocked on code
+      review", "waiting for user input"). Goes into state.md.
+
+outputs:
+  - path: .radiant-harness/state.md
+    type: artifact
+    description: |
+      Updated state file. Schema:
+      - current_feature (NNNN-slug or null)
+      - tier (trivial|feature|architecture|null)
+      - next_step (radiant <subcmd> | "manual edit" | "wait")
+      - next_command (the literal command to run)
+      - blockers ([string])
+      - open_questions ([{question, owner, due}])
+      - last_session (date + summary line)
+      - last_updated (timestamp)
+
+gates:
+  - name: state-parsed
+    description: |
+      state.md parses as valid Markdown with the expected
+      sections. If format is broken, surface the issue and
+      offer to repair.
+  - name: next-action-explicit
+    description: |
+      state.md's `next_command` field is non-empty when a
+      feature is in flight. If empty, the user can't resume
+      without a manual decision.
+
+context_provides:
+  - .radiant-harness/state.md
+
+commands_available:
+  - radiant handoff          # pause + show resume info
+  - radiant state            # just show current state (read-only)
+
+related_skills:
+  - nova-feature
+  - validar
+  - metricas
+
+anti_patterns:
+  - |
+    Closing the agent window without calling handoff. The
+    next session has to guess what you were doing. Always
+    pause before closing.
+  - |
+    Writing a vague "next step" like "continue work". The
+    next_command must be a literal `radiant run ...` or
+    `radiant spec ...` that can be copy-pasted.
+  - |
+    Forgetting to record blockers. If you're stuck waiting on
+    someone, say so. Don't pretend the work is unblocked.
+
+author: radiant-harness contributors
+license: MIT

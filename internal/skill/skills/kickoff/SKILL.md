@@ -1,62 +1,107 @@
----
-name: kickoff
-description: Constitute a project: interview, map, and generate roadmap.
----
+# Skill: kickoff
 
-# Skill: Project Kickoff (Lean Inception + SDD)
+> Project constitution. Greenfield discovery or brownfield
+> mapping. Routes to the right artifacts per the tier system.
 
-Constitutes a project: interviews, maps, proposes, and generates a roadmap.
-Follows RPI: Research (detect mode, gather context) → Plan (interview, decide axes) → Implement (generate docs).
+## Decision tree
 
-## Phase 1 — Detect mode (Research)
+```
+User says "start a new project" or "set up radiant"
+        │
+        ▼
+Does the directory have an existing codebase?
+        │
+        ├── no ──► GREENFIELD path
+        │          - Interview: vision, personas, MVP
+        │          - Generate: docs/product/vision.md, mvp-canvas.md
+        │          - Draft: glossary.md (≥5 terms)
+        │
+        └── yes ──► BROWNFIELD path
+                    - Map: existing code → context-map.md
+                    - Capture: existing decisions as retro-ADRs
+                    - Gap: what's missing vs the radiant layout
+                    - Propose: roadmap to close the gap
 
-1. Inspect the directory: `read_file` manifests (`package.json`, `go.mod`, `Cargo.toml`), `src/` with real code, git history, existing `docs/`.
-2. If `src/` is empty or absent and git history is < 10 commits → **Greenfield**.
-   If real code + history exists → **Brownfield**. Mixed → **Hybrid**.
-3. Confirm detected mode with the user before proceeding.
+        ▼
+Connect MCPs (call integracoes if not done)
+        ▼
+Run first feature with nova-feature
+```
 
-> Keep this phase lean. Delegate broad codebase exploration to a subagent if the repo is large.
+## Workflow
 
-## Phase 2A — Greenfield path (Plan: Lean Inception)
+### Greenfield path
 
-Interview one question at a time (see `/clarificar` principles). Fill in order:
+1. Interview (one question at a time, like clarificar):
+   - "What problem does this solve, and for whom?"
+   - "Who are the 2-3 personas who'll use this most?"
+   - "What's the smallest version that's still useful?"
+2. Write `docs/product/vision.md` — one page: problem, personas,
+   success metric.
+3. Write `docs/product/mvp-canvas.md` — MVP scope with persona
+   mapping.
+4. Draft `docs/glossary.md` — 5+ terms from the interview.
+5. Move to `nova-feature` for the first feature.
 
-1. **Vision** → generate `docs/product/vision.md` (product vision canvas).
-2. **Personas** → identify primary/secondary, their goals and pains.
-3. **Journey mapping** → key user journeys from trigger to outcome.
-4. **MVP canvas** → generate `docs/product/mvp-canvas.md`: what's in, what's out, success metrics.
+### Brownfield path
 
-## Phase 2B — Brownfield path (Plan: as-is map)
+1. Run `radiant mapear` against the existing code.
+2. Review the generated `docs/architecture/context-map.md`.
+3. For each major architectural decision visible in the code
+   (database choice, framework, auth pattern), create a retro-ADR
+   in `docs/architecture/adr/`.
+4. Compare the radiant layout vs what's present; identify gaps.
+5. Generate a `docs/product/roadmap.md` to close the gaps over N
+   sprints.
+6. Move to `nova-feature` for the next feature.
 
-1. Run `/mapear` to auto-detect stack, architecture, bounded contexts.
-2. Review the generated `assessment.md` with the user — confirm gaps and risks.
-3. Capture undocumented historical decisions as retroactive ADRs (`docs/architecture/adr/`).
+## Examples
 
-## Phase 3 — Technical kickoff (5 axes) — both paths
+### Example 1: greenfield
 
-Interview each axis, propose a recommended answer, confirm with user:
+**Input**: `mode="greenfield"`, `project-name="billing-api"`
 
-| Axis | Questions | Output doc |
-|------|-----------|------------|
-| **Tech stack** | Language, framework, persistence, messaging | `vision.md` / `assessment.md` |
-| **Architecture** | Monolith? Modules? Services? Bounded contexts? | `context-map.md` via `/diagramar` |
-| **Infra** | Cloud provider, container strategy, environments | `design.md` or infra section |
-| **Quality** | Test framework, coverage minimum, static analysis | `docs/engineering/TESTING.md` |
-| **Observability** | Logs, metrics, tracing, alerting, SLOs | observability section in design |
+**Outputs**:
+- `docs/product/vision.md` — "billing-api lets SMBs accept payments
+  without writing PCI-compliant code"
+- `docs/product/mvp-canvas.md` — 3 personas, MVP features mapped
+- `docs/glossary.md` — "merchant, charge, refund, payout, dispute"
 
-## Phase 4 — Generate artifacts (Implement)
+### Example 2: brownfield
 
-1. Fill `docs/engineering/TESTING.md` — gate commands per test level.
-2. Run `/integracoes` — discover team tools, propose MCP connections.
-3. Run `/camada-agentica` — propose rules, subagents, skills, workflows.
-4. Run `/roadmap` — generate `docs/product/roadmap.md` with Now/Next/Later.
-5. Initialize `docs/STATE.md` with kickoff date, current phase: `plan`.
-6. Commit all generated docs with message `chore: kickoff — project constitution`.
+**Input**: `mode="brownfield"`, `project-name="legacy-monolith"`
 
-## Rules
+**Outputs**:
+- `docs/architecture/context-map.md` — existing code mapped to
+  4 bounded contexts
+- `docs/architecture/adr/0001-keep-postgres.md` — retro-ADR for
+  the existing DB choice
+- `docs/product/roadmap.md` — 5-sprint plan to introduce tests,
+  then modularize
 
-- **One question at a time.** Never dump a multi-axis form. Interview sequentially.
-- **Always propose a recommended answer** based on detected stack and docs — don't ask open-ended.
-- **Idempotent:** re-running `/kickoff` updates existing docs, doesn't overwrite decisions.
-- Delegate file-heavy exploration to subagents to keep the context window under 40%.
-- Confirm with the user before any outward-facing action (creating issues, publishing).
+## Anti-patterns
+
+- ❌ Skipping Lean Inception. "We already know what to build" is
+  rarely true; vision interviews surface hidden constraints.
+- ❌ Forcing greenfield on a brownfield. The code IS the source of
+  truth; interview-driven discovery ignores it.
+- ❌ Writing vision without personas. Vision is empty without
+  who-it-serves.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `mode-confirmed` | User keeps flip-flopping | Default: greenfield if directory is empty, brownfield otherwise. Ask user to confirm. |
+| `stakeholders-named` | User can't name personas | Walk through recent customer interactions; personas emerge from real users, not theory. |
+| `contexts-bounded` | Brownfield has no clear boundaries | This is a real finding; the kickoff just discovered the project's biggest risk. Don't fake it. |
+| `language-ubiquitous` | Glossary has <5 terms | The project is too small to warrant radiant, OR the team hasn't agreed on language yet. Either is a valid finding. |
+
+## Related skills
+
+| Skill | When to chain |
+|-------|---------------|
+| `nova-feature` | After kickoff finishes — start the first feature. |
+| `integracoes` | Connect MCPs before kickoff interviews if available. |
+| `mapear` | Used by brownfield kickoff for codebase analysis. |
+| `diagramar` | Used to produce context-map.md visuals. |

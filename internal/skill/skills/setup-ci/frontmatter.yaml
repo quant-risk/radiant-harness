@@ -1,0 +1,50 @@
+name: setup-ci
+version: 1.0.0
+description: |
+  Generates the CI workflow file (.github/workflows/esteira.yml
+  by default, configurable to GitLab CI / CircleCI / etc.) that
+  enforces radiant gates on every PR: validate, audit, tests.
+when_to_use: |
+  After kickoff. When adopting radiant on a new repo. When
+  migrating CI from "tests only" to "tests + radiant gates".
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: provider
+    type: enum
+    required: false
+    description: |
+      "github" | "gitlab" | "circleci". Defaults to "github".
+
+outputs:
+  - path: .github/workflows/esteira.yml
+    type: artifact
+    description: GitHub Actions workflow.
+  - path: .gitlab-ci.yml
+    type: artifact
+    description: GitLab CI config (when provider=gitlab).
+
+gates:
+  - name: gates-present
+    description: 'Workflow includes validate, audit, tests, build.'
+  - name: secrets-referenced
+    description: API keys referenced via GitHub/GitLab secrets, not hardcoded.
+
+context_provides:
+  - docs/engineering/
+
+commands_available:
+  - radiant setup-ci
+
+related_skills:
+  - auditar
+  - validar
+
+anti_patterns:
+  - Hardcoding secrets. Always use the CI provider's secret store.
+  - Skipping radiant gates because "tests cover it". Tests cover code; radiant covers spec/code alignment.
+  - Running CI on every push to main without PR gates. Pushes can bypass review.
+
+author: radiant-harness contributors
+license: MIT

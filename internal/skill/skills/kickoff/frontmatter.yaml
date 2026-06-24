@@ -1,0 +1,96 @@
+name: kickoff
+version: 1.0.0
+description: |
+  Conducts the project constitution: greenfield discovery
+  (vision/personas/MVP/roadmap) or brownfield mapping (as-is →
+  gap → ADRs). Routes to the right artifacts per tier.
+when_to_use: |
+  Starting a new project from scratch, or resuming a project
+  that doesn't have the radiant-harness layout yet.
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: mode
+    type: enum
+    required: true
+    description: |
+      "greenfield" | "brownfield". Greenfield = new project,
+      interview-driven. Brownfield = existing project, code-first.
+  - name: project-name
+    type: string
+    required: true
+    description: |
+      kebab-case project name (e.g. "billing-api").
+
+outputs:
+  - path: docs/product/vision.md
+    type: artifact
+    description: |
+      Product vision (Lean Inception). One page.
+  - path: docs/product/mvp-canvas.md
+    type: artifact
+    description: |
+      MVP scope, persona-aligned.
+  - path: docs/architecture/context-map.md
+    type: artifact
+    description: |
+      Bounded contexts + their relationships (DDD strategic).
+  - path: docs/glossary.md
+    type: artifact
+    description: |
+      Ubiquitous language. Terms agreed between business and dev.
+  - path: docs/architecture/adr/
+    type: artifact
+    description: |
+      Architecture Decision Records (Nygard format).
+
+gates:
+  - name: mode-confirmed
+    description: |
+      User confirmed greenfield vs brownfield. Each branch
+      produces different artifacts.
+  - name: stakeholders-named
+    description: |
+      For greenfield: at least one persona + their top need
+      captured in vision.md.
+  - name: contexts-bounded
+    description: |
+      For brownfield: codebase has been mapped to ≥1 bounded
+      context. If unclear, the kickoff hasn't done its job.
+  - name: language-ubiquitous
+    description: |
+      glossary.md exists with at least 5 terms agreed between
+      business and dev.
+
+context_provides:
+  - state.md
+
+commands_available:
+  - radiant product vision
+  - radiant product mvp
+  - radiant diagramar
+  - radiant mapear
+  - radiant adr
+
+related_skills:
+  - nova-feature
+  - clarificar
+  - integracoes
+  - diagramar
+
+anti_patterns:
+  - |
+    Skipping Lean Inception in greenfield and going straight
+    to spec. Without a vision and MVP canvas, every feature
+    is a guess.
+  - |
+    Forcing greenfield onto a brownfield project. The
+    interview-driven path assumes there's no code yet; if
+    code exists, map it first.
+  - |
+    Writing the vision without the personas. Personas are
+    how you measure whether a feature serves someone.
+
+author: radiant-harness contributors
+license: MIT

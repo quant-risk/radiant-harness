@@ -1,0 +1,64 @@
+name: camada-agentica
+version: 1.0.0
+description: |
+  Generates the agentic layer configuration for the project:
+  AGENTS.md (universal) + native views for the agents the team
+  actually uses (Claude Code, Cursor, Codex, Copilot, Gemini,
+  Windsurf). Tuned to the project's stack, glossary, and tier.
+when_to_use: |
+  After kickoff (so the project has a stack + glossary). When
+  adding a new agent the team wants to use. When the project's
+  stack changes (new framework, new test tool).
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: agents
+    type: string
+    required: false
+    description: |
+      Comma-separated list of agents to generate views for.
+      Defaults to AGENTS.md only (universal, no opt-in views).
+
+outputs:
+  - path: AGENTS.md
+    type: artifact
+    description: |
+      Universal project index. Any agent can read this.
+  - path: .claude/skills/
+    type: artifact
+    description: Claude Code native view (only when agents includes claude).
+  - path: .cursor/rules/sdd.mdc
+    type: artifact
+    description: Cursor native rule (only when agents includes cursor).
+  - path: .github/copilot-instructions.md
+    type: artifact
+    description: Copilot native view (only when agents includes copilot).
+
+gates:
+  - name: agents-md-present
+    description: AGENTS.md exists and references all bundled skills.
+  - name: native-views-consistent
+    description: Every native view references the same AGENTS.md (no drift).
+
+context_provides:
+  - AGENTS.md (current)
+  - docs/glossary.md
+  - docs/architecture/context-map.md
+  - .radiant-harness/skills/
+
+commands_available:
+  - radiant init --agent=<list>
+  - radiant update
+
+related_skills:
+  - kickoff
+  - integracoes
+
+anti_patterns:
+  - Putting Claude-specific content in AGENTS.md. AGENTS.md is universal.
+  - Generating native views without the universal AGENTS.md underneath. Views are layers on top, not replacements.
+  - Auto-generating .claude/ when the team uses Cursor. Opt-in only.
+
+author: radiant-harness contributors
+license: MIT

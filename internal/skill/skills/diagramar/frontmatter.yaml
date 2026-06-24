@@ -1,0 +1,55 @@
+name: diagramar
+version: 1.0.0
+description: |
+  Produces C4-model architecture diagrams (Context, Container,
+  Component, optionally Code) as Mermaid. Reads from
+  context-map.md or analyzes code directly.
+when_to_use: |
+  Before major refactors, when onboarding new team members,
+  or as part of brownfield kickoff.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: level
+    type: enum
+    required: true
+    description: One of context, container, or component (C4 levels).
+  - name: focus
+    type: string
+    required: false
+    description: |
+      Bounded context or module to focus on (e.g. "billing").
+      Defaults to whole system.
+
+outputs:
+  - path: docs/architecture/diagrams.md
+    type: artifact
+    description: Mermaid diagrams + narrative explaining each.
+
+gates:
+  - name: level-chosen
+    description: User picked the right C4 level for the question they're answering.
+  - name: diagram-renders
+    description: Mermaid syntax must parse. Validate before committing.
+
+context_provides:
+  - docs/architecture/context-map.md
+  - docs/architecture/assessment.md
+
+commands_available:
+  - radiant diagramar
+
+related_skills:
+  - mapear
+  - kickoff
+  - adr
+
+anti_patterns:
+  - Skipping the Context level and going straight to Code. Start at the highest level that answers the question.
+  - Diagrams without narrative. A diagram nobody understands is decoration.
+  - Mixing levels in one diagram. One diagram = one level.
+
+author: radiant-harness contributors
+license: MIT

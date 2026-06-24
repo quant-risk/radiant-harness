@@ -1,0 +1,83 @@
+name: clarificar
+version: 1.0.0
+description: |
+  Conducts a structured interview to sharpen ambiguous specs,
+  designs, or domain language. Asks ONE question at a time. Each
+  answer narrows the spec until ACs are testable. Invoked when
+  nova-feature detects ambiguous ACs.
+when_to_use: |
+  The spec has ACs that can't be written as Given/When/Then,
+  or two ACs seem to say the same thing, or the user uses
+  words that aren't in glossary.md.
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+
+inputs:
+  - name: ambiguity
+    type: string
+    required: true
+    description: |
+      What is unclear. Quote the exact phrase from the spec, the
+      user's message, or the codebase location.
+  - name: spec-path
+    type: path
+    required: true
+    description: |
+      Path to the spec.md (or design.md / domain.md) where the
+      ambiguity lives. Read-only input; the skill edits it.
+
+outputs:
+  - path: "-"      # report type — output is the answer set, not a file
+    type: report
+    description: |
+      Sequence of questions + answers that resolve the ambiguity.
+      Side-effect: spec.md is rewritten with the clarified ACs.
+  - path: <spec-path>
+    type: artifact
+    description: |
+      The same spec.md, rewritten with sharper ACs (when the
+      user agrees). Path is dynamic; declared as input.
+
+gates:
+  - name: question-count
+    description: |
+      No more than 5 questions in a single clarificar session.
+      More than 5 → the spec is fundamentally broken; escalate
+      to a kickoff re-scoping.
+  - name: ac-resolved
+    description: |
+      The ambiguous AC is now Given/When/Then — verifiable, with
+      measurable conditions. The user explicitly approves.
+    on_failure: |
+      Keep asking. Don't write a "best guess" AC.
+
+context_provides:
+  - state.md
+  - glossary.md
+  - <spec-path>
+
+commands_available:
+  - radiant spec --refine <spec-path>
+
+related_skills:
+  - nova-feature
+  - kickoff
+
+anti_patterns:
+  - |
+    Asking 3+ questions in a single message. The agent (or
+    user) can only answer one well at a time. Multi-question
+    turns cause shallow answers.
+  - |
+    Rewriting the AC without asking. The user might have
+    meant something subtle. Write down the candidate, ask
+    for confirmation.
+  - |
+    Reading an AC and saying "this is testable, ship it".
+    Many "testable" ACs are actually unmeasurable. Test
+    each one by writing the assertion out loud first.
+
+author: radiant-harness contributors
+license: MIT

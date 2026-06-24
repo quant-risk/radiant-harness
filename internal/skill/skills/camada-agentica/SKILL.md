@@ -1,70 +1,80 @@
----
-name: camada-agentica
-description: Propose and generate the agentic layer for the project.
----
+# Skill: camada-agentica
 
-# Skill: Agentic Layer (Propose → Generate)
+> Generate the agentic layer: universal AGENTS.md + opt-in
+> native views. Vendor-neutral by default.
 
-Proposes the agentic layer for the project, then generates only what the user approves.
-Four artifact types: rules, subagents, skills, workflows/CI.
+## Decision tree
 
-## Phase 1 — Analyze inputs (Research)
+```
+Project has stack + glossary (post-kickoff)
+        │
+        ▼
+Generate universal AGENTS.md (always)
+        │
+        ▼
+User opt-in to specific agent views? (--agent=<list>)
+        │
+        ├── no ──► Done. AGENTS.md only.
+        │
+        └── yes ──► For each agent:
+                    - claude → .claude/skills/* + .claude/settings.json
+                    - cursor → .cursor/rules/sdd.mdc
+                    - codex → nothing extra (uses AGENTS.md)
+                    - copilot → .github/copilot-instructions.md
+                    - gemini → GEMINI.md
+                    - windsurf → .windsurf/rules/sdd.md
+```
 
-1. `read_file` `docs/engineering/agentic-layer.md` — existing layer map (if any).
-2. `read_file` `docs/architecture/assessment.md` — detected stack, gaps, risks.
-3. `read_file` `docs/product/vision.md` and `docs/product/roadmap.md` — what work is coming.
-4. `read_file` `docs/engineering/TESTING.md` — existing gate commands.
-5. Check `docs/engineering/integrations.md` — which MCPs are connected and who consumes them.
-6. Read `CLAUDE.md` MCP table — currently connected tools.
+## Workflow
 
-> If inputs are sparse (early kickoff), the proposal is preliminary. Mark it as such.
+### Step 1: universal AGENTS.md
 
-## Phase 2 — Propose the layer (Plan)
+Always generated. Contents:
+- Project overview (1 paragraph from vision.md)
+- Glossary (5+ terms)
+- Available skills (from `.radiant-harness/skills/`)
+- Workflow rules (tier, gates, AGENTS.md)
+- Anti-patterns
 
-Present a proposal table for each artifact type. Each row includes **justification**:
+### Step 2: native views (opt-in)
 
-### 2a. Rules (behavioral conventions)
-| Rule | Current state | Proposed change | Why |
-|------|--------------|-----------------|-----|
-| `CLAUDE.md` gates | <exists? empty?> | Fill DoD, layer rule, ubiquitous language | Source of truth for agent |
-| `.claude/settings.json` | <exists?> | Add SessionStart hook, permissions allowlist | Deterministic context injection |
+For each agent in `--agent=<list>`, generate the native view as
+a thin wrapper around AGENTS.md. The native view is generated
+FROM AGENTS.md, not independently.
 
-### 2b. Subagents (on-demand specialists)
-| Subagent | Trigger | Receives | Returns |
-|----------|---------|----------|---------|
-| `researcher` | `/nova-feature` Phase 1 | task + codebase area | research.md summary |
-| `test-runner` | gate execution | test command | pass/fail + output |
+### Step 3: drift prevention
 
-Only propose subagents that map to recurring patterns in the roadmap or TESTING.md.
+Every native view ends with: "For the canonical project
+instructions, see AGENTS.md."
 
-### 2c. Skills (reusable workflows)
-Review the 15 standard SDD skills. Flag any that need stack-specific customization
-(e.g. `/setup-ci` needs to know the CI provider, `/metricas` needs the PM tool).
+## Examples
 
-### 2d. Workflows/CI
-| Workflow | What it does | Gate it enforces |
-|----------|-------------|-----------------|
-| `harness.yml` | Run audit script on PR | Spec exists for code changes |
-| `SessionStart` hook | Inject base context | Deterministic context load |
+### Example 1: AGENTS.md only
 
-## Phase 3 — Confirm scope (Plan)
+`radiant init` produces AGENTS.md. Done.
 
-1. Present the full proposal. Ask: "Which items should I generate now?"
-2. Default: generate nothing without explicit approval per item.
-3. For each approved item, note: file path, what it contains, what it depends on.
+### Example 2: Claude + Cursor
 
-## Phase 4 — Generate approved artifacts (Implement)
+`radiant init --agent=claude,cursor` produces:
+- AGENTS.md (universal)
+- `.claude/skills/*` (Claude Code view)
+- `.cursor/rules/sdd.mdc` (Cursor rule)
 
-For each approved item, generate the file:
+## Anti-patterns
 
-1. **Rules:** edit `CLAUDE.md` (fill blanks), create/update `.claude/settings.json`.
-2. **Subagents:** `write_file` to `.claude/agents/<name>.md` from `docs/engineering/_templates/subagent.template.md`.
-3. **Workflows:** `write_file` to `.github/workflows/` or `.gitlab-ci.yml` — delegate CI specifics to `/setup-ci`.
-4. Update `docs/engineering/agentic-layer.md` with what was generated and its status.
+- ❌ Claude-specific content in AGENTS.md.
+- ❌ Native views without universal AGENTS.md.
+- ❌ Auto-generating views without opt-in.
 
-## Rules
+## Failure modes
 
-- **Propose with justification, generate only approved.** Never silently create agent files.
-- Each proposal cites the input that motivates it — stack, process, or domain need.
-- Unapproved items become roadmap adoption items (suggest `/roadmap`).
-- No secrets in generated files. CI workflows reference env vars, never inline tokens.
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `agents-md-present` | AGENTS.md missing | Always generated by `radiant init`; regenerate if needed. |
+| `native-views-consistent` | Native view contradicts AGENTS.md | Re-generate from AGENTS.md. |
+
+## Related skills
+
+- `kickoff` — produces the stack + glossary that AGENTS.md references
+- `integracoes` — MCPs available to the agent
+- `update` — regenerates views when skills change

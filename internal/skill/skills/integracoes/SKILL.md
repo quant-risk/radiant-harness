@@ -1,58 +1,118 @@
----
-name: integracoes
-description: Discover team tools and connect MCPs with lock protocol.
----
+# Skill: integracoes
 
-# Skill: Integrations (MCP Discovery and Connection)
+> Discovers and validates MCPs / tools. Critical safety: the
+> account/workspace boundary matters. NEVER auto-configures.
 
-Discovers team tools, validates MCP connections, and generates `docs/engineering/integrations.md`.
-Read-first approach: connect, read to validate, then lock the account/workspace before any write.
+## Decision tree
 
-## Phase 1 — Discover team tools (Research)
+```
+User mentions a tool, or kickoff calls integracoes
+        │
+        ▼
+Tool exists in the local MCP catalogue? (env var present?)
+        │
+        ├── no ──► Mark as "candidate, not installed"
+        │          Suggest installation instructions
+        │
+        └── yes ──► Ask: business account or personal?
+                       │
+                       ├── business ──► Validate with read query
+                       │
+                       └── personal ──► WARN: don't use for
+                                          work artifacts
 
-1. `read_file` `docs/product/vision.md` and `docs/STATE.md` for context on what tools are in use.
-2. Ask the user: "Which tools does the team use for project management, docs, code/CI, cloud, observability?"
-3. If an existing `integrations.md` exists, load it — this is a re-run; verify which entries are still valid.
-4. Detect MCP servers already present in the session (`mcp__<server>__*` tools available).
+        ▼
+Test with a read-only query (list / search / get)
+        │
+        ├── Pass ──► Mark "validated, ready"
+        │
+        └── Fail ──► Mark "validated, failing" + reason
+                     Suggest fix or removal
+        │
+        ▼
+User approves writing .mcp.json?
+        │
+        ├── yes ──► Write .mcp.json (only approved servers)
+        │
+        └── no ──► Just record in docs/engineering/integrations.md
+```
 
-## Phase 2 — Propose MCP connections (Plan)
+## Workflow
 
-For each team tool, map to a candidate MCP server:
+### Step 1: enumerate
 
-| Tool category | Candidate MCP | Enables |
-|---------------|--------------|---------|
-| Project mgmt (Jira/Linear) | Atlassian / Linear official | read/create issues |
-| Docs (Confluence/Notion) | Confluence / Notion MCP | read/search docs |
-| Code (GitHub/GitLab) | GitHub / GitLab MCP | PRs, issues, code review |
-| Cloud (AWS/GCP) | Cloud provider MCP | resource inventory, logs |
+Ask user what tools they use. Common categories:
+- Issue tracking: Jira, Linear, GitHub Issues
+- Docs: Confluence, Notion, GitHub Wiki
+- Code: GitHub, GitLab, Bitbucket
+- Cloud: AWS, GCP, Azure
+- Communication: Slack, Teams
 
-2. Present the proposed connections table. Confirm which to proceed with.
+Don't propose tools — let the user say what they use. Don't
+default to "use GitHub" because the project is on GitHub.
 
-## Phase 3 — Connect and validate (Implement)
+### Step 2: account boundary
 
-For each approved connection, follow the **lock protocol**:
+For each tool, ask explicitly: business or personal account?
+This is not optional. A personal Notion has personal notes that
+shouldn't appear in work artifacts.
 
-1. **Connect:** run `claude mcp add <server>` or edit `.mcp.json` (project-scoped, no secrets in file).
-2. **Read-lock:** confirm the account/workspace with the user before reading anything.
-3. **Validate read:** execute one read call (e.g. `mcp__jira__list_issues`). Verify the workspace matches.
-4. **Write-lock:** before any write, **re-confirm** the account/workspace with the user.
-   Write is opt-in per skill — "active connection does NOT authorize use."
+### Step 3: validate
 
-5. Update the MCP table in `CLAUDE.md` with validated account/workspace and consuming skills.
-6. Generate `docs/engineering/integrations.md` from the template — fill team tools, proposed/connected MCPs, status.
+For each MCP/tool, run a read-only query. Examples:
+- Jira: list 1 project
+- Notion: search for "test"
+- GitHub: list 1 repo
 
-## Phase 4 — Routing
+If the query fails, mark as "failing" and ask the user. Don't
+silently mark as "ready".
 
-For each connected MCP, document which skills consume it:
+### Step 4: ask before writing .mcp.json
 
-| MCP | Consuming skills |
-|-----|-----------------|
-| `mcp__jira__*` | `/nova-feature` (fetch issues), `/metricas` (cycle time) |
-| `mcp__github__*` | `/revisar-pr` (PR check), `/metricas` (lead time) |
+`.mcp.json` changes agent behavior globally for the project.
+ALWAYS ask before writing. The user might want the integration
+documented but not active yet.
 
-## Rules
+## Examples
 
-- **No secrets in files.** Tokens go in env vars or `claude mcp add`, never in `.mcp.json` or docs.
-- **Re-executable:** re-running `/integracoes` re-validates existing connections and adds new ones.
-- Read before write. Confirm before read. Re-confirm before write.
-- Follow `CLAUDE.md` conventions — only use MCPs listed in the session.
+### Example 1: GitHub MCP, business account
+
+**Inputs**: scope=all, user mentions "GitHub"
+
+**Validation**: `gh repo list` returns the project repos.
+
+**Approval**: "Yes, write .mcp.json for GitHub"
+
+**Output**: `docs/engineering/integrations.md` has GitHub entry,
+`.mcp.json` has the github MCP server.
+
+### Example 2: Notion MCP, personal account
+
+**Inputs**: scope=all, user mentions "Notion"
+
+**Warning**: "You said Notion. Is this your business workspace or
+personal? Personal notes shouldn't be referenced in this project."
+
+**If user says personal**: Mark as "personal, do not use for work
+artifacts. Listed for awareness only."
+
+## Anti-patterns
+
+- ❌ Auto-writing .mcp.json. Always ask.
+- ❌ Treating "installed" as "ready". Always test.
+- ❌ Ignoring personal vs business. Default safety = personal.
+  Force user to opt-in to business.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `account-boundary-clarified` | User says "I don't know" | Default to personal. Don't proceed without clarification. |
+| `validated` | Read query fails | Surface error; ask user to fix MCP config. |
+
+## Related skills
+
+| Skill | When to chain |
+|-------|---------------|
+| `kickoff` | Calls integracoes before starting interviews. |
+| `nova-feature` | May pull data from MCPs during research. |

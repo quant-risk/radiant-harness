@@ -1,97 +1,102 @@
----
-name: evals
-description: Evaluate spec-to-code fidelity via AC and test coverage.
----
+# Skill: evals
 
-# Skill: Evals (Spec → Code Fidelity)
+> Spec→code fidelity. Numeric score + breakdown by feature.
+> Always cite evidence.
 
-Measures how faithfully the implementation follows the spec.
-Scriptable checks for AC→task→test coverage, plus SPEC_DEVIATION counting.
-
-## Phase 1 — Collect spec inventory (Research)
-
-1. List all features: `search_files` pattern `specs/*/spec.md` — enumerate spec directories.
-2. For each spec, `read_file` and extract:
-   - All `AC-N` identifiers and their Given/When/Then text.
-   - The spec's "Out of scope" section (if present).
-3. For each spec, `read_file` `tasks.md` — extract task list and gate commands.
-4. Count total ACs across all specs — this is the coverage denominator.
-
-> Delegate per-spec reading to subagents if there are > 5 features. Each subagent returns a structured summary.
-
-## Phase 2 — Check AC → task coverage (Plan + Implement)
-
-For each feature, verify every AC has a corresponding task:
+## Decision tree
 
 ```
-terminal: grep -r "AC-1\|AC_1" specs/0001-*/tasks.md
+Eval requested (scope: all|since-last-release|<spec-path>)
+        │
+        ▼
+For each feature in scope:
+        │
+        ├── Read spec.md ACs
+        ├── Read tasks.md coverage
+        ├── Read code (link to file:line per claim)
+        │
+        ▼
+Per AC:
+        ├── covered (test exists + passes)
+        ├── not-covered (no test, or test doesn't cover this AC)
+        └── deviated (code does something different from AC)
+        │
+        ▼
+Compute score: covered / total
+        │
+        ▼
+Report with file:line evidence
 ```
 
-Or use `search_files` pattern `AC.?<N>` in each `tasks.md`.
+## Workflow
 
-Build the coverage matrix:
+### Step 1: enumerate features
 
-| Feature | Total ACs | ACs with task | ACs with test | ACs passing | Deviations | Score |
-|---------|-----------|--------------|--------------|-------------|------------|-------|
-| 0001-feedback | 5 | 5 | 5 | 5 | 0 | 100% |
-| 0002-export | 3 | 3 | 2 | 2 | 1 | 67% |
+Walk `specs/` and extract every `spec.md` in scope.
 
-**Score formula:** `(ACs with passing test) / (Total ACs) × 100`
+### Step 2: per-AC trace
 
-## Phase 3 — Check AC → test coverage (Plan + Implement)
+For each AC:
+1. Find the task that covers it (tasks.md's Coverage column)
+2. Find the test file that implements it
+3. Verify the test runs (or accept that it ran in the last
+   validation report)
+4. Compare the test's assertion against the AC's Given/When/Then
 
-1. For each `AC-N`, search test files: `search_files` pattern `AC.?<N>|test_AC_<N>` in test directories.
-2. Methods:
-   - Naming convention from TESTING.md: `test_AC_N_*` or `AC-N: ...`.
-   - If naming convention not followed, search for Given/When/Then text snippets.
-3. Flag ACs without tests as **uncovered** — score impact.
+### Step 3: deviation scan
 
-## Phase 4 — Count SPEC_DEVIATION (Plan + Implement)
+For each implementation file mentioned in the AC, check whether
+the code matches the AC's behavior. If it diverges, mark as
+deviated.
 
-1. `search_files` pattern `SPEC_DEVIATION` across `src/` — find all deviation comments.
-2. For each deviation, classify:
-   - **Resolved** — code fixed or spec updated + ADR exists.
-   - **Open** — deviation exists without resolution.
-3. Count open deviations per feature. Each open deviation reduces the fidelity score.
+### Step 4: write the report
 
-**Adjusted score:** `base_score - (open_deviations × 10)`, floored at 0%.
+```markdown
+# Evals: <scope>
 
-## Phase 5 — Check scope adherence (Plan)
+## Summary
 
-1. For each spec, read the "Out of scope" section.
-2. `search_files` in `src/` for features that shouldn't exist yet — implementations beyond scope.
-3. Flag any out-of-scope implementation as a scope violation.
+| Feature | ACs | Covered | Not Covered | Deviated | Score |
+|---------|-----|---------|-------------|----------|-------|
+| 0001    | 5   | 4       | 1           | 0        | 80%   |
+| 0002    | 8   | 7       | 0           | 1        | 87%   |
 
-## Phase 6 — Generate evals report (Implement)
+## Detail
 
-1. Write the per-feature scorecard:
+### 0001-jwt-auth
 
-```
-## Spec → Code Fidelity Report — <date>
+- AC1 ✓: tasks/2/test_login_returns_jwt.go:14
+- AC2 ✓: tasks/2/test_invalid_login.go:8
+- AC3 ✗ not-covered: no test for expired token rejection
+- AC4 ✓: tasks/3/test_tampered_jwt.go:12
 
-### Overall fidelity: <avg score>%
+### 0002-search
 
-### Per-feature breakdown
-| Feature | ACs | Task coverage | Test coverage | Pass rate | Deviations | Score |
-|---------|-----|---------------|---------------|-----------|------------|-------|
-
-### Findings
-- [feature] AC-N has no test — uncovered acceptance criterion.
-- [feature] 2 open SPEC_DEVIATIONs — spec and code diverge.
-- [feature] Implementation includes <X> which is marked out-of-scope.
-
-### Trends (if previous report exists)
-- Coverage: <prev>% → <current>% (↑/→/↓)
-- Open deviations: <prev> → <current>
+- AC1 ✓: ...
+- DEV-001: AC3 says p95 < 200ms; code only handles 10 users
+  (search/handler.go:47)
 ```
 
-2. Save to `docs/evals-<date>.md` or update `docs/STATE.md` with summary.
-3. Present to user with prioritized remediation list.
+## Examples
 
-## Rules
+See `examples/` directory in the bundled skill for worked examples
+covering common audit/eval/PR/roadmap scenarios.
 
-- **Objective scoring.** The score is computed from searchable artifacts, not opinion.
-- **Naming convention matters.** If tests don't follow `test_AC_N_*`, coverage detection degrades.
-  Flag naming convention violations as a finding.
-- **One report per run.** Compare with previous report for trends — don't overwrite history.
-- Low scores are actionable, not punitive. Every finding has a specific fix.
+## Anti-patterns
+
+- ❌ Scores without evidence. Numbers without citations = PR.
+- ❌ Run once, stop. Fidelity drifts.
+- ❌ Confusing test count with coverage.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `data-sufficient` | <3 features | Skip; suggest waiting. |
+| `report-includes-evidence` | Claim without file:line | Add the citation. |
+
+## Related skills
+
+- `auditar` — broader conformity check
+- `metricas` — uses eval scores for maturity scoring
+- `revisar-pr` — per-PR fidelity check

@@ -1,0 +1,60 @@
+name: adr
+version: 1.0.0
+description: |
+  Creates an Architecture Decision Record (Nygard format) for
+  decisions that are hard to reverse, span multiple subsystems,
+  or introduce a new pattern.
+when_to_use: |
+  Making a non-trivial technical decision. After brownfield
+  kickoff (retro-ADRs for existing decisions). When a feature
+  spec changes the architecture.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: decision
+    type: string
+    required: true
+    description: |
+      One-sentence statement of the decision. E.g. "Use
+      PostgreSQL for primary data store."
+  - name: status
+    type: enum
+    required: false
+    description: |
+      "proposed" (decision under discussion) | "accepted"
+      (decision in effect) | "deprecated" (superseded by
+      another ADR) | "superseded" (replaced by ADR-NNNN).
+
+outputs:
+  - path: docs/architecture/adr/NNNN-<slug>.md
+    type: artifact
+    description: Nygard-formatted ADR.
+
+gates:
+  - name: context-written
+    description: The 'Context' section explains the forces, not just the choice.
+  - name: alternatives-listed
+    description: At least 2 alternatives considered with pros/cons.
+  - name: consequences-traced
+    description: Both positive and negative consequences listed.
+
+context_provides:
+  - docs/architecture/adr/
+
+commands_available:
+  - radiant adr "<decision>"
+
+related_skills:
+  - kickoff
+  - diagramar
+  - nova-feature
+
+anti_patterns:
+  - Writing the decision without context. "We use Postgres" is not an ADR; an ADR explains why.
+  - Listing only the chosen option. ADRs are valuable BECAUSE they record what was rejected.
+  - Skipping consequences. Both positive AND negative.
+
+author: radiant-harness contributors
+license: MIT

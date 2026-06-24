@@ -1,0 +1,56 @@
+name: roadmap
+version: 1.0.0
+description: |
+  Constructs or revises the product roadmap with the team:
+  sequence of features by value × effort, dependency graph,
+  quarterly milestones. Lives at docs/product/roadmap.md.
+when_to_use: |
+  After kickoff (initial roadmap). Quarterly review (re-prioritize).
+  When new strategic information arrives (market change, customer
+  feedback, technical constraint).
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: features
+    type: object
+    required: false
+    description: |
+      List of candidate features with value + effort estimates.
+      If absent, derive from specs/_templates/ + recent
+      nova-feature invocations.
+
+outputs:
+  - path: docs/product/roadmap.md
+    type: artifact
+    description: |
+      Quarterly milestones, feature sequence, dependency graph,
+      risk register.
+
+gates:
+  - name: sequenced
+    description: Features are ordered (not just listed).
+  - name: estimated
+    description: Each feature has value + effort estimate.
+  - name: dependencies-mapped
+    description: Dependencies between features are explicit.
+
+context_provides:
+  - docs/product/vision.md
+  - docs/product/mvp-canvas.md
+  - specs/_templates/
+
+commands_available:
+  - radiant product roadmap
+
+related_skills:
+  - kickoff
+  - nova-feature
+
+anti_patterns:
+  - Listing features without ordering. A roadmap is a sequence.
+  - Optimistic estimates. Use ranges (S/M/L or t-shirt sizes).
+  - Ignoring dependencies. Two features that block each other can't both be "now".
+
+author: radiant-harness contributors
+license: MIT

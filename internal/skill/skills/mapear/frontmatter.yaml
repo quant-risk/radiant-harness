@@ -1,0 +1,54 @@
+name: mapear
+version: 1.0.0
+description: |
+  Analyzes an existing codebase and produces assessment.md:
+  tech stack, layered architecture, bounded contexts, technical
+  debts, test coverage, missing pieces vs the radiant layout.
+when_to_use: |
+  Brownfield kickoff (before kickoff produces its roadmap).
+  Or "I inherited this codebase, where do I start?"
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: codebase-path
+    type: path
+    required: true
+    description: Root directory of the codebase to map.
+
+outputs:
+  - path: docs/architecture/assessment.md
+    type: artifact
+    description: |
+      Tech stack, file structure, bounded contexts, debts,
+      coverage gaps, missing radiant artifacts.
+  - path: docs/architecture/context-map.md
+    type: artifact
+    description: Bounded contexts + their relationships.
+
+gates:
+  - name: stack-detected
+    description: Primary language + framework identified with confidence.
+  - name: contexts-bounded
+    description: At least 1 bounded context extracted from the code.
+  - name: debts-listed
+    description: Technical debts called out (not hidden).
+
+context_provides:
+  - state.md
+
+commands_available:
+  - radiant mapear <path>
+
+related_skills:
+  - kickoff
+  - diagramar
+  - audit
+
+anti_patterns:
+  - Listing every file in the codebase. The map is about shape, not inventory.
+  - Skipping the "debts" section. Hidden debts stay hidden until they bite.
+  - Imposing radiant's preferred layout on day 1. Map the as-is first, propose deltas second.
+
+author: radiant-harness contributors
+license: MIT

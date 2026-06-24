@@ -1,0 +1,52 @@
+name: evals
+version: 1.0.0
+description: |
+  Measures spec→code fidelity: which ACs are covered by tests,
+  which tasks are missing ACs, which code diverges from spec.
+  Produces a numeric score and a breakdown by feature.
+when_to_use: |
+  After every release. When validating that the spec/code
+  alignment is being maintained. When comparing two models'
+  implementation fidelity on the same spec.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: scope
+    type: enum
+    required: false
+    description: One of all, since-last-release, or a specific spec-path.
+
+outputs:
+  - path: docs/evals-report.md
+    type: artifact
+    description: |
+      Fidelity score per feature, plus aggregate. Each AC marked
+      as: covered | not-covered | deviated.
+
+gates:
+  - name: data-sufficient
+    description: At least 3 features completed in scope. Less = noise.
+  - name: report-includes-evidence
+    description: Every claim in the report cites a specific file:line.
+
+context_provides:
+  - specs/
+  - .radiant-harness/state.md
+
+commands_available:
+  - radiant evals
+
+related_skills:
+  - auditar
+  - metricas
+  - revisar-pr
+
+anti_patterns:
+  - Reporting fidelity scores without evidence. Numbers without citations are PR.
+  - Running once and stopping. Fidelity drifts; re-run after each release.
+  - Confusing test count with spec coverage. Many tests ≠ spec fidelity.
+
+author: radiant-harness contributors
+license: MIT

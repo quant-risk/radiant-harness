@@ -1,74 +1,96 @@
----
-name: metricas
-description: Track Lead Time, Throughput, CD maturity, and bottlenecks.
----
+# Skill: metricas
 
-# Skill: Metrics (Delivery Flow Health)
+> Delivery maturity: Lead Time, Throughput, AC coverage, gate
+> pass rate, deviation rate. Blameless tone.
 
-Measures flow health: Lead Time, Throughput, and Continuous Delivery maturity.
-Uses git, CI, and PM tool data to **find bottlenecks** — not to rank people.
+## Decision tree
 
-## Phase 1 — Gather data sources (Research)
+```
+Metrics requested (window: 30d|90d|sprint|all)
+        │
+        ▼
+Gather data:
+        - spec.md created_at timestamps
+        - last commit hash on each feature
+        - gate pass/fail history
+        - SPEC_DEVIATION entries
+        │
+        ▼
+≥5 features completed? ──── no ──► "Insufficient data; report skipped"
+        │
+        ▼ yes
+Compute:
+        - Lead Time = merge_time - spec_creation_time
+        - Throughput = features / sprint
+        - AC coverage = green_acs / total_acs
+        - Gate pass rate = green_gates / total_gates
+        - Deviation rate = deviations / features
+        │
+        ▼
+Maturity score (1-5) per CD conventions
+        │
+        ▼
+Write report
+```
 
-1. Define the measurement period (last sprint, last month, last quarter).
-2. **Git data:** `terminal: git log --since="<date>" --merges --format="%H %ci %s"` — merged PRs with timestamps.
-3. **CI data:** if MCP connected (`mcp__github__*`), fetch workflow run durations and failure rates.
-4. **PM data:** if MCP connected (`mcp__jira__*` or `mcp__linear__*`), fetch issues with created/resolved timestamps.
-5. `read_file` `docs/engineering/metrics.md` — previous measurements for trend comparison.
+## Workflow
 
-> Delegate data gathering to a subagent. Raw git/Jira logs are large — bring only the computed summary into context.
+### Step 1: gather data
 
-## Phase 2 — Compute Lead Time (Plan)
+Walk `specs/` and `.radiant-harness/`. Extract:
+- `spec.md` first commit timestamp
+- Last commit timestamp on the spec directory
+- Gate pass/fail from validation reports
+- SPEC_DEVIATION counts from spec.md
 
-Lead Time = time from spec creation (or first commit, or issue creation) to production deploy.
+### Step 2: compute metrics
 
-1. For each completed item, calculate:
-   - **Spec → first commit** (planning time).
-   - **First commit → merge** (development time).
-   - **Merge → deploy** (deploy queue time).
-2. Report **median** and **p85** — the tail shows where flow stalls.
-3. Identify which segment dominates. Examples:
-   - Spec → commit is long → planning bottleneck, spec ambiguity.
-   - Commit → merge is long → review bottleneck, PR too large.
-   - Merge → deploy is long → deploy process bottleneck, manual gates.
+Standard formulas:
 
-## Phase 3 — Compute Throughput (Plan)
+```text
+Lead Time (median) = median(merge_time - spec_creation_time)
+Throughput = features_completed / sprints_in_window
+AC Coverage = ACs_with_green_gate / total_ACs
+Gate Pass Rate = green_gates / total_gates
+Deviation Rate = deviation_entries / features_completed
+```
 
-1. Count items that reached "done"/prod in the period.
-2. Compare to previous period (from `metrics.md`): increasing, stable, declining?
-3. Note team size context — throughput per contributor, not absolute numbers.
+### Step 3: maturity score (CD-inspired)
 
-## Phase 4 — Assess CD maturity (Plan)
+| Score | Criteria |
+|-------|----------|
+| 1 | <50% AC coverage, no tests, frequent deviations |
+| 2 | Tests exist, low coverage, Lead Time >2 weeks |
+| 3 | Tests cover most ACs, Lead Time 1-2 weeks |
+| 4 | High coverage, Lead Time <1 week, low deviations |
+| 5 | Continuous delivery: <1 day Lead Time, >90% coverage, near-zero deviations |
 
-Score Continuous Delivery / Deployment practices:
+### Step 4: write the report
 
-| Practice | Current state | How to check | Gap to advance |
-|----------|--------------|--------------|----------------|
-| Always deployable (CD) | yes/partial/no | CI green on main? Deploy blocked by manual steps? | |
-| Auto-deploy (CDepl) | yes/partial/no | Does merge to main trigger auto-deploy? | |
-| Rollback capability | yes/no | Can we revert in < 5 min? | |
+Blameless tone. No individual names. Focus on systems.
 
-2. Code quality metrics (from CI):
-   - Coverage: current %, trend vs last period.
-   - Static analysis: blocking findings count, trend.
+## Examples
 
-## Phase 5 — Generate report (Implement)
+### Example 1: 90-day window
 
-1. Update `docs/engineering/metrics.md` with all computed values and trends.
-2. Highlight **top bottleneck** with a specific recommendation:
-   > "Lead Time median is 8 days. 5 of those are commit→merge. PRs average 600 lines.
-   > Recommendation: split features into smaller specs (target < 300 lines/PR)."
-3. Present the report to the user. Ask: "Does this match your perception? Any context I'm missing?"
+**Output**: report shows Lead Time median 8 days, Throughput 6
+features/sprint, AC coverage 87%, Gate pass rate 92%, Deviation
+rate 0.3 per feature. Maturity score 3.
 
-## Phase 6 — Update state
+## Anti-patterns
 
-1. Update `docs/STATE.md`: metrics reviewed, date, top bottleneck noted.
-2. If a bottleneck relates to a roadmap item, note the cross-reference.
+- ❌ Naming individuals. Blameless.
+- ❌ Acting on <5 features. Too noisy.
+- ❌ Conflating velocity with quality.
 
-## Rules
+## Failure modes
 
-- **Find bottlenecks, don't rank people.** Never report individual contributor metrics.
-- Use median and p85 — averages hide the tail where problems live.
-- Trend matters more than absolute numbers. One snapshot is noise.
-- If data sources are incomplete (no MCP, sparse git history), note the gap and report what's available.
-- Never present metrics without context — a number without a story is noise.
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `data-sufficient` | <5 features | Skip the report. Suggest waiting. |
+| `blameless-tone` | Names appear | Rewrite; replace with "the team", "this sprint", etc. |
+
+## Related skills
+
+- `auditar` — provides data for metrics
+- `validar` — per-feature gate results

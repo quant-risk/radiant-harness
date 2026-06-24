@@ -497,3 +497,33 @@ func TestExtractToSkipsExisting(t *testing.T) {
 		t.Errorf("sentinel was deleted despite force=false: %v", err)
 	}
 }
+
+// TestAllBundledSkillsValidateCleanly is the canonical regression
+// guard for the skill bundle: every skill shipped with the CLI
+// must validate against docs/SKILL-SCHEMA.md §6 with zero errors.
+// Run by CI on every commit; failure here means a skill was
+// shipped broken and the binary must not be released.
+func TestAllBundledSkillsValidateCleanly(t *testing.T) {
+	infos, err := Bundle()
+	if err != nil {
+		t.Fatalf("Bundle: %v", err)
+	}
+	if len(infos) < 10 {
+		t.Errorf("bundle has only %d skills; expected at least 10 (the canonical methodology set)", len(infos))
+	}
+	for _, info := range infos {
+		t.Run(info.Name, func(t *testing.T) {
+			s, err := LoadFromFS(bundledFS, "skills/"+info.Name)
+			if err != nil {
+				t.Fatalf("LoadFromFS %s: %v", info.Name, err)
+			}
+			errs := s.Validate()
+			if len(errs) > 0 {
+				t.Errorf("bundled skill %s has %d validation errors:", info.Name, len(errs))
+				for _, e := range errs {
+					t.Errorf("  %s", e.Error())
+				}
+			}
+		})
+	}
+}

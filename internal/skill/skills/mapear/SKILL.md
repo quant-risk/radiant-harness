@@ -1,56 +1,105 @@
----
-name: mapear
-description: Map codebase, detect stack, and produce assessment.md.
----
+# Skill: mapear
 
-# Skill: Map Codebase (Brownfield Assessment)
+> Map an existing codebase to bounded contexts, debts, and the
+> radiant layout gap.
 
-Auto-detects stack, architecture, and bounded contexts. Produces an as-is portrait
-and gap analysis vs the SDD standard. Idempotent — re-running refreshes the assessment.
+## Decision tree
 
-## Phase 1 — Detect stack (Research)
+```
+Codebase path provided
+        │
+        ▼
+Detect primary language + framework
+        │
+        ▼
+Walk the directory tree (file counts, layer boundaries)
+        │
+        ▼
+Identify bounded contexts (cluster by import graph)
+        │
+        ▼
+Detect debts (missing tests, TODOs, deprecation warnings)
+        │
+        ▼
+Compare to radiant layout → gap report
+        │
+        ▼
+Write assessment.md + context-map.md
+```
 
-1. Scan for manifests using `search_files` (target: `files`, pattern: `package.json|go.mod|Cargo.toml|pyproject.toml|pom.xml|build.gradle`).
-2. `read_file` each manifest to identify: language/runtime, frameworks, persistence, messaging libraries.
-3. Check for infra artifacts: `Dockerfile`, `docker-compose.yml`, `.github/workflows/`, `terraform/`, `helm/`.
-4. Detect CI provider: `.github/workflows/` → GitHub Actions; `.gitlab-ci.yml` → GitLab CI; `Jenkinsfile` → Jenkins.
-5. Count test files (`search_files` pattern: `*.test.*|*_test.*|spec/**/*.ts`) to gauge existing test coverage.
+## Workflow
 
-> Delegate large scans to a subagent if the repo has > 500 files. Return only the summary table.
+### Step 1: detect stack
 
-## Phase 2 — Detect architecture (Research)
+Look at the file extensions, package files (`package.json`, `go.mod`,
+`Cargo.toml`, `requirements.txt`), and CI configs. Identify:
+- Primary language
+- Framework (web framework, ORM, test framework)
+- Build / run command
 
-1. Examine `src/` directory structure. Identify layering: `interfaces/`, `application/`, `domain/`, `infrastructure/`?
-2. If DDD layers absent, detect the actual style (flat MVC, modular monolith, microservices).
-3. Identify bounded contexts: group modules by domain responsibility. List each with its responsibility.
-4. Flag dangerous couplings: cross-context imports, circular dependencies, shared mutable state.
-5. Check for existing architecture docs (`docs/architecture/`) and ADRs — read them for context.
+### Step 2: walk the tree
 
-## Phase 3 — Gap analysis vs SDD (Plan)
+For each top-level directory, count files and identify the layer
+(domain, application, infrastructure, presentation). Don't list
+every file — show the shape.
 
-Score each of the 5 axes against the SDD standard:
+### Step 3: cluster bounded contexts
 
-| Axis | SDD standard | Check method | Gap |
-|------|-------------|--------------|-----|
-| **Tech stack** | Documented, versioned | Manifests exist and are documented? | |
-| **Architecture** | DDD layers, context-map | `src/` follows dependency rule? context-map.md exists? | |
-| **Infra** | Containerized, IaC | Dockerfile/CI present? Environments documented? | |
-| **Quality** | Gates defined, coverage min | TESTING.md exists? Test command runs green? | |
-| **Observability** | Logs + metrics + tracing | Any observability setup? SLOs defined? | |
+Group directories into bounded contexts. Heuristics:
+- Same prefix (`billing/`, `users/`, `inventory/`)
+- Same owner (look at git log for that directory)
+- Same external system they integrate with
 
-2. Rate each axis risk: `low` / `med` / `high` based on gap severity.
-3. List the top 3 debts/risks with impact and recommended action.
+### Step 4: detect debts
 
-## Phase 4 — Generate assessment.md (Implement)
+Search for:
+- TODO/FIXME comments
+- Files with deprecation warnings
+- Missing test coverage (count test files vs source files)
+- Circular dependencies (rough check)
 
-1. Fill `docs/architecture/_templates/assessment.template.md` with detected data.
-2. Capture undocumented historical decisions → list as candidates for retroactive ADRs.
-3. Save to `docs/architecture/assessment.md`.
-4. Update `docs/STATE.md`: note assessment complete, link to file.
+Don't hide these. The map is a tool for decisions, not PR.
 
-## Rules
+### Step 5: gap to radiant layout
 
-- **Idempotent:** re-running refreshes data; existing ADRs are never overwritten.
-- **Photograph, don't judge** — the assessment is an as-is portrait. Recommendations go in roadmap, not here.
-- Keep context lean: don't read every source file — sample entry points and structural files only.
-- Confirm with the user before marking anything as a "debt" — some choices are intentional.
+Compare to the expected radiant structure:
+- `AGENTS.md`?
+- `.radiant-harness/state.md`?
+- `docs/glossary.md`?
+- `docs/architecture/context-map.md`?
+- `specs/` with `spec.md` + `tasks.md`?
+
+Note what's missing.
+
+## Examples
+
+### Example 1: brownfield Go service
+
+**Output**: assessment.md reports Go 1.22, Gin, PostgreSQL,
+3 bounded contexts (api, db, worker), 12 TODOs, 23% test coverage,
+no radiant artifacts.
+
+### Example 2: greenfield React app
+
+**Output**: assessment.md reports TypeScript, Next.js 14,
+Tailwind, 1 bounded context (the whole app — too coarse),
+no TODOs but also no tests, no radiant artifacts.
+
+## Anti-patterns
+
+- ❌ Inventorying every file. The map is about shape.
+- ❌ Hiding debts. They bite later.
+- ❌ Imposing layout on day 1. Map first, propose deltas second.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `stack-detected` | Unrecognized stack | List both candidates + reasoning; ask user. |
+| `contexts-bounded` | Code has no clear boundaries | That's a real finding; mapear just discovered the project's biggest risk. |
+
+## Related skills
+
+- `kickoff` — uses mapear output for brownfield path
+- `diagramar` — produces visual context-map from the same data
+- `audit` — checks radiant-layout compliance separately

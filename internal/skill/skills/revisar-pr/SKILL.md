@@ -1,76 +1,107 @@
----
-name: revisar-pr
-description: SDD conformity gate on PR/MR — checks process, not bugs.
----
+# Skill: revisar-pr
 
-# Skill: Review PR/MR (SDD Conformity Gate)
+> PR review gate: spec alignment, AC coverage, gates, deviations.
 
-Checks **process conformity** — not code quality or bugs. For bugs/style, use a separate code review.
-This gate answers: "Did this change follow the SDD pipeline?"
+## Decision tree
 
-## Phase 1 — Identify change scope (Research)
+```
+PR opened (or invoked manually)
+        │
+        ▼
+Fetch diff (via GitHub MCP or input)
+        │
+        ▼
+For each AC in spec.md:
+    ├── Code in diff implements it? ──── yes ──► ✓
+    ├── No code, but task covers it? ──── skip ──► not implemented yet
+    └── Code diverges from AC? ──► SPEC_DEVIATION
+        │
+        ▼
+Run every gate in tasks.md on the PR branch
+        │
+        ▼
+Write pr-review.md
+```
 
-1. Get the PR/MR diff: `terminal: git diff main...HEAD --name-only` (or use MCP `mcp__github__*`).
-2. Categorize changed files:
-   - `src/**` → code changes (require spec traceability).
-   - `docs/**` → doc changes (check if living docs need update).
-   - `specs/**` → spec changes (check if approved).
-   - `.claude/**`, `scripts/**` → infra changes (check if intentional).
-3. If no `src/` files changed → skip to verdict (doc-only PRs need lighter checks).
-4. Identify which spec(s) this PR belongs to: match branch name or changed files to `specs/NNNN-*/`.
+## Workflow
 
-> Context budget: only read the diff file list + the matching spec. Don't review every line of code.
+### Step 1: fetch the diff
 
-## Phase 2 — SDD conformity checklist (Plan)
+If GitHub MCP is connected, fetch via `mcp__github__get_pr_diff`. If
+not, ask the user to paste the diff.
 
-Run each check. Mark pass/fail with evidence:
+### Step 2: AC-by-AC check
 
-### 2a. Spec exists and is approved
-- [ ] The changed `src/` files map to a `specs/NNNN-*/spec.md`.
-- [ ] That spec has acceptance criteria (Given/When/Then).
-- [ ] No code changes exist without a corresponding spec (except `quick/` trivial tier).
+For each AC in spec.md:
+1. Find the files that should implement it
+2. Search the diff for changes to those files
+3. Mark:
+   - **Implemented** — code matches the AC
+   - **Missing** — no code touches the relevant files
+   - **Deviated** — code exists but does something different
 
-### 2b. Traceability: every touched AC has a test
-- [ ] For each `AC-N` in the spec, a test exists (check naming: `test_AC_N_*` or `AC-N:`).
-- [ ] `search_files` in test directories for each AC ID — confirm coverage.
-- [ ] Flag any AC touched by the diff but lacking a test.
+### Step 3: run gates
 
-### 2c. Gates green
-- [ ] Run gate commands from `docs/engineering/TESTING.md`:
-  ```
-  terminal: <unit test command>
-  terminal: <lint command>
-  terminal: <static analysis command>
-  ```
-- [ ] All pass. CI status is green (check via `mcp__github__*` if connected).
+If the agent has shell access, check out the PR branch and run
+each gate. Otherwise, ask the user to confirm gate status.
 
-### 2d. No open SPEC_DEVIATION
-- [ ] `search_files` pattern `SPEC_DEVIATION` in the diff — any new deviations?
-- [ ] If found, verify each has a resolution (code fixed or spec updated + ADR).
+### Step 4: SPEC_DEVIATION
 
-### 2e. ADRs for hard-to-reverse decisions
-- [ ] If the PR introduces a new pattern, dependency, or architectural change → ADR exists in `docs/architecture/adr/`.
+For each deviation, write a SPEC_DEVIATION entry:
 
-### 2f. Living docs and scope
-- [ ] Glossary/context-map updated if language or boundary changed.
-- [ ] Nothing from the spec's "Out of scope" section was implemented.
+```markdown
+### SPEC_DEVIATION-001: AC3 says "p95 < 200ms" but tests cover only 10 users
 
-## Phase 3 — Verdict (Implement)
+- **Files**: auth/middleware_test.go
+- **What's missing**: load test at 100 concurrent users
+- **Recommended action**: extend test or revise AC3
+```
 
-Produce a clear result:
+### Step 5: write pr-review.md
 
-**APPROVE** if all checks pass. Note minor suggestions as non-blocking comments.
+```markdown
+# PR review: <NNNN> — <short title>
 
-**CHANGES REQUIRED** if any check fails. List each failure with evidence:
-> ❌ AC-3 has no test — `search_files` found no `test_AC_3` in test dirs.
-> ❌ Open SPEC_DEVIATION at `src/api/handler.ts:42` — code retries 5x, spec says 3x.
-> ❌ No ADR for new dependency `stripe` (hard-to-reverse decision).
+## Summary
 
-If MCP connected, offer to post the verdict as a comment on the PR/MR.
+| Category | Status |
+|----------|--------|
+| ACs implemented | 4/5 |
+| Gates passing | 5/5 |
+| SPEC_DEVIATION | 1 |
 
-## Rules
+## Recommendation
 
-- **Check process, not bugs.** Don't review code quality — that's a different review.
-- **Evidence-based.** Every check cites the file or search result that proves it.
-- **Scope-bound.** Only check what this PR changes. Don't expand to unrelated issues.
-- If CI is still running, note it as pending — don't block on incomplete runs.
+- [ ] Approve
+- [x] Request changes (SPEC_DEVIATION-001)
+
+## Suggested PR comment
+
+> SPEC_DEVIATION-001: AC3 mentions p95 < 200ms under 100 concurrent
+> users, but the test only runs at 10. Either extend the test or
+> revise the AC. The PR as-is does not satisfy AC3.
+```
+
+## Examples
+
+See `examples/` directory in the bundled skill for worked examples
+covering common audit/eval/PR/roadmap scenarios.
+
+## Anti-patterns
+
+- ❌ Approving without reading spec.md. The spec IS the contract.
+- ❌ Confusing "looks good" with "matches spec". Check the diff.
+- ❌ Skipping deviations. Document them.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `spec-pr-align` | AC missing in code | Block merge. |
+| `gates-pass` | Gate fails | Block merge. |
+| `deviations-documented` | Drift, no doc | Block merge until documented. |
+
+## Related skills
+
+- `validar` — validates the spec against implementation after merge
+- `nova-feature` — produced the spec being reviewed

@@ -4,6 +4,61 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-06-24
+
+Sprint 10 second batch: 16 vendor-neutral skills, all rewritten
+top-of-line to match the open `docs/SKILL-SCHEMA.md` spec.
+
+### Added
+- **15 skills rewritten** (top-of-line, NOT ported from spec-driven):
+  - `nova-feature` — start a feature; tier it; produce spec.md +
+    tasks.md with measurable ACs
+  - `clarificar` — structured interview to sharpen ambiguous ACs
+  - `validar` — DoD check; verify code matches spec, document
+    SPEC_DEVIATION
+  - `kickoff` — greenfield discovery or brownfield mapping;
+    vision, personas, MVP canvas, context map
+  - `handoff` — pause/resume session via `.radiant-harness/state.md`
+  - `integracoes` — discover MCPs/tools with account-boundary safety
+  - `mapear` — analyze existing codebase → assessment.md
+  - `diagramar` — C4-model Mermaid diagrams (Context/Container/
+    Component)
+  - `adr` — Architecture Decision Records in Nygard format
+  - `revisar-pr` — PR review against spec; SPEC_DEVIATION report
+  - `auditar` — project-wide conformity (frontmatter, links, AC
+    traceability)
+  - `metricas` — Lead Time, Throughput, maturity score (blameless)
+  - `setup-ci` — generate CI workflow with radiant gates
+  - `camada-agentica` — generate AGENTS.md + opt-in native views
+  - `evals` — spec→code fidelity score, file:line evidence
+  - `roadmap` — sequence features by value × effort, dependency graph
+- **Each skill** has full schema (frontmatter.yaml + SKILL.md):
+  - Decision tree (ASCII)
+  - Workflow (numbered steps)
+  - Examples (at least 1 per skill)
+  - Anti-patterns (with wrong/correct pairs)
+  - Failure modes (recovery procedures)
+  - Related skills (cross-references)
+  - Zero Claude-centrism: no `CLAUDE.md`, no slash commands as
+    primary entry, references are universal
+- **`TestAllBundledSkillsValidateCleanly`** — CI guard that fails
+  if any bundled skill breaks the schema. Tests run per-skill.
+
+### Stats
+- 16 skills bundled (was 1 in 0.4.0)
+- 208 tests passing (was 207, +1 aggregate regression test)
+- Coverage: skill package ~100%
+- 6/6 cross-compile clean
+- vet clean, gofmt clean
+
+### What's next (Sprint 10 third batch)
+- `radiant init` extracts skills to `.radiant-harness/skills/`
+- `radiant spec <intent>` command (interactive interview)
+- `AGENTS.md` auto-generation
+- `radiant state` + `radiant handoff` commands
+- `--tier` flag with auto-detect
+- Native view generation opt-in via `--agent=<list>`
+
 ## [0.4.0] — 2026-06-24
 
 Sprint 10 (first batch): vendor-neutral skill runtime. Foundation

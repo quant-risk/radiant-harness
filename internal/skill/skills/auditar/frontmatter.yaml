@@ -1,0 +1,54 @@
+name: auditar
+version: 1.0.0
+description: |
+  Audits the radiant-harness project layout for conformity:
+  frontmatter on docs, valid links, AC→test traceability,
+  ADRs in place for major decisions, no stale SPEC_DEVIATION.
+when_to_use: |
+  Before major releases. Quarterly check. When CI fails
+  suspiciously and you suspect structural drift.
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: scope
+    type: enum
+    required: false
+    description: |
+      "full" | "docs" | "specs" | "adrs". Defaults to "full".
+
+outputs:
+  - path: docs/audit-report.md
+    type: artifact
+    description: |
+      Findings list with: severity, location, fix recommendation.
+
+gates:
+  - name: all-frontmatter-valid
+    description: Every doc with YAML frontmatter parses cleanly.
+  - name: all-links-resolve
+    description: No broken cross-references.
+  - name: traceability-1to1
+    description: Every AC traces to ≥1 task; every task traces to ≥1 AC.
+  - name: no-stale-deviations
+    description: SPEC_DEVIATION entries have resolution (closed or documented).
+
+context_provides:
+  - docs/
+  - specs/
+
+commands_available:
+  - radiant audit
+
+related_skills:
+  - validar
+  - revisar-pr
+  - metricas
+
+anti_patterns:
+  - Running the audit once and assuming the project stays conformant. Run on every release.
+  - Ignoring low-severity findings. They compound.
+  - Auto-fixing without showing the diff. Audit changes need review.
+
+author: radiant-harness contributors
+license: MIT

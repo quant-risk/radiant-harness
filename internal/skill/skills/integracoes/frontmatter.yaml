@@ -1,0 +1,77 @@
+name: integracoes
+version: 1.0.0
+description: |
+  Discovers MCPs and tools the team uses (Jira, Confluence,
+  Notion, GitHub, cloud providers, etc.). Records which are
+  validated for production use. NEVER auto-configures without
+  explicit approval — the account/workspace boundary matters.
+when_to_use: |
+  Before starting a new project (so the kickoff interviews can
+  pull real data from MCPs), or when the team adds a new tool
+  and wants to make it available to agents.
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+
+inputs:
+  - name: scope
+    type: enum
+    required: false
+    description: |
+      "all" (discover every tool the user mentions), "specific"
+      (only the named tool). Defaults to "all".
+  - name: tool
+    type: string
+    required: false
+    description: |
+      For scope="specific": which tool to look up.
+
+outputs:
+  - path: docs/engineering/integrations.md
+    type: artifact
+    description: |
+      List of MCPs / tools with: name, account/workspace (bus vs
+      personal), validated status, MCP server (if any), commands
+      the agent should use to invoke it.
+  - path: .mcp.json
+    type: artifact
+    description: |
+      ONLY written if user explicitly approves. Records the
+      approved MCP servers for the project.
+
+gates:
+  - name: account-boundary-clarified
+    description: |
+      For each MCP, the user clarified which account/workspace
+      to use (business vs personal). NEVER default.
+    on_failure: |
+      Ask before writing .mcp.json. Wrong workspace = data leak.
+  - name: validated
+    description: |
+      At least one test call per MCP succeeded. "Discovered" is
+      not enough — the agent should have run a read-only query.
+
+context_provides:
+  - state.md
+
+commands_available:
+  - radiant integrations discover
+
+related_skills:
+  - kickoff
+  - nova-feature
+
+anti_patterns:
+  - |
+    Auto-configuring .mcp.json without approval. A personal
+    Notion account could leak into a business context.
+  - |
+    Treating "discovered" as "ready". Always test with a
+    read-only query before declaring an MCP operational.
+  - |
+    Hardcoding tool-specific behavior into radiant. Each MCP
+    is configured per-project, not globally.
+
+author: radiant-harness contributors
+license: MIT

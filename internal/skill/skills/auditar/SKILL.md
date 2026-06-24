@@ -1,95 +1,103 @@
----
-name: auditar
-description: Validate SDD conformity via structural scripts and judgment.
----
+# Skill: auditar
 
-# Skill: Audit SDD Pipeline
+> Project-wide conformity check. Doc frontmatter, links, AC
+> traceability, ADRs, deviations.
 
-Validates that the project conforms to the SDD pipeline. Two layers:
-**structural** (deterministic, scriptable) and **semantic** (requires judgment).
-
-## Phase 1 — Structural check (deterministic)
-
-Run automated validators. These are pass/fail — no judgment needed.
-
-1. **Pipeline audit script:**
-   ```
-   terminal: node scripts/audit-esteira.mjs .
-   ```
-   Checks: required docs exist, frontmatter valid, directory structure matches SDD layout.
-
-2. **Mermaid validation** (if diagrams exist):
-   ```
-   terminal: node scripts/validate-mermaid.mjs .
-   ```
-   Checks: all Mermaid blocks in `docs/architecture/diagrams.md` parse without errors.
-
-3. **Frontmatter validation:** scan all `docs/**/*.md` and `specs/**/*.md`:
-   - Every doc has `name` and `description` in frontmatter.
-   - Pipeline docs have `alwaysApply` field.
-   - Skills have `name` + `description` (no `alwaysApply`).
-
-4. Record structural results: ✅ pass / ❌ fail with specific file and error.
-
-> If audit scripts don't exist yet, note it as a gap and generate a minimal version.
-
-## Phase 2 — Semantic check (judgment)
-
-These require reading and reasoning — a script can't do them.
-
-### 2a. Traceability
-- For each feature in `specs/`, verify: every `AC-N` in `spec.md` has a corresponding task in `tasks.md`.
-- For each `AC-N`, `search_files` test directories for the AC ID — confirm a test exists.
-- Flag orphans: AC without task, task without AC, test without AC.
-
-### 2b. Orphan specs
-- List all `specs/NNNN-*/` directories.
-- For each, check: does implementation exist in `src/`? Is there a merged PR?
-- Flag specs with no implementation (stale) or implementation with no spec (rogue).
-
-### 2c. Living docs freshness
-- `read_file` `docs/glossary.md` — are the terms still used in code? `search_files` for each term in `src/`.
-- `read_file` `docs/architecture/context-map.md` — do the bounded contexts match the actual `src/` structure?
-- Flag stale entries: terms no longer in code, contexts that merged or split.
-
-### 2d. Pending DoD violations
-- `search_files` pattern `SPEC_DEVIATION` across `src/` and `specs/` — list all open deviations.
-- Check `docs/STATE.md` for features marked "done" — do they have open deviations? That's a DoD violation.
-
-### 2e. Link integrity
-- `search_files` pattern `\]\(` in all docs — extract markdown links.
-- Verify each link target exists (`read_file` or `search_files` for the path).
-- Flag broken links.
-
-## Phase 3 — Generate audit report (Implement)
-
-1. Compile results into a structured report:
+## Decision tree
 
 ```
-## SDD Pipeline Audit — <date>
-
-### Structural: PASS / FAIL
-- [✅/❌] audit-esteira.mjs: <details>
-- [✅/❌] validate-mermaid.mjs: <details>
-- [✅/❌] frontmatter: <n> issues
-
-### Semantic findings
-| Category | Finding | Severity | Recommendation |
-|----------|---------|----------|----------------|
-| Traceability | AC-3 in spec 0002 has no test | high | Add test_AC_3 |
-| Orphan | spec 0001 has no PR | med | Implement or archive |
-| Living docs | "Widget" in glossary, not in code | low | Remove or update |
-
-### Overall: CONFORMANT / NON-CONFORMANT
+Audit requested (scope: full|docs|specs|adrs)
+        │
+        ▼
+Walk the scope; for each file:
+        │
+        ├── has YAML frontmatter? ──── yes ──► parses? ──── yes ──► ✓
+        │                                    │              │
+        │                                    │              └── no ──► ✗ fix
+        │                                    └── no ──► depends on convention
+        │
+        ├── cross-references another file? ──► link resolves? ──── yes ──► ✓
+        │                                                       │
+        │                                                       └── no ──► ✗
+        │
+        └── for spec.md + tasks.md:
+            each AC → ≥1 task? each task → ≥1 AC?
 ```
 
-2. Save report to `docs/STATE.md` (audit section) or a dedicated `docs/audit-<date>.md`.
-3. Present findings to the user with prioritized fix list.
+## Workflow
 
-## Rules
+### Step 1: walk the scope
 
-- **Structural first, semantic second.** Fix structural failures before evaluating semantics.
-- **Evidence-based.** Every finding cites the file and search that revealed it.
-- **Non-conformant is actionable.** Each finding has a specific fix recommendation.
-- Re-running `/auditar` refreshes the report — it's not a one-time gate.
-- Don't fix issues during the audit — that's a separate step. Report, then plan fixes.
+Recursive directory walk. For each `.md` file, parse the
+frontmatter (if any) and check it against the schema.
+
+### Step 2: check links
+
+Extract every `[text](path)` link. Resolve relative to the file.
+Verify the target exists.
+
+### Step 3: AC traceability
+
+For every `specs/<NNNN>-<slug>/spec.md`:
+- Extract ACs
+- Open `tasks.md` for the same spec
+- Verify: every AC has ≥1 task in its `Covers` column
+- Verify: every task has ≥1 AC in its `Covers` column
+
+### Step 4: SPEC_DEVIATION status
+
+For every spec with a `## Deviations` section:
+- Each entry should have a status (open / closed)
+- Closed entries should have a resolution
+
+### Step 5: write the report
+
+```markdown
+# Audit report
+
+## Summary
+
+| Severity | Count |
+|----------|-------|
+| Error    | 0     |
+| Warning  | 2     |
+| Info     | 5     |
+
+## Findings
+
+### [WARNING] specs/0003-search/spec.md AC3 has no covering task
+- **Severity**: warning
+- **Location**: specs/0003-search/spec.md:23
+- **Fix**: add a task with AC3 in the Covers column, or remove AC3.
+
+### [INFO] docs/architecture/adr/0001 has no supersession link
+- **Severity**: info
+- **Location**: docs/architecture/adr/0001-use-postgres.md
+- **Fix**: if superseded, link to the replacement ADR.
+```
+
+## Examples
+
+See `examples/` directory in the bundled skill for worked examples
+covering common audit/eval/PR/roadmap scenarios.
+
+## Anti-patterns
+
+- ❌ Audit once, assume conformant. Re-audit every release.
+- ❌ Ignore low-severity. They compound.
+- ❌ Auto-fix without showing the diff.
+
+## Failure modes
+
+| Gate | Failure | Recovery |
+|------|---------|----------|
+| `all-frontmatter-valid` | A doc has broken frontmatter | Show the doc, ask user to fix or accept. |
+| `all-links-resolve` | A cross-reference is broken | Show the broken link, ask user. |
+| `traceability-1to1` | AC has no task | Show the orphan AC, ask user to add or remove. |
+| `no-stale-deviations` | SPEC_DEVIATION is unresolved | Show the entry, ask user to close or document. |
+
+## Related skills
+
+- `validar` — per-feature DoD check (audit is project-wide)
+- `revisar-pr` — per-PR check (audit is project-wide)
+- `metricas` — uses audit data for maturity scoring

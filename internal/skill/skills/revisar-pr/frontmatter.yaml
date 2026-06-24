@@ -1,0 +1,62 @@
+name: revisar-pr
+version: 1.0.0
+description: |
+  Reviews a PR/MR against the spec it implements. Generates a
+  SPEC_DEVIATION report: code that diverges from spec.md, ACs
+  not tested, gates not run, undocumented scope creep.
+when_to_use: |
+  PR is opened. CI calls this as a gate. Manual invocation when
+  the team wants a sanity check.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: pr-url
+    type: string
+    required: false
+    description: URL to the PR (if reviewing from GitHub)
+  - name: spec-path
+    type: path
+    required: true
+    description: Path to specs/<NNNN>-<slug>/ being implemented.
+  - name: diff
+    type: string
+    required: false
+    description: |
+      PR diff (text). If absent, this skill asks the agent to
+      fetch it via the GitHub MCP (if connected).
+
+outputs:
+  - path: specs/<NNNN>-<slug>/pr-review.md
+    type: artifact
+    description: |
+      PR review report: SPEC_DEVIATION list, AC coverage, gate
+      results, suggested comments to post on the PR.
+
+gates:
+  - name: spec-pr-align
+    description: Every AC has corresponding code in the diff.
+  - name: gates-pass
+    description: All task gates pass on the PR's branch.
+  - name: deviations-documented
+    description: Code that diverges from spec is documented.
+
+context_provides:
+  - <spec-path>/spec.md
+  - <spec-path>/tasks.md
+
+commands_available:
+  - radiant review-pr <spec-path>
+
+related_skills:
+  - validar
+  - nova-feature
+
+anti_patterns:
+  - Approving without reading the spec. The spec IS the contract.
+  - Confusing "looks good" with "matches spec". Check the diff.
+  - Skipping SPEC_DEVIATION when present. Document it.
+
+author: radiant-harness contributors
+license: MIT

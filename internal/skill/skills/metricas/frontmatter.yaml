@@ -1,0 +1,55 @@
+name: metricas
+version: 1.0.0
+description: |
+  Measures delivery maturity: Lead Time (spec → merge), Throughput
+  (features/sprint), AC coverage, gate pass rate, SPEC_DEVIATION
+  rate. Outputs a maturity score per the Continuous Delivery
+  conventions.
+when_to_use: |
+  Quarterly review. Retrospective. Sprint planning (to set
+  realistic goals). When the team feels stuck.
+tier_eligible:
+  - architecture
+
+inputs:
+  - name: window
+    type: enum
+    required: false
+    description: |
+      "30d" | "90d" | "sprint" | "all". Defaults to "90d".
+
+outputs:
+  - path: docs/metrics-report.md
+    type: artifact
+    description: |
+      Lead Time histogram, throughput, AC coverage %, gate pass
+      rate, deviation rate, maturity score.
+
+gates:
+  - name: data-sufficient
+    description: |
+      At least 5 features completed in the window. Less than
+      that → numbers are too noisy to act on.
+  - name: blameless-tone
+    description: |
+      Report uses blameless language. No individual named.
+      Focuses on systems, not people.
+
+context_provides:
+  - specs/
+  - .radiant-harness/state.md (timestamps)
+
+commands_available:
+  - radiant metrics
+
+related_skills:
+  - auditar
+  - validar
+
+anti_patterns:
+  - Naming individuals. Blameless postmortem culture.
+  - Acting on small samples. <5 features = noise.
+  - Conflating velocity with quality. Throughput matters, but so does AC coverage.
+
+author: radiant-harness contributors
+license: MIT

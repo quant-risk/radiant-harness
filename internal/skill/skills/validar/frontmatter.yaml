@@ -1,0 +1,75 @@
+name: validar
+version: 1.0.0
+description: |
+  Runs the Definition of Done check on a finished feature: every
+  AC has a green test, every gate passes, the code matches the
+  spec, deviations are documented. Outputs a structured report.
+when_to_use: |
+  After `radiant run` finishes. Before merging or opening a PR.
+  Equivalent to the DoD check in tier system.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: spec-path
+    type: path
+    required: true
+    description: |
+      Path to specs/<NNNN>-<slug>/ containing spec.md, tasks.md,
+      and the implemented code.
+
+outputs:
+  - path: specs/<NNNN>-<slug>/validation.md
+    type: artifact
+    description: |
+      Structured report: ACs green/red, gate results, deviations,
+      SPEC_DEVIATION list.
+
+gates:
+  - name: ac-testable
+    description: |
+      Every AC in spec.md is Given/When/Then with measurable
+      conditions. Reject if any AC fails this.
+  - name: ac-tested
+    description: |
+      Every AC has a corresponding test (in tasks.md's Coverage
+      column). Run the test and confirm it passes.
+  - name: gates-pass
+    description: |
+      Every task's gate command exits 0. If any fails, surface
+      the failing gate and which task.
+  - name: spec-deviation
+    description: |
+      If the code diverges from spec.md, the deviation must be
+      documented in spec.md under "Deviations" with a rationale.
+
+context_provides:
+  - state.md
+  - glossary.md
+  - <spec-path>/spec.md
+  - <spec-path>/tasks.md
+
+commands_available:
+  - radiant validate <spec-path>
+  - radiant validate <spec-path> --gates
+
+related_skills:
+  - nova-feature
+  - revisar-pr
+  - metricas
+
+anti_patterns:
+  - |
+    Marking an AC as "tested" without running the test. "It
+    looks right" is not a test. Run it.
+  - |
+    Skipping SPEC_DEVIATION documentation when the code
+    diverges. Drift without record = silent scope creep.
+  - |
+    Passing the DoD by listing "everything looks good" without
+    concrete gates. The report must include actual test
+    output, not summaries.
+
+author: radiant-harness contributors
+license: MIT
