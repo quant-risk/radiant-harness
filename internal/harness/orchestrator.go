@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 
@@ -286,14 +285,12 @@ func (o *Orchestrator) runGate(ctx context.Context, gate string) error {
 	gateCtx, cancel := context.WithTimeout(ctx, DefaultGateTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(gateCtx, "sh", "-c", gate)
-	cmd.Dir = o.ProjectDir
-	out, err := cmd.CombinedOutput()
+	out, err := runGateShell(gateCtx, o.ProjectDir, gate)
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("gate timeout after %s\n%s", DefaultGateTimeout, string(out))
+			return fmt.Errorf("gate timeout after %s\n%s", DefaultGateTimeout, out)
 		}
-		return fmt.Errorf("gate failed: %s\n%s", err, string(out))
+		return fmt.Errorf("gate failed: %s\n%s", err, out)
 	}
 	return nil
 }

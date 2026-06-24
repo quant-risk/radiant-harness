@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-06-24
+
+Sprint 3: real cross-platform builds, auto model routing, cost estimation.
+
+### Added
+- **`--auto-route` flag** for `radiant run`. Picks a per-phase model
+  based on the anchor preset: research routes to top-tier (Opus from
+  a Sonnet anchor), plan/implement stay mid-tier. Falls back to the
+  anchor if no sibling exists at the requested tier (e.g. DeepSeek
+  family has no top-tier model).
+- **`llm.AutoRoute(anchor, phase)`** function in
+  `internal/llm/routing.go`. Vendor-aware routing — same family
+  shared across presets.
+- **`llm.CostUSD(model, input, output)`** estimates USD cost from a
+  token count and a model name. `PricePerMTokensUSD` table covers all
+  14 presets with vendor-published rates (Anthropic, OpenAI, Google,
+  DeepSeek, Mistral, Groq, xAI, Xiaomi). `FormatCost(usd)` returns
+  `$0.42` or `<$0.01` for human display.
+- **Cross-platform lock** (`internal/harness/lock.go`) using atomic
+  file rename. Works on Linux, macOS, AND Windows (NTFS). Replaces
+  `syscall.Flock` which is Unix-only.
+- **Cross-platform gate runner** via build tags:
+  - `internal/harness/gate_unix.go` — `sh -c`
+  - `internal/harness/gate_windows.go` — `cmd /c`
+  - `internal/engine/gate_unix.go` and `gate_windows.go` (mirror)
+  - `internal/quality/gate_unix.go` and `gate_windows.go` (mirror)
+
+### Changed
+- **Cross-platform build verified**: `GOOS=linux/amd64`,
+  `GOOS=darwin/arm64`, AND `GOOS=windows/amd64` all compile cleanly.
+  Was previously broken on Windows because `syscall.Flock` is
+  Unix-only.
+- **`State.Lock()` and `State.Release()`** rewritten to use the new
+  rename-based lock. Same external behavior (blocks until acquired,
+  serializes orchestrator runs) but works everywhere.
+
+### Stats
+- 150 tests passing (up from 118 in 0.2.1)
+- Coverage: harness 61.1% (above 60% threshold!), quality 59.5%,
+  benchmark 77%, llm 84%, spec 89%
+- Zero race conditions under `-race` detector
+- 3 OS targets × 2 architectures each compile and lint clean
+
 ## [0.2.1] — 2026-06-24
 
 Sprint 2: empirical validation, gap closure, vendor diversity.

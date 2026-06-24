@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,10 +23,6 @@ import (
 // Most OpenRouter/Anthropic accounts have low rate limits (5–20 req/min)
 // and bursting more than ~4 in parallel produces 429s rather than speed.
 const MaxParallelTasks = 4
-
-// GateTimeout caps a single gate (test runner) execution. Hung gates usually
-// indicate a flaky test or deadlock; 5 minutes is generous.
-const GateTimeout = 5 * time.Minute
 
 // Allowed path prefix for code blocks emitted by the LLM. Paths outside the
 // project directory are rejected to prevent a misaligned response from
@@ -357,14 +352,12 @@ func (e *Engine) runGate(ctx context.Context, gate string) error {
 	defer cancel()
 
 	e.log("  Gate: %s", gate)
-	cmd := exec.CommandContext(gateCtx, "sh", "-c", gate)
-	cmd.Dir = e.projectDir
-	out, err := cmd.CombinedOutput()
+	out, err := runShellGate(gateCtx, e.projectDir, gate)
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("gate timeout after %s\n%s", GateTimeout, string(out))
+			return fmt.Errorf("gate timeout after %s\n%s", GateTimeout, out)
 		}
-		return fmt.Errorf("gate failed: %w\n%s", err, string(out))
+		return fmt.Errorf("gate failed: %w\n%s", err, out)
 	}
 	return nil
 }

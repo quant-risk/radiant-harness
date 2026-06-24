@@ -4,20 +4,15 @@
 > em **vendor neutrality** (nenhum provedor é privilegiado) e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
-## Sprint 2 — done (2026-06-24)
+## Sprint 3 — done (2026-06-24)
 
-- [x] `radiant doctor` — environment diagnostic
-- [x] `radiant bench` — cross-framework benchmark with `internal/benchmark/`
-- [x] Mistral presets (`mistral-large-2`, `codestral-22b`)
-- [x] Groq presets (`groq-llama-3.3-70b`, `groq-mixtral-8x7b`)
-- [x] xAI preset (`grok-2`)
-- [x] CI coverage thresholds
-- [x] 118 tests passing, 6/6 packages > 0% coverage
-- [x] `internal/plugin/` removed (dead code)
-- [x] `internal/benchmark/` implemented
-- [x] Empirical validation (Go installed, build/vet/test run, smoke green)
+- [x] Windows shell + flock via build tags (rename-based lock)
+- [x] Cross-platform build verified: linux/amd64, darwin/arm64, windows/amd64
+- [x] Auto model routing (`--auto-route` flag, `llm.AutoRoute()`)
+- [x] Cost tracking (`llm.CostUSD()`, `llm.FormatCost()`, price table)
+- [x] 150 tests passing (up from 118), zero races
 
-## Sprint 3 — up next
+## Sprint 4 — up next
 
 ## Princípios
 

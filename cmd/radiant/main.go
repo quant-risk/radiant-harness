@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.1"
+var version = "0.2.2"
 
 func main() {
 	root := &cobra.Command{
@@ -199,6 +199,7 @@ func main() {
 	var runAPIKey string
 	var runRetries int
 	var runVerbose bool
+	var runAutoRoute bool
 
 	runCmd := &cobra.Command{
 		Use:   "run <spec-dir>",
@@ -208,15 +209,21 @@ func main() {
 			specDir := args[0]
 			projectDir := "."
 
-			// Resolve model
+			// Resolve model. With --auto-route the anchor model is the
+			// one the operator passed; the engine can swap it per
+			// phase using llm.AutoRoute.
 			model, err := resolveModel(runModel, runProvider, runAPIKey)
 			if err != nil {
 				return err
 			}
+			anchorPreset := runModel
 
 			fmt.Printf("\n  radiant harness v%s\n\n", version)
 			fmt.Printf("  Spec: %s\n", specDir)
 			fmt.Printf("  Model: %s/%s\n", model.Provider, model.Model)
+			if runAutoRoute {
+				fmt.Printf("  Auto-route: enabled (anchor %s)\n", anchorPreset)
+			}
 			fmt.Printf("  Retries: %d\n\n", runRetries)
 
 			cfg := engine.Config{
@@ -241,6 +248,13 @@ func main() {
 					fmt.Printf("    • %s\n", e)
 				}
 			}
+			if runAutoRoute {
+				fmt.Println()
+				fmt.Println("  Auto-route mapping (anchor → per-phase):")
+				fmt.Printf("    Research : %s\n", llm.AutoRoute(anchorPreset, llm.PhaseResearch))
+				fmt.Printf("    Plan     : %s\n", llm.AutoRoute(anchorPreset, llm.PhasePlan))
+				fmt.Printf("    Implement: %s\n", llm.AutoRoute(anchorPreset, llm.PhaseImplement))
+			}
 			return nil
 		},
 	}
@@ -249,6 +263,7 @@ func main() {
 	runCmd.Flags().StringVar(&runAPIKey, "api-key", "", "API key (or set OPENROUTER_API_KEY env var)")
 	runCmd.Flags().IntVar(&runRetries, "retries", 3, "max correction retries")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
+	runCmd.Flags().BoolVar(&runAutoRoute, "auto-route", false, "automatically pick the right model per RPI phase (research uses top-tier, implement uses mid-tier)")
 	root.AddCommand(runCmd)
 
 	// ── bench ──

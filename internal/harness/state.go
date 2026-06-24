@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
@@ -27,14 +26,22 @@ var validTransitions = map[radiant.HarnessState][]radiant.HarnessState{
 }
 
 // State manages the harness state machine with guarded transitions and
-// crash-safe persistence (atomic write + fsync + advisory flock).
+// crash-safe persistence (atomic write + fsync + rename). Concurrency
+// safety comes from two layers:
+//
+//  1. Intra-process: a sync.Mutex serializes all readers/writers of
+//     the in-memory Progress.
+//
+//  2. Inter-process: an advisory lock on the .radiant-harness directory
+//     serializes `radiant run` invocations on the same project across
+//     processes (see lock.go for the cross-platform implementation).
 type State struct {
 	mu       sync.Mutex
 	data     radiant.Progress
 	dir      string
 	filePath string
 	lockPath string
-	lockFile *os.File
+	lock     *Lock
 }
 
 // NewState creates a new State for a project and loads any existing progress
@@ -47,7 +54,7 @@ func NewState(projectDir string) *State {
 	s := &State{
 		dir:      dir,
 		filePath: filepath.Join(dir, "progress.json"),
-		lockPath: filepath.Join(dir, "lock"),
+		lockPath: dir,
 		data: radiant.Progress{
 			State:     radiant.StateIdle,
 			StartedAt: time.Now(),
@@ -57,42 +64,41 @@ func NewState(projectDir string) *State {
 	return s
 }
 
-// Lock acquires an exclusive advisory flock on the state directory, blocking
-// until any other holder releases. Combined with Release(), this serializes
-// orchestrator runs on the same project across processes so two parallel
-// `radiant run` invocations can't corrupt progress.json.
+// Lock acquires an exclusive advisory lock on the state directory, blocking
+// (with retries up to the timeout) until any other holder releases.
+// Combined with Release(), this serializes orchestrator runs on the same
+// project across processes so two parallel `radiant run` invocations can't
+// corrupt progress.json. LockTimeout is the max time to wait before
+// returning an error.
 func (s *State) Lock() error {
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir state dir: %w", err)
-	}
-	f, err := os.OpenFile(s.lockPath, os.O_RDWR|os.O_CREATE, 0o644)
+	lock, err := LockWithRetry(s.lockPath, LockTimeout)
 	if err != nil {
-		return fmt.Errorf("open lock file: %w", err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("flock: %w", err)
+		return fmt.Errorf("acquire harness lock: %w", err)
 	}
 	s.mu.Lock()
-	s.lockFile = f
+	s.lock = lock
 	s.mu.Unlock()
 	return nil
 }
 
-// Release releases the advisory flock and closes the lock file handle. Safe
-// to call multiple times. After Release the State is still usable for reads
-// and Snapshot() calls, but no longer guards against concurrent writers.
+// Release releases the advisory lock. Safe to call multiple times. After
+// Release the State is still usable for reads and Snapshot() calls, but
+// no longer guards against concurrent writers.
 func (s *State) Release() {
 	s.mu.Lock()
-	f := s.lockFile
-	s.lockFile = nil
+	lock := s.lock
+	s.lock = nil
 	s.mu.Unlock()
-	if f == nil {
+	if lock == nil {
 		return
 	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	_ = f.Close()
+	_ = lock.Release()
 }
+
+// LockTimeout is how long Run waits for an advisory lock before failing.
+// Two minutes is enough for one Run to finish a typical task but short
+// enough that a stuck Run doesn't permanently block the next one.
+const LockTimeout = 2 * time.Minute
 
 // Transition moves to a new state with guard validation. Returns an error
 // if the transition is not allowed by the state machine.

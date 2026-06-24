@@ -6,19 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
 )
 
-// gateTimeout caps any single gate (test runner, type-checker) execution so a
-// hung gate can't stall the whole validate run. 5 minutes is generous for any
-// realistic test suite; anything longer is almost always a deadlock.
-const gateTimeout = 5 * time.Minute
+// gateTimeout is defined in gate_unix.go / gate_windows.go.
 
 // allowedGateBinaries mirrors the allowlist enforced by the harness agent
 // runner. Validation is stricter than the agent (we're static-checking
@@ -160,21 +155,10 @@ func RunGates(projectDir, specDir string) []GateResult {
 	return results
 }
 
-// runShellGate executes the gate as `sh -c <gate>` with the projectDir as
-// cwd. Returns the combined stdout/stderr and any error from execution or
-// context cancellation.
-func runShellGate(ctx context.Context, projectDir, gate string) (string, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", gate)
-	cmd.Dir = projectDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return string(out), fmt.Errorf("gate timeout after %s", gateTimeout)
-		}
-		return string(out), fmt.Errorf("gate failed: %w", err)
-	}
-	return string(out), nil
-}
+// runShellGate is implemented in gate_unix.go / gate_windows.go so the
+// shell binary matches the host OS. This wrapper just unifies the
+// signature.
+var _ = errors.New // keep import in case future variants need it
 
 // gateRowRe matches a single markdown table row from tasks.md with a
 // Gate (command) column. We accept optional surrounding whitespace and
