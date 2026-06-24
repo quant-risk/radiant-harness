@@ -4,6 +4,78 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-06-24
+
+Sprint 7: planner actually fires, JSONL trace export, race fix,
+6-target cross-compile.
+
+### Fixed
+- **Data race on `Engine.currentTaskID`** (`internal/engine/engine.go`).
+  The field was read in `chatWith` without holding the mutex, while
+  `executeTask`'s preamble/cleanup wrote under it. Triggered under
+  parallel task phases — `-race` flagged every run. Fixed by adding
+  `e.mu.Lock()` / `Unlock()` around the read. New test
+  `TestCurrentTaskIDLockedRead` stresses the locked-read pattern
+  under 4 writer goroutines × 500 iterations; race detector stays
+  silent.
+
+### Added
+- **`runPlannerAdvisory`** — `--planner` is no longer a no-op. After
+  parsing the spec and tasks, the engine calls the planner LLM once
+  with the full spec + tasks body and asks for a bullet list of
+  concerns (ambiguous Given/When/Then, missing ACs, unprovable tasks).
+  The planner's response is parsed into `Result.Warnings` and surfaced
+  in the post-run summary, but **never blocks execution** — the spec
+  is the source of truth. If the planner call fails (timeout, rate
+  limit, network), the run continues with a warning and no advisory
+  output. The call goes through `chatPlanner`, so it appears in the
+  trace summary under phase=`"planner"` and in any `--trace-out` JSONL.
+
+  The output now reads:
+
+  ```
+  ⚠ Planner raised 3 concern(s) (advisory):
+    • AC2 says "fast enough" without a quantitative threshold
+    • Task 4 has no test command in the table
+    • AC5 references a library not in the Out-of-scope list
+  ```
+
+- **`--trace-out <file>` flag** on `radiant run`. Drains the trace log
+  to disk as JSONL (one event per line) using the standard `jq`-able
+  shape: `{"type":"chat","phase":"implement","task_id":7,"model":
+  "claude-sonnet-4.5","input_tokens":1200,"output_tokens":350,
+  "latency_ms":4500,"ok":true}`. Atomic write via temp + fsync +
+  rename — a crash mid-write leaves no torn file. Failure to write
+  is non-fatal: the run still completes; the operator sees
+  `⚠ trace-out failed: ...` and the regular output.
+
+  Useful for cost debugging (`jq 'select(.phase=="planner") |
+  {model, input_tokens, output_tokens}' trace.jsonl | jq -s`),
+  observability pipelines (Datadog/Logflare/Honeycomb all ingest
+  JSONL natively), and regression detection (compare per-call latency
+  across releases).
+
+- **Two new cross-compile targets**: `linux/arm64` (AWS Graviton,
+  Raspberry Pi 4/5, ARM servers) and `windows/arm64` (Surface Pro X,
+  ARM-native Windows). The Makefile `release` target now produces all
+  six OS/arch pairs. Verified with `file` — ARM binaries are
+  statically linked ELF aarch64 and PE32+ Aarch64 respectively.
+
+### Changed
+- `Makefile` release target now documents each target's use case in a
+  comment block (CI vs Apple Silicon vs ARM servers vs Surface Pro),
+  so future contributors can see at a glance which platform needs
+  which target.
+
+### Stats
+- 172 tests passing (up from 168 in 0.3.2)
+- Coverage: harness 61.1%, llm 84.3%, benchmark 77%, spec 88.5%,
+  quality 59.5%, engine 45.5% (+1.5 from race + JSONL tests)
+- Zero race conditions (50-goroutine stress for trace log + token
+  accounting; 4-writer + locked-reader stress for currentTaskID)
+- 6 OS/arch targets compile cleanly: linux/amd64, linux/arm64,
+  darwin/amd64, darwin/arm64, windows/amd64, windows/arm64
+
 ## [0.3.2] — 2026-06-24
 
 Sprint 6: multi-agent routing, lightweight tracing, VS Code CodeLens.

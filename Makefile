@@ -28,12 +28,21 @@ clean:
 install: build
 	cp bin/radiant $(GOPATH)/bin/radiant
 
-# Cross-platform release
+# Cross-platform release. All six OS/arch targets the harness
+# advertises support for:
+#   linux/amd64     — x86 servers, CI, Docker on x86 hosts
+#   linux/arm64     — AWS Graviton, Raspberry Pi 4/5, Linux ARM servers
+#   darwin/amd64    — Intel Mac (rare but still in the wild)
+#   darwin/arm64    — Apple Silicon (M1/M2/M3/M4)
+#   windows/amd64   — x86 Windows, WSL2 default, most cloud VMs
+#   windows/arm64   — Surface Pro X, ARM-native Windows
 release:
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/radiant-linux-amd64 ./cmd/radiant/
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/radiant-darwin-arm64 ./cmd/radiant/
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/radiant-darwin-amd64 ./cmd/radiant/
+	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/radiant-linux-amd64     ./cmd/radiant/
+	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o dist/radiant-linux-arm64     ./cmd/radiant/
+	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/radiant-darwin-amd64    ./cmd/radiant/
+	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/radiant-darwin-arm64    ./cmd/radiant/
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/radiant-windows-amd64.exe ./cmd/radiant/
+	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o dist/radiant-windows-arm64.exe ./cmd/radiant/
 	@echo "✓ Release binaries in dist/"
 
 # Smoke test

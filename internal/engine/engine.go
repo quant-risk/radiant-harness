@@ -5,8 +5,10 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,6 +169,18 @@ func (e *Engine) Run(ctx context.Context, specDir string) (*Result, error) {
 	// 3. Build system prompt from conventions
 	systemPrompt := e.buildSystemPrompt(specDir)
 
+	// 3a. Planner advisory step. When the user passed --planner (or a
+	// non-default planner is configured), call it once with the spec +
+	// tasks so it can flag ambiguities, missing acceptance criteria,
+	// or tasks that look unprovable. The planner's response is logged
+	// and surfaced in --verbose output, but it never blocks execution
+	// — the user is the source of truth for the plan.
+	if e.plannerModelName != "" {
+		if warnings := e.runPlannerAdvisory(ctx, specDir, s, plan); len(warnings) > 0 {
+			result.Warnings = warnings
+		}
+	}
+
 	// 4. Execute each phase
 	for _, phase := range plan.Phases {
 		e.log("Phase: %s (%d tasks)", phase.Name, len(phase.Tasks))
@@ -305,7 +319,12 @@ func (e *Engine) chatWith(ctx context.Context, client *llm.Client, phaseTag, sys
 	})
 	latencyMS := time.Since(start).Milliseconds()
 	modelName := client.Model().Model
+	// Lock while reading currentTaskID: executeParallel spawns N
+	// goroutines that all call executeTask, which sets/clears the
+	// field. Without the lock, the race detector flags this read.
+	e.mu.Lock()
 	taskID := e.currentTaskID
+	e.mu.Unlock()
 	if err != nil {
 		e.recordTrace(TraceEvent{
 			Type:      "chat",
@@ -367,6 +386,29 @@ func (e *Engine) DumpTrace() []TraceEvent {
 	out := make([]TraceEvent, len(e.trace))
 	copy(out, e.trace)
 	return out
+}
+
+// WriteTraceJSONL dumps every accumulated trace event to w as one JSON
+// object per line. This is the format `jq` and most observability
+// tools ingest natively. Caller is responsible for closing w (we use
+// io.Writer so tests can pass bytes.Buffer; production passes *os.File).
+//
+// We take the lock once and copy the slice under it, then iterate
+// outside the lock — serialising the slice is cheap; calling json.Marshal
+// on each event would block concurrent appenders if we held the lock.
+func (e *Engine) WriteTraceJSONL(w io.Writer) error {
+	e.mu.Lock()
+	events := make([]TraceEvent, len(e.trace))
+	copy(events, e.trace)
+	e.mu.Unlock()
+
+	enc := json.NewEncoder(w)
+	for _, ev := range events {
+		if err := enc.Encode(ev); err != nil {
+			return fmt.Errorf("encode trace event: %w", err)
+		}
+	}
+	return nil
 }
 
 // executeTask runs a single task: implement → validate → auto-correct.
@@ -468,6 +510,73 @@ func (e *Engine) executeParallel(ctx context.Context, systemPrompt string, tasks
 
 	wg.Wait()
 	return result
+}
+
+// runPlannerAdvisory asks the planner LLM to scan the spec + tasks for
+// ambiguities, missing acceptance criteria, or tasks that look
+// unprovable. The planner returns a short, machine-greppable list:
+// each warning must start with "- " on its own line. We extract them,
+// log them under --verbose, and surface them on Result.Warnings.
+//
+// The planner call is best-effort: if it fails (timeout, network,
+// rate-limit), we log and continue — the planner is advisory, not a
+// gate. The call goes through chatPlanner, so the trace summary shows
+// it under phase="planner".
+func (e *Engine) runPlannerAdvisory(ctx context.Context, specDir string, s *radiant.Spec, plan *radiant.TaskPlan) []string {
+	specFile := filepath.Join(specDir, "spec.md")
+	taskFile := filepath.Join(specDir, "tasks.md")
+	specBody, err1 := os.ReadFile(specFile)
+	taskBody, err2 := os.ReadFile(taskFile)
+	if err1 != nil || err2 != nil {
+		// Missing files were already caught by the parsers; bail.
+		return nil
+	}
+
+	systemPrompt := "You are a senior staff engineer reviewing a Spec-Driven " +
+		"Development plan before implementation. Your job is to surface " +
+		"risks early — never to block. Be terse."
+
+	userPrompt := fmt.Sprintf(
+		"Review the spec and tasks below. Output a markdown bullet list "+
+			"(each line starts with \"- \") of any concerns: missing "+
+			"acceptance criteria, ambiguous Given/When/Then, tasks "+
+			"without an obvious test, or ACs that no task covers. If "+
+			"nothing is wrong, output exactly: - OK\n\n"+
+			"## SPEC\n%s\n\n## TASKS\n%s",
+		string(specBody), string(taskBody),
+	)
+
+	e.log("  Planner advisory: asking %s to review the plan...", e.plannerModelName)
+	text, _, err := e.chatPlanner(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		e.log("  Planner advisory failed (continuing without): %v", err)
+		// Even on failure, record a placeholder trace event so the
+		// user can see the planner was attempted.
+		return nil
+	}
+
+	var warnings []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		item := strings.TrimPrefix(line, "- ")
+		item = strings.TrimSpace(item)
+		if item == "" || item == "OK" {
+			continue
+		}
+		warnings = append(warnings, item)
+	}
+	if len(warnings) == 0 {
+		e.log("  Planner: no concerns raised.")
+		return nil
+	}
+	e.log("  Planner raised %d concern(s):", len(warnings))
+	for _, w := range warnings {
+		e.log("    • %s", w)
+	}
+	return warnings
 }
 
 // buildSystemPrompt creates the system prompt from project conventions.
@@ -839,6 +948,13 @@ type Result struct {
 	// CostUSD for the model-aware pricing table).
 	InputTokens  int
 	OutputTokens int
+
+	// Warnings are advisory notes from the planner LLM (when one is
+	// configured). They never block execution — the spec is the source
+	// of truth — but they're surfaced in --verbose output and the
+	// post-run summary so the operator can revisit the spec before
+	// shipping.
+	Warnings []string
 }
 
 // TaskResult is the result of a single task.

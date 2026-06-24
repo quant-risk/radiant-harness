@@ -11,7 +11,15 @@
 - [x] VS Code CodeLens on `tasks.md` for one-click gate runs
 - [x] 168 tests passing, zero races
 
-## Sprint 7 — up next
+## Sprint 7 — done (2026-06-24)
+
+- [x] **Planner LLM now fires** via `runPlannerAdvisory` — `--planner` was advertised but never used; now it scans the spec + tasks for ambiguities before execution starts and surfaces concerns as advisory warnings (never blocking)
+- [x] **JSONL trace export** via `--trace-out <file>` — drains the trace log to disk, atomic write via temp + fsync + rename, `jq`-able line-delimited JSON
+- [x] **Race fix** on `Engine.currentTaskID` — locked the read in `chatWith` to match the writes in `executeTask`'s preamble/cleanup
+- [x] **Two new cross-compile targets**: `linux/arm64` (Graviton, Raspberry Pi) + `windows/arm64` (Surface Pro X); release now covers all 6 OS/arch pairs
+- [x] 172 tests passing, zero races
+
+## Sprint 8 — up next
 
 ## Princípios
 

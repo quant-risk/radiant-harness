@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.3.2"
+var version = "0.3.3"
 
 func main() {
 	root := &cobra.Command{
@@ -205,6 +205,7 @@ func main() {
 	var runAutoRoute bool
 	var runPlanner string
 	var runImplementer string
+	var runTraceOut string
 
 	runCmd := &cobra.Command{
 		Use:   "run <spec-dir>",
@@ -258,6 +259,20 @@ func main() {
 				return err
 			}
 
+			// JSONL trace export. Writes one event per line (chat,
+			// gate, write) so users can pipe the file through jq or
+			// ship it to any observability backend that understands
+			// line-delimited JSON. Empty --trace-out means "don't
+			// write". We write even when the run failed — failure
+			// trace is the most useful trace.
+			if runTraceOut != "" {
+				if err := writeTraceToFile(e, runTraceOut); err != nil {
+					fmt.Fprintf(os.Stderr, "  ⚠ trace-out failed: %v\n", err)
+				} else {
+					fmt.Printf("  Trace : %d events → %s\n", len(e.DumpTrace()), runTraceOut)
+				}
+			}
+
 			fmt.Println()
 			if result.Success {
 				fmt.Printf("  ✓ Feature completed (%d attempts, %s)\n", result.Attempts, result.Duration())
@@ -265,6 +280,16 @@ func main() {
 				fmt.Printf("  ✗ Feature failed after %d attempts (%s)\n", result.Attempts, result.Duration())
 				for _, e := range result.Errors {
 					fmt.Printf("    • %s\n", e)
+				}
+			}
+
+			// Planner warnings (advisory only — never block). Surfaced
+			// after the success/failure line so the operator sees the
+			// verdict first and the soft concerns second.
+			if len(result.Warnings) > 0 {
+				fmt.Printf("\n  ⚠ Planner raised %d concern(s) (advisory):\n", len(result.Warnings))
+				for _, w := range result.Warnings {
+					fmt.Printf("    • %s\n", w)
 				}
 			}
 
@@ -299,6 +324,7 @@ func main() {
 	runCmd.Flags().BoolVar(&runAutoRoute, "auto-route", false, "automatically pick the right model per RPI phase (research uses top-tier, implement uses mid-tier)")
 	runCmd.Flags().StringVar(&runPlanner, "planner", "", "LLM used for planning (defaults to --model). E.g. claude-opus-4.1 for planning while claude-sonnet-4.5 implements.")
 	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
+	runCmd.Flags().StringVar(&runTraceOut, "trace-out", "", "write per-LLM-call trace events to this file as JSONL (one event per line). Useful for cost debugging and observability.")
 	root.AddCommand(runCmd)
 
 	// ── bench ──
@@ -500,6 +526,44 @@ func agentLabels(agents []radiant.AgentID) string {
 // user explicitly types a model name that doesn't resolve, we'd rather
 // emit a clear runtime warning and fall back to the default model than
 // abort the entire run. The error is printed so the user can fix it.
+// writeTraceToFile opens path (creating parent dirs as needed) and
+// drains the engine's trace log to it as JSONL. Atomic on POSIX via
+// temp + rename, so a crash mid-write leaves no torn file. On Windows
+// we fall back to a direct write — rename-over-existing is a no-op
+// there.
+func writeTraceToFile(e *engine.Engine, path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { os.Remove(tmpName) }
+
+	if err := e.WriteTraceJSONL(tmp); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("write jsonl: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("fsync: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
 func resolveModelSilent(modelName, provider, apiKey string) (llm.Model, bool) {
 	m, err := resolveModel(modelName, provider, apiKey)
 	if err != nil {
