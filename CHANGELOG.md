@@ -4,6 +4,62 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] — 2026-06-24
+
+Sprint 8: gate command output cap. Closes the OOM vector flagged in
+the Sprint 6 audit (every gate call site used `cmd.CombinedOutput()`
+with no byte cap).
+
+### Added
+- **`--max-gate-output <bytes>` flag** on `radiant run`. Default
+  10 MiB. Caps the stdout+stderr captured from each gate command.
+  When a gate writes more than the cap, the captured buffer is
+  clipped at the byte boundary, a `[output truncated at N bytes]`
+  marker is appended so downstream consumers know the output is
+  incomplete (not a successful empty test), and the gate is killed
+  via broken-pipe on its next write. Without this, a chatty gate
+  (`pytest -v`, `go test -v`, anything that logs each test case)
+  could OOM the harness parent.
+
+  Implementation: switched all three gate runners
+  (`internal/engine/`, `internal/harness/`, `internal/quality/` —
+  both POSIX and Windows build tags) from `CombinedOutput()` to
+  `StdoutPipe` + `StderrPipe` + `io.LimitReader(io.MultiReader(...),
+  int64(maxOutput))`. The pipe-based approach means we never read
+  more than the cap into memory — the gate's next write blocks
+  until we close our end, then fails with SIGPIPE (POSIX) or
+  ERROR_BROKEN_PIPE (Windows) and the process exits.
+
+- **`engine.Config.GateMaxOutputBytes`** — wired through `New()`,
+  default 0 (which the gate runners translate to `DefaultGateMaxOutput`).
+  `0` keeps the "use package default" contract; set explicitly to
+  disable the cap if you really want to.
+
+### Fixed
+- **OOM vector on chatty gates** — same root cause as the audit
+  finding. `cmd.CombinedOutput()` reads the entire stdout+stderr
+  into a single `[]byte` with no upper bound. A `pytest` test suite
+  with verbose output could push hundreds of MiB into the harness
+  process. Now bounded by `--max-gate-output`.
+
+### Tests
+- `TestRunShellGateRespectsCap` — verifies a 64KB-output gate is
+  truncated at the 1024-byte cap with the marker appended.
+- `TestRunShellGateUnderCap` — verifies a small gate returns its
+  full output untouched, no marker.
+- `TestRunShellGateDefaultCap` — verifies `maxOutput=0` falls back
+  to the package default (zero-means-default contract).
+- `TestRunShellGateReportsFailure` — regression guard: non-zero
+  exit codes still surface as errors with the captured output
+  available, even after the pipe-based rewrite.
+
+### Stats
+- 176 tests passing (up from 172 in 0.3.3)
+- Coverage: harness 61.1%, llm 84.3%, benchmark 77%, spec 88.5%,
+  quality 59.5%, engine 47.0% (+1.5pp from new gate tests)
+- Zero race conditions
+- 6 OS/arch targets compile cleanly
+
 ## [0.3.3] — 2026-06-24
 
 Sprint 7: planner actually fires, JSONL trace export, race fix,

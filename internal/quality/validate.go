@@ -139,7 +139,7 @@ func RunGates(projectDir, specDir string) []GateResult {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), gateTimeout)
-		out, runErr := runShellGate(ctx, projectDir, gate)
+		out, runErr := runShellGate(ctx, projectDir, gate, 0) // 0 = package default (10 MiB)
 		cancel()
 
 		if runErr != nil {

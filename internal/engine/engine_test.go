@@ -546,3 +546,88 @@ func TestWriteTraceJSONLEmpty(t *testing.T) {
 		t.Errorf("empty trace wrote %d bytes, want 0: %q", buf.Len(), buf.String())
 	}
 }
+
+// TestRunShellGateRespectsCap verifies that a gate writing more than
+// maxOutput bytes is truncated to exactly maxOutput bytes plus the
+// marker. The marker tells downstream consumers that what they see is
+// incomplete — critical for distinguishing "test passed silently" from
+// "test was truncated mid-output".
+func TestRunShellGateRespectsCap(t *testing.T) {
+	dir := t.TempDir()
+	// dd produces 64KB of zeros; cap at 1024 bytes.
+	const cap = 1024
+	out, err := runShellGate(context.Background(), dir,
+		"dd if=/dev/zero bs=1024 count=64 2>/dev/null",
+		cap)
+	if err != nil {
+		// The gate should die with a broken-pipe error once the
+		// reader stops pulling. We accept either: success with the
+		// truncated marker, or an error wrapping SIGPIPE / broken
+		// pipe. The point is: the captured buffer must be capped.
+		if !strings.Contains(out, "truncated") {
+			t.Fatalf("expected truncation marker in output; got: %q (err=%v)", out, err)
+		}
+	}
+	// Either way, the output should be at most cap bytes + the marker.
+	const marker = "\n[output truncated at 1024 bytes — gate wrote more than the configured cap]"
+	if !strings.HasSuffix(out, strings.TrimPrefix(marker, "\n")) {
+		t.Fatalf("output should end with truncation marker; got tail: %q", out[len(out)-80:])
+	}
+	// And the captured buffer (excluding marker) must not exceed cap.
+	capturedLen := len(out) - len(marker)
+	if capturedLen > cap {
+		t.Errorf("captured output = %d bytes, want <= %d", capturedLen, cap)
+	}
+}
+
+// TestRunShellGateUnderCap verifies the happy path: a gate that fits
+// inside the cap returns its full output untouched, no marker.
+func TestRunShellGateUnderCap(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runShellGate(context.Background(), dir, `printf "hello world"`, 1024)
+	if err != nil {
+		t.Fatalf("runShellGate: %v", err)
+	}
+	if out != "hello world" {
+		t.Errorf("output = %q, want %q", out, "hello world")
+	}
+	if strings.Contains(out, "truncated") {
+		t.Errorf("under-cap gate must not include truncation marker; got: %q", out)
+	}
+}
+
+// TestRunShellGateDefaultCap verifies that passing maxOutput=0 falls
+// back to DefaultGateMaxOutput (the documented zero-means-default
+// contract). We can't easily verify the exact value without a chatty
+// gate, but we can verify that a small output still passes through
+// unchanged with maxOutput=0.
+func TestRunShellGateDefaultCap(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runShellGate(context.Background(), dir, `printf "ok"`, 0)
+	if err != nil {
+		t.Fatalf("runShellGate: %v", err)
+	}
+	if out != "ok" {
+		t.Errorf("output = %q, want %q", out, "ok")
+	}
+}
+
+// TestRunShellGateReportsFailure verifies that a failing gate (exit
+// code != 0) is still reported as an error, with the captured output
+// available for the caller. Regression guard: when we replaced
+// CombinedOutput with the pipe + io.LimitReader pattern, we need to
+// make sure non-zero exits still surface.
+func TestRunShellGateReportsFailure(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runShellGate(context.Background(), dir,
+		`echo "boom" && exit 7`, 1024)
+	if err == nil {
+		t.Fatalf("expected error from non-zero exit; got nil")
+	}
+	if !strings.Contains(out, "boom") {
+		t.Errorf("captured output should contain 'boom'; got: %q", out)
+	}
+	if !strings.Contains(err.Error(), "exit") && !strings.Contains(err.Error(), "failed") {
+		t.Errorf("error should indicate failure; got: %v", err)
+	}
+}

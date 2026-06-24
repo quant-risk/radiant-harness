@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.3.3"
+var version = "0.3.4"
 
 func main() {
 	root := &cobra.Command{
@@ -206,6 +206,7 @@ func main() {
 	var runPlanner string
 	var runImplementer string
 	var runTraceOut string
+	var runMaxGateOutput int
 
 	runCmd := &cobra.Command{
 		Use:   "run <spec-dir>",
@@ -233,10 +234,11 @@ func main() {
 			fmt.Printf("  Retries: %d\n\n", runRetries)
 
 			cfg := engine.Config{
-				Model:      model,
-				ProjectDir: projectDir,
-				MaxRetries: runRetries,
-				Verbose:    runVerbose,
+				Model:              model,
+				ProjectDir:         projectDir,
+				MaxRetries:         runRetries,
+				Verbose:            runVerbose,
+				GateMaxOutputBytes: runMaxGateOutput,
 			}
 			// Optional multi-agent routing: --planner and --implementer
 			// override the model used at each phase. Both are resolved via
@@ -325,6 +327,7 @@ func main() {
 	runCmd.Flags().StringVar(&runPlanner, "planner", "", "LLM used for planning (defaults to --model). E.g. claude-opus-4.1 for planning while claude-sonnet-4.5 implements.")
 	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
 	runCmd.Flags().StringVar(&runTraceOut, "trace-out", "", "write per-LLM-call trace events to this file as JSONL (one event per line). Useful for cost debugging and observability.")
+	runCmd.Flags().IntVar(&runMaxGateOutput, "max-gate-output", 10*1024*1024, "cap stdout+stderr captured from each gate command, in bytes (default 10 MiB). Gates writing more than this are truncated and killed.")
 	root.AddCommand(runCmd)
 
 	// ── bench ──

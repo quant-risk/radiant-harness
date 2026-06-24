@@ -58,6 +58,7 @@ type Engine struct {
 	projectDir        string
 	maxRetries        int
 	verbose           bool
+	gateMaxOutput     int // per-gate stdout+stderr cap in bytes; 0 = DefaultGateMaxOutput
 	mu                sync.Mutex
 
 	// runUsage accumulates token counts across every LLM call in a
@@ -113,6 +114,14 @@ type Config struct {
 	ProjectDir string
 	MaxRetries int
 	Verbose    bool
+
+	// GateMaxOutputBytes caps the stdout+stderr captured from each
+	// gate command. Gates that write more than this are truncated
+	// (the captured buffer is clipped, a marker is appended, and the
+	// gate is killed via broken-pipe on its next write). 0 means
+	// use DefaultGateMaxOutput (10 MiB). Without a cap, a chatty
+	// gate can OOM the harness process.
+	GateMaxOutputBytes int
 }
 
 // New creates a new engine.
@@ -138,6 +147,7 @@ func New(cfg Config) *Engine {
 		projectDir:        cfg.ProjectDir,
 		maxRetries:        cfg.MaxRetries,
 		verbose:           cfg.Verbose,
+		gateMaxOutput:     cfg.GateMaxOutputBytes, // 0 = use package default
 	}
 }
 
@@ -710,7 +720,7 @@ func (e *Engine) runGate(ctx context.Context, gate string) error {
 	defer cancel()
 
 	e.log("  Gate: %s", gate)
-	out, err := runShellGate(gateCtx, e.projectDir, gate)
+	out, err := runShellGate(gateCtx, e.projectDir, gate, e.gateMaxOutput)
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("gate timeout after %s\n%s", GateTimeout, out)

@@ -3,9 +3,11 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -14,6 +16,8 @@ import (
 // Hung gates usually indicate a flaky test or deadlock; 5 minutes is
 // generous for any realistic test suite.
 const GateTimeout = 5 * time.Minute
+
+const DefaultGateMaxOutput = 10 << 20 // 10 MiB, mirrors engine.DefaultGateMaxOutput
 
 // runGateShell executes the gate as `cmd /c <gate>` with the projectDir
 // as cwd. On Windows there's no `sh` by default; `cmd /c` is the closest
@@ -24,15 +28,37 @@ const GateTimeout = 5 * time.Minute
 // directly — gate authors targeting Windows should write CMD-compatible
 // commands, not shell-script-style ones. Use && for chaining, not the
 // POSIX &&.
-func runGateShell(ctx context.Context, projectDir, gate string) (string, error) {
+func runGateShell(ctx context.Context, projectDir, gate string, maxOutput int) (string, error) {
+	if maxOutput <= 0 {
+		maxOutput = DefaultGateMaxOutput
+	}
 	cmd := exec.CommandContext(ctx, "cmd", "/c", gate)
 	cmd.Dir = projectDir
-	out, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return string(out), fmt.Errorf("gate timeout after %s", GateTimeout)
-		}
-		return string(out), fmt.Errorf("gate failed: %w", err)
+		return "", fmt.Errorf("stdout pipe: %w", err)
 	}
-	return string(out), nil
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start gate: %w", err)
+	}
+	limited := io.LimitReader(io.MultiReader(stdout, stderr), int64(maxOutput))
+	var buf bytes.Buffer
+	n, _ := io.Copy(&buf, limited)
+	if n >= int64(maxOutput) {
+		buf.WriteString("\n[output truncated at ")
+		buf.WriteString(fmt.Sprintf("%d", maxOutput))
+		buf.WriteString(" bytes — gate wrote more than the configured cap]")
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return buf.String(), fmt.Errorf("gate timeout after %s", GateTimeout)
+		}
+		return buf.String(), fmt.Errorf("gate failed: %w", waitErr)
+	}
+	return buf.String(), nil
 }

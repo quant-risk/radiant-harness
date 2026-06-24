@@ -285,7 +285,7 @@ func (o *Orchestrator) runGate(ctx context.Context, gate string) error {
 	gateCtx, cancel := context.WithTimeout(ctx, DefaultGateTimeout)
 	defer cancel()
 
-	out, err := runGateShell(gateCtx, o.ProjectDir, gate)
+	out, err := runGateShell(gateCtx, o.ProjectDir, gate, 0) // 0 = package default
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("gate timeout after %s\n%s", DefaultGateTimeout, out)

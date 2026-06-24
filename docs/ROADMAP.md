@@ -19,7 +19,12 @@
 - [x] **Two new cross-compile targets**: `linux/arm64` (Graviton, Raspberry Pi) + `windows/arm64` (Surface Pro X); release now covers all 6 OS/arch pairs
 - [x] 172 tests passing, zero races
 
-## Sprint 8 — up next
+## Sprint 8 — done (2026-06-24)
+
+- [x] **Gate command output cap** via `--max-gate-output <bytes>` (default 10 MiB). Closes the OOM vector flagged in the Sprint 6 audit — all 3 gate runners (`engine/`, `harness/`, `quality/`, both POSIX and Windows) switched from `CombinedOutput()` to `StdoutPipe + StderrPipe + io.LimitReader`. Gates writing more than the cap are truncated and killed via broken-pipe.
+- [x] 176 tests passing, zero races, 6/6 cross-compile clean
+
+## Sprint 9 — up next
 
 ## Princípios
 
