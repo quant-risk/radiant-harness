@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -200,6 +201,85 @@ func TestBaseURLForAllProviders(t *testing.T) {
 		if !strings.Contains(url, fragment) {
 			t.Errorf("baseURL for %s = %q, expected to contain %q", prov, url, fragment)
 		}
+	}
+}
+
+func TestParseRetryAfterDeltaSeconds(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"30", 30 * time.Second},
+		{"0", 0},
+		{"120", 2 * time.Minute},
+		{"", 0},
+		{"abc", 0},
+		{"-5", 0}, // negative ignored
+	}
+	for _, c := range cases {
+		got := parseRetryAfter(c.in)
+		if got != c.want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestParseRetryAfterHTTPDate(t *testing.T) {
+	// 5 seconds in the future
+	future := time.Now().UTC().Add(5 * time.Second)
+	dateStr := future.Format(http.TimeFormat)
+	got := parseRetryAfter(dateStr)
+	if got < 4*time.Second || got > 6*time.Second {
+		t.Errorf("parseRetryAfter(%q) = %v, want ~5s", dateStr, got)
+	}
+}
+
+func TestParseRetryAfterPastDate(t *testing.T) {
+	// Past date should return 0 (don't wait negative)
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	dateStr := past.Format(http.TimeFormat)
+	got := parseRetryAfter(dateStr)
+	if got != 0 {
+		t.Errorf("parseRetryAfter(%q past) = %v, want 0", dateStr, got)
+	}
+}
+
+func TestChatHonorsRetryAfterOn429(t *testing.T) {
+	var requestCount int
+	var requestTimes []time.Time
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		requestTimes = append(requestTimes, time.Now())
+		if requestCount < 2 {
+			w.Header().Set("Retry-After", "1") // 1 second
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	})
+
+	start := time.Now()
+	resp, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("expected eventual success: %v", err)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Errorf("wrong content: %s", resp.Choices[0].Message.Content)
+	}
+	// Verify we waited at least ~1 second before the retry.
+	if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
+		t.Errorf("retry happened too fast (%v); Retry-After should have been honored", elapsed)
+	}
+	if requestCount != 2 {
+		t.Errorf("expected 2 attempts, got %d", requestCount)
+	}
+}
+
+func TestIsRetryableRecognizesRateLimit(t *testing.T) {
+	err := &RateLimitError{Err: errors.New("rate limited"), RetryAfter: 5 * time.Second}
+	if !isRetryable(err) {
+		t.Error("RateLimitError should be retryable")
 	}
 }
 

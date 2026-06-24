@@ -54,6 +54,11 @@ type Engine struct {
 	maxRetries int
 	verbose    bool
 	mu         sync.Mutex
+
+	// runUsage accumulates token counts across every LLM call in a
+	// single Run. Populated by executeTask via accountUsage, copied
+	// into Result at the end of Run.
+	runUsage chatUsage
 }
 
 // Config holds engine configuration.
@@ -130,7 +135,50 @@ func (e *Engine) Run(ctx context.Context, specDir string) (*Result, error) {
 	}
 
 	result.EndTime = time.Now()
+	result.InputTokens = e.runUsage.InputTokens
+	result.OutputTokens = e.runUsage.OutputTokens
 	return result, nil
+}
+
+// chatUsage captures the token counts returned by an LLM call. Vendors
+// expose these differently (OpenAI: prompt + completion; Anthropic via
+// proxy: input + output; some have cached read tokens). We track the two
+// halves separately so CostUSD can apply vendor-specific pricing later
+// without re-parsing the response.
+type chatUsage struct {
+	InputTokens  int
+	OutputTokens int
+}
+
+// chatTracked is a wrapper around llmClient.Chat that returns the assistant
+// text AND the token usage. Used by executeTask so the run can surface a
+// cost estimate. If the call fails, both the text and usage are zero.
+func (e *Engine) chatTracked(ctx context.Context, systemPrompt, userPrompt string) (string, chatUsage, error) {
+	resp, err := e.llmClient.Chat(ctx, []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	})
+	if err != nil {
+		return "", chatUsage{}, err
+	}
+	text := ""
+	if len(resp.Choices) > 0 {
+		text = resp.Choices[0].Message.Content
+	}
+	return text, chatUsage{
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: resp.Usage.CompletionTokens,
+	}, nil
+}
+
+// accountUsage adds token counts from a chatUsage into the engine's
+// running totals. Called from executeTask so the totals span every
+// implementation + correction call across every task.
+func (e *Engine) accountUsage(u *chatUsage) {
+	e.mu.Lock()
+	e.runUsage.InputTokens += u.InputTokens
+	e.runUsage.OutputTokens += u.OutputTokens
+	e.mu.Unlock()
 }
 
 // executeTask runs a single task: implement → validate → auto-correct.
@@ -144,12 +192,13 @@ func (e *Engine) executeTask(ctx context.Context, systemPrompt string, task radi
 
 		// IMPLEMENT: call LLM to generate code
 		implPrompt := e.buildImplementPrompt(task, specDir, s)
-		response, err := e.llmClient.SimpleChat(ctx, systemPrompt, implPrompt)
+		response, usage, err := e.chatTracked(ctx, systemPrompt, implPrompt)
 		if err != nil {
 			result.Attempts++
 			result.Errors = append(result.Errors, fmt.Sprintf("LLM error: %v", err))
 			continue
 		}
+		e.accountUsage(&usage)
 
 		// Parse LLM response and apply changes
 		if err := e.applyLLMResponse(response, specDir); err != nil {
@@ -169,8 +218,9 @@ func (e *Engine) executeTask(ctx context.Context, systemPrompt string, task radi
 				// Auto-correct: ask LLM to fix the error
 				if attempt < e.maxRetries {
 					correctPrompt := e.buildCorrectPrompt(task, gateErr.Error(), response)
-					correctResponse, correctErr := e.llmClient.SimpleChat(ctx, systemPrompt, correctPrompt)
+					correctResponse, correctUsage, correctErr := e.chatTracked(ctx, systemPrompt, correctPrompt)
 					if correctErr == nil {
+						e.accountUsage(&correctUsage)
 						e.applyLLMResponse(correctResponse, specDir)
 					}
 				}
@@ -584,6 +634,12 @@ type Result struct {
 	Errors    []string
 	StartTime time.Time
 	EndTime   time.Time
+
+	// Token accounting. Accumulated across every Chat call in the run.
+	// Used to surface a cost estimate to the operator (see internal/llm
+	// CostUSD for the model-aware pricing table).
+	InputTokens  int
+	OutputTokens int
 }
 
 // TaskResult is the result of a single task.

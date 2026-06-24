@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.2"
+var version = "0.3.0"
 
 func main() {
 	root := &cobra.Command{
@@ -248,6 +248,20 @@ func main() {
 					fmt.Printf("    • %s\n", e)
 				}
 			}
+
+			// Token usage + estimated cost. Shown even when the run failed —
+			// operators want to see how much was spent before failure so
+			// they can decide whether to retry.
+			fmt.Println()
+			fmt.Printf("  Tokens : %d input + %d output = %d total\n",
+				result.InputTokens, result.OutputTokens,
+				result.InputTokens+result.OutputTokens)
+			if cost := llm.CostUSD(runModel, result.InputTokens, result.OutputTokens); cost > 0 {
+				fmt.Printf("  Cost   : %s (model: %s)\n", llm.FormatCost(cost), runModel)
+			} else if result.InputTokens > 0 || result.OutputTokens > 0 {
+				fmt.Printf("  Cost   : <unknown — no price entry for %q>\n", runModel)
+			}
+
 			if runAutoRoute {
 				fmt.Println()
 				fmt.Println("  Auto-route mapping (anchor → per-phase):")

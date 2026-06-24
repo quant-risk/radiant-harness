@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -259,5 +260,49 @@ func TestRunGateRejectsEmpty(t *testing.T) {
 	e := New(Config{ProjectDir: t.TempDir()})
 	if err := e.runGate(context.Background(), ""); err != nil {
 		t.Errorf("empty gate should be accepted, got: %v", err)
+	}
+}
+
+func TestAccountUsageAccumulates(t *testing.T) {
+	e := New(Config{ProjectDir: t.TempDir()})
+
+	e.accountUsage(&chatUsage{InputTokens: 100, OutputTokens: 50})
+	e.accountUsage(&chatUsage{InputTokens: 200, OutputTokens: 75})
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.runUsage.InputTokens != 300 {
+		t.Errorf("InputTokens = %d, want 300", e.runUsage.InputTokens)
+	}
+	if e.runUsage.OutputTokens != 125 {
+		t.Errorf("OutputTokens = %d, want 125", e.runUsage.OutputTokens)
+	}
+}
+
+func TestAccountUsageIsConcurrencySafe(t *testing.T) {
+	e := New(Config{ProjectDir: t.TempDir()})
+
+	const goroutines = 50
+	const perGoroutine = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perGoroutine; j++ {
+				e.accountUsage(&chatUsage{InputTokens: 1, OutputTokens: 2})
+			}
+		}()
+	}
+	wg.Wait()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	want := goroutines * perGoroutine
+	if e.runUsage.InputTokens != want {
+		t.Errorf("InputTokens = %d, want %d (lost updates under concurrency)", e.runUsage.InputTokens, want)
+	}
+	if e.runUsage.OutputTokens != want*2 {
+		t.Errorf("OutputTokens = %d, want %d", e.runUsage.OutputTokens, want*2)
 	}
 }

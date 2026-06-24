@@ -4,15 +4,14 @@
 > em **vendor neutrality** (nenhum provedor é privilegiado) e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
-## Sprint 3 — done (2026-06-24)
+## Sprint 4 — done (2026-06-24)
 
-- [x] Windows shell + flock via build tags (rename-based lock)
-- [x] Cross-platform build verified: linux/amd64, darwin/arm64, windows/amd64
-- [x] Auto model routing (`--auto-route` flag, `llm.AutoRoute()`)
-- [x] Cost tracking (`llm.CostUSD()`, `llm.FormatCost()`, price table)
-- [x] 150 tests passing (up from 118), zero races
+- [x] Wire cost display into `radiant run` final summary
+- [x] Rate-limit awareness (429 → Retry-After honored)
+- [x] Homebrew + Scoop + AUR manifests (distribution ready)
+- [x] 157 tests passing, zero races
 
-## Sprint 4 — up next
+## Sprint 5 — up next
 
 ## Princípios
 

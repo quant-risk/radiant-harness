@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-24
+
+Sprint 4: cost display, rate-limit awareness, package manager manifests.
+
+### Added
+- **Token accounting** in `engine.Result`. Every Chat call now reports
+  `InputTokens` and `OutputTokens`, accumulated across every task and
+  retry. Concurrent accumulation is mutex-protected; tested with 50
+  goroutines × 100 calls each (5000 increments) with zero lost updates.
+- **Cost display in `radiant run`** final output. Prints token totals
+  and estimated USD cost using `llm.CostUSD()` against the
+  vendor-published price table. If the model has no price entry, the
+  output shows `<unknown — no price entry for "x">` instead of
+  fabricating a number.
+- **Rate-limit awareness** in the LLM client. HTTP 429 responses are
+  classified as a new `RateLimitError` carrying the server's
+  `Retry-After` hint. The retry loop honors `Retry-After` instead of
+  exponential backoff, so a rate-limited provider isn't hammered.
+  `parseRetryAfter` supports both RFC 7231 formats: delta-seconds
+  (`Retry-After: 30`) and HTTP-date.
+- **Package manager manifests** in `packaging/`:
+  - `homebrew/radiant.rb` — Homebrew formula (macOS + Linux, ARM + x86)
+  - `scoop/radiant.json` — Scoop manifest (Windows)
+  - `aur/PKGBUILD` — Arch Linux AUR build (Arch, Manjaro, Endeavour)
+
+  Each manifest documents the binary URL pattern, SHA256 placeholder
+  (replaced at release time by goreleaser), and a smoke test
+  (`radiant --version` for Homebrew, the version assertion for all).
+
+### Stats
+- 157 tests passing (up from 150 in 0.2.2)
+- Cross-platform build: linux/amd64, darwin/arm64, windows/amd64,
+  windows/arm64 all compile
+- Zero race conditions under `go test -race`
+- 5 OS/arch targets, 3 package managers
+
 ## [0.2.2] — 2026-06-24
 
 Sprint 3: real cross-platform builds, auto model routing, cost estimation.

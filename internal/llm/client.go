@@ -14,6 +14,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -126,6 +127,10 @@ func NewClient(model Model) *Client {
 // Chat sends a chat request with automatic retry on transient failures.
 // Retries use exponential backoff with full jitter (AWS-style) so a burst
 // of failed requests across multiple orchestrator runs doesn't synchronize.
+//
+// 429 responses are handled specially: the Retry-After header (seconds
+// or HTTP date) is honored instead of the exponential backoff, so we
+// don't burn retries hammering a rate-limited provider.
 func (c *Client) Chat(ctx context.Context, messages []Message) (*ChatResponse, error) {
 	req := ChatRequest{
 		Model:       c.model.Model,
@@ -141,7 +146,15 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (*ChatResponse, e
 	var lastErr error
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		if attempt > 0 {
-			if err := sleepWithJitter(ctx, attempt); err != nil {
+			wait := time.Duration(0)
+			// Prefer Retry-After from a 429 over exponential backoff.
+			var rl *RateLimitError
+			if errors.As(lastErr, &rl) && rl.RetryAfter > 0 {
+				wait = rl.RetryAfter
+			} else {
+				wait = backoffFor(attempt)
+			}
+			if err := sleepFor(ctx, wait); err != nil {
 				return nil, err
 			}
 		}
@@ -181,6 +194,15 @@ func (c *Client) doOnce(ctx context.Context, body []byte) (*ChatResponse, error)
 		return nil, &retryableError{err: fmt.Errorf("read response: %w", err)}
 	}
 
+	// 429 is the special case: retryable, but the server tells us exactly
+	// how long to wait via Retry-After (delta-seconds or HTTP-date).
+	if resp.StatusCode == 429 {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, &RateLimitError{
+			Err:        fmt.Errorf("rate limited (429): %s", truncateForError(string(respBody), 256)),
+			RetryAfter: retryAfter,
+		}
+	}
 	if resp.StatusCode >= 500 {
 		return nil, &retryableError{err: fmt.Errorf("API error %d: %s", resp.StatusCode, truncateForError(string(respBody), 512))}
 	}
@@ -198,6 +220,33 @@ func (c *Client) doOnce(ctx context.Context, body []byte) (*ChatResponse, error)
 		return nil, &nonRetryableError{err: fmt.Errorf("LLM error: %s", chatResp.Error.Message)}
 	}
 	return &chatResp, nil
+}
+
+// parseRetryAfter returns the duration to wait before retrying. Supports
+// both formats defined by RFC 7231: delta-seconds ("Retry-After: 30")
+// and HTTP-date ("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT"). If
+// the header is missing or unparseable, returns 0 — the caller falls
+// back to exponential backoff.
+func parseRetryAfter(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	// Try delta-seconds first.
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	// Fall back to HTTP-date.
+	if t, err := http.ParseTime(value); err == nil {
+		d := time.Until(t)
+		if d < 0 {
+			return 0
+		}
+		return d
+	}
+	return 0
 }
 
 // ChatStream streams the response. Retries on the initial connection only;
@@ -321,10 +370,24 @@ type nonRetryableError struct{ err error }
 func (e *nonRetryableError) Error() string { return e.err.Error() }
 func (e *nonRetryableError) Unwrap() error { return e.err }
 
+// RateLimitError is returned for HTTP 429 responses. The RetryAfter
+// field carries the server's hint (parsed from the Retry-After header)
+// so the retry loop can honor it instead of guessing.
+type RateLimitError struct {
+	Err        error
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string { return e.Err.Error() }
+func (e *RateLimitError) Unwrap() error { return e.Err }
+
 func isRetryable(err error) bool {
 	var r *retryableError
 	var n *nonRetryableError
+	var rl *RateLimitError
 	switch {
+	case errors.As(err, &rl):
+		return true // 429 — always retryable
 	case errors.As(err, &r):
 		return true
 	case errors.As(err, &n):
@@ -333,18 +396,27 @@ func isRetryable(err error) bool {
 	return false
 }
 
-// sleepWithJitter implements exponential backoff with full jitter, capped at
-// 30s. Returns ctx.Err() if cancellation fires during the sleep.
-func sleepWithJitter(ctx context.Context, attempt int) error {
+// backoffFor returns the exponential-backoff-with-jitter sleep duration
+// for the given retry attempt. Capped at 30s. The randomness (full
+// jitter per AWS) prevents synchronized retry storms across multiple
+// orchestrator runs hitting the same provider.
+func backoffFor(attempt int) time.Duration {
 	base := time.Duration(math.Pow(2, float64(attempt))) * 100 * time.Millisecond
 	if base > 30*time.Second {
 		base = 30 * time.Second
 	}
-	jitter := time.Duration(rand.Int63n(int64(base)))
+	return time.Duration(rand.Int63n(int64(base)))
+}
+
+// sleepFor waits for `d` or until ctx is cancelled, whichever comes first.
+func sleepFor(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(jitter):
+	case <-time.After(d):
 		return nil
 	}
 }
