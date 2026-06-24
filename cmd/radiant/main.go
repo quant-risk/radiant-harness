@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/benchmark"
@@ -19,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.3.0"
+var version = "0.3.1"
 
 func main() {
 	root := &cobra.Command{
@@ -396,6 +399,38 @@ func main() {
 	}
 	root.AddCommand(modelsCmd)
 
+	// ── eval ──
+	var evalModel string
+	var evalPrompt string
+	var evalRuns int
+	var evalOutput string
+
+	evalCmd := &cobra.Command{
+		Use:   "eval",
+		Short: "Run a single prompt against a model N times to measure latency, token usage, and cost",
+		Long: "Useful for comparing providers on a representative workload before\n" +
+			"committing to one for production. The same prompt is sent N times;\n" +
+			"median latency and total token cost are reported. Requires --api-key\n" +
+			"or one of the standard LLM env vars (OPENROUTER_API_KEY, etc).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if evalPrompt == "" {
+				return fmt.Errorf("--prompt is required")
+			}
+			if evalRuns <= 0 {
+				evalRuns = 3
+			}
+			if evalModel == "" {
+				evalModel = "claude-sonnet-4.5"
+			}
+			return runEval(context.Background(), evalModel, evalPrompt, evalRuns, evalOutput)
+		},
+	}
+	evalCmd.Flags().StringVar(&evalModel, "model", "", "model preset (default claude-sonnet-4.5)")
+	evalCmd.Flags().StringVar(&evalPrompt, "prompt", "", "prompt to send (required)")
+	evalCmd.Flags().IntVar(&evalRuns, "runs", 3, "number of times to send the prompt (median is reported)")
+	evalCmd.Flags().StringVar(&evalOutput, "output", "", "save JSON results to this path")
+	root.AddCommand(evalCmd)
+
 	// ── version ──
 	root.SetVersionTemplate("{{.Version}}\n")
 
@@ -567,4 +602,114 @@ func runDoctor(root string) error {
 
 	fmt.Println()
 	return nil
+}
+
+// evalRun captures one iteration of the eval loop.
+type evalRun struct {
+	LatencyMs    int64  `json:"latency_ms"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	Error        string `json:"error,omitempty"`
+}
+
+// evalResult is the full eval output for one model.
+type evalResult struct {
+	Model       string    `json:"model"`
+	Runs        int       `json:"runs"`
+	Successful  int       `json:"successful"`
+	MedianMs    int64     `json:"median_latency_ms"`
+	MeanMs      int64     `json:"mean_latency_ms"`
+	TotalInTok  int       `json:"total_input_tokens"`
+	TotalOutTok int       `json:"total_output_tokens"`
+	TotalCost   float64   `json:"total_cost_usd"`
+	Iterations  []evalRun `json:"iterations"`
+}
+
+// runEval sends `prompt` to `model` exactly `runs` times and reports
+// latency / token / cost statistics. The output is a markdown table
+// plus an optional JSON file via --output for trend tracking.
+func runEval(ctx context.Context, model, prompt string, runs int, outputPath string) error {
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		return fmt.Errorf("no API key set; export OPENROUTER_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY) or pass --api-key to `radiant run`")
+	}
+
+	m, ok := llm.GetPreset(model, apiKey)
+	if !ok {
+		return fmt.Errorf("unknown model preset %q; run `radiant models` for the list", model)
+	}
+	client := llm.NewClient(m)
+
+	fmt.Printf("  radiant eval — model=%s runs=%d\n", model, runs)
+	fmt.Printf("  prompt: %s\n\n", truncateForDisplay(prompt, 80))
+
+	results := evalResult{Model: model, Runs: runs, Iterations: make([]evalRun, runs)}
+
+	var latencies []int64
+	for i := 0; i < runs; i++ {
+		start := time.Now()
+		resp, err := client.Chat(ctx, []llm.Message{{Role: "user", Content: prompt}})
+		latency := time.Since(start).Milliseconds()
+
+		run := evalRun{LatencyMs: latency}
+		if err != nil {
+			run.Error = err.Error()
+			fmt.Printf("  [%d/%d] ✗ %s (%dms)\n", i+1, runs, err, latency)
+		} else {
+			run.InputTokens = resp.Usage.PromptTokens
+			run.OutputTokens = resp.Usage.CompletionTokens
+			fmt.Printf("  [%d/%d] ✓ %dms, %d+%d tok\n",
+				i+1, runs, latency, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+			latencies = append(latencies, latency)
+			results.Successful++
+			results.TotalInTok += run.InputTokens
+			results.TotalOutTok += run.OutputTokens
+		}
+		results.Iterations[i] = run
+	}
+
+	// Compute median + mean from successful runs.
+	if len(latencies) > 0 {
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		results.MedianMs = latencies[len(latencies)/2]
+		var sum int64
+		for _, l := range latencies {
+			sum += l
+		}
+		results.MeanMs = sum / int64(len(latencies))
+	}
+	results.TotalCost = llm.CostUSD(model, results.TotalInTok, results.TotalOutTok)
+
+	fmt.Println()
+	fmt.Printf("  Median latency : %dms\n", results.MedianMs)
+	fmt.Printf("  Mean latency   : %dms\n", results.MeanMs)
+	fmt.Printf("  Success rate   : %d/%d\n", results.Successful, runs)
+	fmt.Printf("  Total tokens   : %d in + %d out = %d\n",
+		results.TotalInTok, results.TotalOutTok, results.TotalInTok+results.TotalOutTok)
+	fmt.Printf("  Estimated cost : %s\n", llm.FormatCost(results.TotalCost))
+
+	if outputPath != "" {
+		data, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal results: %w", err)
+		}
+		if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", outputPath, err)
+		}
+		fmt.Printf("  Saved JSON to %s\n", outputPath)
+	}
+	return nil
+}
+
+func truncateForDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
 }

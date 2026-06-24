@@ -4,6 +4,53 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-06-24
+
+Sprint 5: Anthropic native, eval suite, project moves to iCloud.
+
+### Added
+- **`internal/llm/anthropic.go`** — native Anthropic Messages API
+  client. Sends to `POST /v1/messages` with `x-api-key` and
+  `anthropic-version: 2023-06-01` headers. Splits the system prompt
+  out of the messages array (Anthropic's shape, not OpenAI's). Honors
+  `Retry-After` and exponential backoff the same way the OpenAI
+  client does. Includes streaming support via SSE.
+
+  `Client.Chat()` now dispatches to `chatAnthropic` whenever the
+  configured provider is `ProviderAnthropic`. Going through Anthropic
+  directly is faster, cheaper, and unlocks features the OpenAI
+  shim doesn't expose (extended thinking, prompt caching). A custom
+  `BaseURL` still works — useful for localhost mocks and Anthropic-
+  compatible gateways.
+
+- **`radiant eval`** — single-prompt harness for comparing providers
+  on a representative workload. Sends the same prompt N times
+  (default 3), reports median + mean latency, total tokens,
+  estimated USD cost. JSON output via `--output` for trend tracking
+  across releases. Useful before committing to a provider for
+  production.
+
+### Fixed
+- **`chatAnthropic` was using a hardcoded URL**, ignoring `Model.BaseURL`.
+  Now calls `c.baseURL()` so test servers (httptest) and localhost
+  proxies work. Found by `TestAnthropicSendsCorrectHeaders` — the
+  test client was hitting api.anthropic.com with a fake API key and
+  getting 401s back instead of reaching the mock.
+
+### Changed
+- **Project location**: moved from `~/Downloads/radiant-harness-main`
+  to `~/Library/Mobile Documents/com~apple~CloudDocs/projects/radiant-
+  harness-main` (iCloud Drive). All paths are still relative to the
+  repo root so build, test, and CI commands are unchanged.
+
+### Stats
+- 164 tests passing (up from 157 in 0.3.0)
+- Coverage: harness 61.1%, llm 84.3%, benchmark 77%, spec 88.5%,
+  quality 59.5%, engine 42.5%
+- Zero race conditions
+- 6 OS/arch targets compile cleanly: linux/amd64, linux/arm64,
+  darwin/amd64, darwin/arm64, windows/amd64, windows/arm64
+
 ## [0.3.0] — 2026-06-24
 
 Sprint 4: cost display, rate-limit awareness, package manager manifests.

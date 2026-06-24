@@ -4,14 +4,13 @@
 > em **vendor neutrality** (nenhum provedor é privilegiado) e
 > **cross-platform** (Linux, macOS, Windows; amd64, arm64).
 
-## Sprint 4 — done (2026-06-24)
+## Sprint 5 — done (2026-06-24)
 
-- [x] Wire cost display into `radiant run` final summary
-- [x] Rate-limit awareness (429 → Retry-After honored)
-- [x] Homebrew + Scoop + AUR manifests (distribution ready)
-- [x] 157 tests passing, zero races
+- [x] Anthropic native Messages API client (when provider=anthropic, route to /v1/messages directly)
+- [x] `radiant eval` for comparing providers on a representative workload
+- [x] 164 tests passing, zero races
 
-## Sprint 5 — up next
+## Sprint 6 — up next
 
 ## Princípios
 

@@ -124,6 +124,15 @@ func NewClient(model Model) *Client {
 	}
 }
 
+// shouldUseAnthropicNative reports whether Chat should dispatch to the
+// native Anthropic Messages API client. Triggered when the provider is
+// Anthropic — BaseURL only changes the endpoint, not the API shape. A
+// custom BaseURL is still useful (e.g. for a localhost mock that
+// mimics Anthropic) but doesn't change which client handles the call.
+func (c *Client) shouldUseAnthropicNative() bool {
+	return c.model.Provider == ProviderAnthropic
+}
+
 // Chat sends a chat request with automatic retry on transient failures.
 // Retries use exponential backoff with full jitter (AWS-style) so a burst
 // of failed requests across multiple orchestrator runs doesn't synchronize.
@@ -131,7 +140,18 @@ func NewClient(model Model) *Client {
 // 429 responses are handled specially: the Retry-After header (seconds
 // or HTTP date) is honored instead of the exponential backoff, so we
 // don't burn retries hammering a rate-limited provider.
+//
+// Routing: when the configured provider is Anthropic AND a custom
+// BaseURL isn't set, Chat dispatches to the native Messages API client
+// (chatAnthropic in anthropic.go) instead of the OpenAI-compatible
+// adapter. This unlocks features the OpenAI shim doesn't expose
+// (extended thinking, prompt caching) and avoids the per-token
+// surcharge that OpenRouter's Claude routing imposes.
 func (c *Client) Chat(ctx context.Context, messages []Message) (*ChatResponse, error) {
+	if c.shouldUseAnthropicNative() {
+		return c.chatAnthropic(ctx, messages)
+	}
+
 	req := ChatRequest{
 		Model:       c.model.Model,
 		Messages:    messages,
@@ -253,6 +273,10 @@ func parseRetryAfter(value string) time.Duration {
 // once streaming starts we let it ride (a mid-stream reconnect would lose
 // already-generated tokens and confuse the caller).
 func (c *Client) ChatStream(ctx context.Context, messages []Message, callback StreamCallback) (*ChatResponse, error) {
+	if c.shouldUseAnthropicNative() {
+		return c.chatStreamAnthropic(ctx, messages, callback)
+	}
+
 	req := ChatRequest{
 		Model:       c.model.Model,
 		Messages:    messages,
