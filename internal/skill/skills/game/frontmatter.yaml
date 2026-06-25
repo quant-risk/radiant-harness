@@ -1,0 +1,145 @@
+name: game
+version: 1.0.0
+description: |
+  Game-development guidance for shipping games with radiant.
+  Covers engine choice, game loop architecture, asset pipeline,
+  performance budgets, state management, save/load, multiplayer
+  netcode, and platform-specific release. Use this skill when
+  the project's deliverable is an interactive entertainment
+  product — console, PC, mobile, or web — with frame-time,
+  asset, and engagement constraints that pure software doesn't
+  have.
+when_to_use: |
+  Project target is a game (any platform). The deliverable is a
+  binary shipped to a store or platform holder (Steam, App Store,
+  Play Store, Switch, Xbox, PlayStation), not a server or web
+  app. Game development has different invariants: real-time
+  frame budgets, asset pipelines, hardware fragmentation, and
+  platform-holder certification.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: engine
+    type: enum
+    required: true
+    description: '"unity" | "unreal" | "godot" | "bevy" | "custom" | "webgl"'
+  - name: platform
+    type: enum
+    required: true
+    description: '"pc" | "console" | "mobile" | "web" | "vr" | "multi"'
+  - name: scale
+    type: enum
+    required: true
+    description: '"indie" (1-5 devs) | "aa" (5-30) | "aaa" (30+)'
+  - name: multiplayer
+    type: enum
+    required: false
+    description: '"singleplayer" | "local-couch" | "online-p2p" | "online-dedicated-server"'
+  - name: target_fps
+    type: number
+    required: false
+    description: Target frame rate (30 / 60 / 120 / 144). Drives perf budget.
+  - name: art_style
+    type: enum
+    required: false
+    description: '"2d-pixel" | "2d-vector" | "3d-lowpoly" | "3d-photoreal" | "voxel" | "stylized"'
+
+outputs:
+  - path: docs/game/architecture.md
+    type: artifact
+    description: |
+      Engine, target platforms, game-loop strategy, state model,
+      input abstraction, asset pipeline, multiplayer architecture.
+  - path: docs/game/perf-budget.md
+    type: artifact
+    description: |
+      Per-platform frame-time budget, draw-call budget, memory
+      budget, asset budget, GC budget. Measured before features.
+  - path: docs/game/release-checklist.md
+    type: artifact
+    description: |
+      Per-platform certification requirements (Sony TRC, Microsoft
+      XR, Nintendo Lotcheck, Steam, App Store, Play Store).
+  - path: docs/game/netcode-design.md
+    type: artifact
+    description: |
+      Multiplayer architecture (state sync, prediction, rollback),
+      server topology, tick rate, lag-compensation strategy.
+
+gates:
+  - name: engine-decided-before-prototype
+    description: |
+      Engine + target platform decided BEFORE gameplay prototype.
+      Switching engines mid-project is a re-write.
+  - name: perf-budget-locked
+    description: |
+      Frame-time, memory, and asset budgets locked per platform
+      BEFORE feature work. "We'll optimise later" never happens
+      because perf debt compounds.
+  - name: fixed-timestep-decided
+    description: |
+      Game loop uses fixed timestep with interpolation (Glenn
+      Fiedler pattern) OR a clear justification for variable
+      timestep. Variable timestep without interpolation causes
+      non-deterministic physics and jitter.
+  - name: state-machine-boundaries
+    description: |
+      Major game states (loading, menu, gameplay, paused) have
+      explicit transitions; resource ownership is unambiguous.
+      Without this, async asset loads leak into gameplay.
+  - name: platform-cert-checklist
+    description: |
+      Platform-holder certification requirements (TRC/XR/Lotcheck
+      or store policies) reviewed BEFORE the first submission.
+      Plan for re-submission cycles.
+  - name: save-format-versioned
+    description: |
+      Save format includes a version + migration path. Saves
+      from an old version MUST load into a new build.
+
+context_provides:
+  - state.md
+  - docs/game/
+
+commands_available:
+  - radiant game <engine> --platform=<list> [--multiplayer=<mode>]
+
+related_skills:
+  - kickoff
+  - roadmap
+  - mobile
+  - incident
+  - setup-ci
+
+anti_patterns:
+  - |
+    Variable timestep without interpolation. Causes jittery
+    physics, non-deterministic collisions, and breaks replays.
+    Use fixed timestep with render interpolation (Glenn Fiedler:
+    "Fix Your Timestep").
+  - |
+    Loading assets in the gameplay frame. Stalls the frame,
+    causes hitches. Use async loading with a clear "loading
+    state" UI; never block render.
+  - |
+    Optimising for the dev machine. If your dev box has a
+    4090, your players do not. Profile on min-spec hardware
+    from day 1.
+  - |
+    "We'll port to consoles later". Console SDKs require
+    signed NDAs, dev kits, and certification cycles. If
+    consoles are a target, plan for them from architecture.
+  - |
+    Single global state object. Creates ordering bugs, makes
+    save/load fragile, makes multiplayer impossible. Use
+    explicit state machines with clear transitions.
+  - |
+    Engine-agnostic "code in pure C++" that ignores the
+    engine's lifecycle. Fighting the engine (e.g. custom
+    memory managers that bypass Unity's IL2CPP) makes ports
+    and engine upgrades expensive.
+
+author: radiant-harness contributors
+license: MIT

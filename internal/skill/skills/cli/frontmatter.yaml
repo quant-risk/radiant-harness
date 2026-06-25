@@ -1,0 +1,142 @@
+name: cli
+version: 1.0.0
+description: |
+  CLI tool design guidance for shipping command-line tools with
+  radiant. Covers POSIX conventions, argument parsing, subcommand
+  design, configuration patterns, output discipline, error handling,
+  shell completion, and distribution. Use this skill when the
+  project's deliverable is a command-line binary — a developer
+  tool, a sysadmin utility, or a CLI-first product. CLIs have
+  different invariants from servers: they're scriptable, they're
+  composed with pipes, and a wrong exit code is a broken
+  contract.
+when_to_use: |
+  Project ships a binary that users invoke from a shell. The
+  deliverable is invoked as `mytool <subcommand> [flags]`, not
+  a long-running daemon, web app, or library. CLIs must respect
+  Unix conventions (stdin/stdout/stderr, exit codes), be
+  scriptable (no TTY assumptions), and be composable (output
+  is grep-able and pipe-friendly).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: language
+    type: enum
+    required: true
+    description: '"go" | "rust" | "typescript" | "python" | "ruby" | "zig" | "c"'
+  - name: distribution
+    type: enum
+    required: true
+    description: '"go-install" | "homebrew" | "apt" | "scoop" | "binary-download" | "npm" | "pypi" | "multi"'
+  - name: subcommand_shape
+    type: enum
+    required: true
+    description: '"flat" (no subcommands) | "hierarchical" (subcommands + sub-subcommands)'
+  - name: interactivity
+    type: enum
+    required: false
+    description: '"non-interactive-only" | "interactive-prompts-optional" | "interactive-first"'
+  - name: target_platforms
+    type: string
+    required: true
+    description: |
+      Comma-separated list of targets: "linux/amd64",
+      "darwin/arm64", "windows/amd64", etc.
+
+outputs:
+  - path: docs/cli/ux-spec.md
+    type: artifact
+    description: |
+      Subcommand tree, flag names, output format per command,
+      exit codes, environment variables, config-file locations.
+      Signed off BEFORE implementation.
+  - path: docs/cli/error-codes.md
+    type: artifact
+    description: |
+      Catalogue of every error code the tool can return, what
+      each means, and what users should do. Powers docs + tests.
+  - path: docs/cli/completion-spec.md
+    type: artifact
+    description: |
+      Shell completion support: bash, zsh, fish, PowerShell.
+      What completions (subcommands, flags, dynamic values).
+
+gates:
+  - name: ux-spec-before-implementation
+    description: |
+      docs/cli/ux-spec.md signed off (subcommands, flags,
+      outputs, exit codes) BEFORE implementation. Prevents
+      "we shipped, the UX is wrong" rework.
+  - name: stdout-vs-stderr-correct
+    description: |
+      stdout holds ONLY the primary output (the thing users
+      pipe / redirect). stderr holds logs, progress, prompts,
+      errors. Tests verify this — humans WILL pipe your output.
+  - name: exit-codes-documented
+    description: |
+      Every error path returns a documented exit code. 0=ok,
+      1=generic, 2=usage error, and any tool-specific codes
+      are in docs/cli/error-codes.md.
+  - name: non-interactive-default
+    description: |
+      The default invocation is non-interactive (no prompts,
+      no TTY assumption). Interactive mode is opt-in via flag
+      or auto-detected TTY. CI must work without flags.
+  - name: shell-completion-supported
+    description: |
+      At least one shell (bash or zsh) has completion for
+      subcommands + flags. Users discover features via
+      tab-completion; missing completion = missing features.
+  - name: install-uninstall-clean
+    description: |
+      The install path is documented and reversible.
+      Uninstall removes the binary + man page + completions
+      + config dirs (per platform). No hidden state.
+
+context_provides:
+  - state.md
+  - docs/cli/
+
+commands_available:
+  - radiant cli <language> --distribute=<list>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - setup-ci
+  - security
+  - diagrammar (diagram the CLI surface)
+
+anti_patterns:
+  - |
+    Logging to stdout. stdout is for the primary output. Logs,
+    progress bars, prompts, errors go to stderr. Humans pipe
+    your output; logs on stdout break their scripts.
+  - |
+    Exit code 0 on error. Every error path returns non-zero.
+    "But the program printed an error" is not the contract;
+    scripts check exit codes.
+  - |
+    Interactive prompts by default. CI scripts, cron jobs,
+    and shell wrappers don't have a TTY. Default must be
+    non-interactive; interactive is opt-in or TTY-detected.
+  - |
+    Secret leakage in args. Tokens, API keys, passwords in
+    argv appear in `ps`, shell history, log aggregators.
+    Use stdin or env vars for secrets.
+  - |
+    Hidden state in $HOME. Config / data dirs without
+    documentation are bugs. Use XDG dirs ($XDG_CONFIG_HOME,
+    $XDG_DATA_HOME) or per-tool conventions, and document them.
+  - |
+    Inconsistent flag names. `--verbose` in one command,
+    `--verbosity` in another, `-v` in a third. Pick a style
+    and stick to it across all subcommands.
+  - |
+    No uninstall path. The tool must be cleanly removable.
+    Orphaned config dirs in $HOME are tech debt.
+
+author: radiant-harness contributors
+license: MIT

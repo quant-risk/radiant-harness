@@ -1,0 +1,155 @@
+name: ml
+version: 1.0.0
+description: |
+  Machine-learning / AI project guidance for shipping models with
+  radiant. Covers problem framing, data pipelines, train/eval
+  discipline, deployment patterns, and post-deployment monitoring.
+  Use this skill when the project's deliverable includes a trained
+  model — classical ML, deep learning, or LLM fine-tuning — and
+  the team's success metric depends on model quality, not just
+  feature velocity.
+when_to_use: |
+  Project trains or fine-tunes a model on data. Deliverable
+  includes model weights, an inference endpoint, or an embedded
+  model artefact. ML has different invariants than pure software:
+  model behaviour is data-dependent, eval methodology is
+  statistical, and most production bugs are silent quality
+  regressions rather than crashes.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: task_type
+    type: enum
+    required: true
+    description: '"classification" | "regression" | "ranking" | "generation" | "embedding" | "reinforcement"'
+  - name: data_modality
+    type: enum
+    required: true
+    description: '"tabular" | "text" | "image" | "audio" | "video" | "graph" | "multimodal"'
+  - name: scale
+    type: enum
+    required: true
+    description: '"small" (fits on 1 GPU / <100k rows) | "medium" (multi-GPU / 100k-10M rows) | "large" (distributed / >10M rows)'
+  - name: framework
+    type: enum
+    required: false
+    description: '"pytorch" | "tensorflow" | "jax" | "scikit-learn" | "huggingface" | "xgboost" | "custom"'
+  - name: deployment_target
+    type: enum
+    required: false
+    description: '"batch" | "online" | "edge" | "embedded-in-product"'
+  - name: success_metric
+    type: string
+    required: true
+    description: |
+      Single business-aligned number the model is graded on
+      (e.g. "5% reduction in churn prediction false negatives",
+      "30% improvement in routing F1 at fixed latency"). NEVER
+      accept "high accuracy" — that is not a metric.
+
+outputs:
+  - path: docs/ml/problem-framing.md
+    type: artifact
+    description: |
+      What we're predicting, for whom, why this metric, what the
+      cost-sensitive errors are. Signed off BEFORE any data work.
+  - path: docs/ml/data-card.md
+    type: artifact
+    description: |
+      Data sources, label provenance, known biases, train/val/test
+      split policy, leakage audit. Updated every time the dataset
+      changes.
+  - path: docs/ml/eval-protocol.md
+    type: artifact
+    description: |
+      How we evaluate: which test sets, which metrics, statistical
+      significance methodology, regression test threshold.
+  - path: docs/ml/model-card.md
+    type: artifact
+    description: |
+      Model architecture, training data slice, intended use,
+      out-of-scope uses, known failure modes. Updated per release.
+
+gates:
+  - name: problem-framed-before-data
+    description: |
+      docs/ml/problem-framing.md signed off (problem, user,
+      metric, cost matrix) BEFORE collecting or labelling data.
+      Prevents "we trained on the wrong objective" rework.
+  - name: train-test-split-locked
+    description: |
+      Train/val/test split IDs locked BEFORE any feature
+      engineering. The test set is touched ONCE: at final eval.
+      Leakage between train and test invalidates everything.
+  - name: baseline-beats-trivial
+    description: |
+      A trivial baseline (predict majority class, predict last
+      value, predict mean) is computed first. ML model must beat
+      it by a meaningful margin. Otherwise you're shipping
+      complexity for no gain.
+  - name: eval-on-held-out
+    description: |
+      Final numbers reported on a held-out test set that the
+      model NEVER saw during training, tuning, or feature
+      selection. Cross-val numbers don't count for release
+      decisions.
+  - name: reproducibility-locked
+    description: |
+      Random seeds, dependency versions (or lockfile), and
+      training script committed. Re-running the script produces
+      metrics within ±0.5%. If not, the result is a fluke.
+  - name: monitoring-plan-defined
+    description: |
+      BEFORE launch: defined metrics (data drift, prediction
+      distribution, label feedback loop), alert thresholds,
+      and a rollback path. "We'll figure it out in prod" is not
+      a plan.
+
+context_provides:
+  - state.md
+  - docs/ml/
+
+commands_available:
+  - radiant ml <task_type> --data=<path> --success-metric="<metric>"
+
+related_skills:
+  - kickoff
+  - roadmap
+  - evals
+  - data
+  - incident
+
+anti_patterns:
+  - |
+    Optimizing accuracy when the business cost is asymmetric
+    (e.g. fraud: missing a fraud case is 100x worse than a false
+    alarm). Use precision/recall, F-beta, or a custom cost
+    matrix. Accuracy hides the failure mode.
+  - |
+    Test-set leakage. Touching the test set during feature
+    engineering, hyperparameter tuning, or model selection.
+    The test set is your one shot at an honest number. Touch
+    it once: at final eval.
+  - |
+    "We have a model" thinking. A model without a baseline
+    is just a complicated random number generator. Always
+    report the trivial baseline alongside the model.
+  - |
+    Training on data the model will see in production. Data
+    from the future, leaked labels, or user feedback that
+    arrived after the prediction was made. Audit the data
+    pipeline for time-travel leaks.
+  - |
+    "We'll monitor drift later". Drift monitoring is part of
+    the launch criteria, not a follow-up. Define the metrics,
+    thresholds, and rollback path BEFORE serving the first
+    prediction.
+  - |
+    Using LLM eval vibes ("the outputs look good") instead
+    of a held-out benchmark with statistical comparison.
+    LLM outputs need the same eval discipline as any model.
+
+author: radiant-harness contributors
+license: MIT
