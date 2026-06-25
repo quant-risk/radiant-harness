@@ -1,0 +1,90 @@
+name: mobile
+version: 1.0.0
+description: |
+  Mobile-first guidance for shipping iOS / Android / cross-platform
+  apps with radiant. Covers app lifecycle, platform-specific gotchas,
+  offline-first design, push notifications, app store release, and
+  mobile CI/CD. Use this skill when the project's deploy target is
+  a phone, not a server.
+when_to_use: |
+  Project target is iOS, Android, or cross-platform (Flutter, RN,
+  Kotlin Multiplatform). The deployment artefact is an .ipa, .apk,
+  or .aab — not a server binary. Mobile has different invariants
+  than server (no rolling deploys, app store reviews, OS version
+  fragmentation, network unreliability).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: platform
+    type: enum
+    required: true
+    description: '"ios" | "android" | "cross" (Flutter/RN/KMP)'
+  - name: min_os_version
+    type: string
+    required: false
+    description: Minimum OS version (e.g. "iOS 16", "Android 8.0")
+  - name: offline_strategy
+    type: enum
+    required: false
+    description: '"online-only" | "offline-first" | "eventual-consistency"'
+  - name: auth_method
+    type: enum
+    required: false
+    description: '"oauth" | "biometric" | "magic-link" | "passkey"'
+
+outputs:
+  - path: docs/mobile/architecture.md
+    type: artifact
+    description: |
+      Mobile-specific architecture decisions: platform choice,
+      offline strategy, sync model, auth, push notifications.
+  - path: docs/mobile/release-checklist.md
+    type: artifact
+    description: |
+      Pre-submission checklist (App Store / Play Store):
+      metadata, screenshots, privacy policy, age rating.
+
+gates:
+  - name: os-version-supported
+    description: |
+      Project's min OS version covers ≥95% of active devices.
+      Check via Apple's App Store Connect / Play Console.
+  - name: offline-strategy-decided
+    description: |
+      Online-only vs offline-first decided BEFORE coding starts.
+      Changing mid-build is expensive.
+  - name: app-store-assets-ready
+    description: |
+      Screenshots, descriptions, privacy policy URL all present
+      and reviewed BEFORE submission.
+
+context_provides:
+  - state.md
+  - docs/mobile/
+
+commands_available:
+  - radiant mobile <platform>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - incident
+
+anti_patterns:
+  - |
+    Assuming reliable network. Mobile networks drop, switch between
+    wifi/cellular, and have inconsistent latency. Always design
+    for offline-first or explicit retry.
+  - |
+    Skipping the App Store review checklist. Apple rejects for
+    trivial reasons (broken links in metadata, missing privacy
+    policy, age rating mismatches). Build the checklist early.
+  - |
+    Treating mobile CI/CD like web CI/CD. TestFlight / Play
+    internal tracks have approval gates that take hours to days.
+    Plan release windows.
+
+author: radiant-harness contributors
+license: MIT

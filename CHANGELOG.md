@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] — 2026-06-25
+
+Sprints 20-22: telemetry wired + summary + 3 domain skills.
+
+### Added
+- **Telemetry wired into `radiant release`** — when telemetry is
+  enabled and a release is successfully tagged, a local event is
+  recorded. Same privacy guarantees: only command name +
+  timestamp + 8-char hash + CLI version.
+- **`radiant telemetry summary`** — aggregate counts from the local
+  log. Shows: total events, distinct commands, distinct days,
+  top-10 commands by frequency, daily counts in chronological
+  order.
+- **`mobile` skill** (19th bundled) — mobile-first guidance for
+  iOS / Android / cross-platform apps. Platform decision,
+  offline strategy, auth, App Store / Play Store release checklist.
+- **`data` skill** (20th) — data engineering for warehouses,
+  lakes, streams. Source systems, schema evolution (expand-and-contract),
+  lineage, freshness SLAs, data quality checks.
+- **`frontend` skill** (21st) — frontend-first guidance for web apps.
+  Framework decision, rendering strategy (SPA/SSR/SSG/ISR), Core
+  Web Vitals budgets, accessibility from day 1.
+
+### Quality
+- 324 tests passing (+5 from Sprints 20-22).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+- `TestAllBundledSkillsValidateCleanly` passes with all 21 skills
+  (18 prior + 3 new).
+
 ## [0.6.2] — 2026-06-25
 
 Sprints 17-19: three post-merge additions.

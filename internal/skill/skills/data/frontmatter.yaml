@@ -1,0 +1,89 @@
+name: data
+version: 1.0.0
+description: |
+  Data engineering guidance for building pipelines, warehouses,
+  and analytics with radiant. Covers ETL/ELT patterns, schema
+  evolution, data quality, lineage, and the modern data stack.
+  Use when the project's primary output is a dataset, dashboard,
+  or ML training corpus — not a user-facing app.
+when_to_use: |
+  Project's primary output is data (analytics, ML, dashboards,
+  reports). The "user" is either a human looking at dashboards or
+  a model consuming training data. Data has different invariants
+  than app code (lineage matters, schema evolution is hard, "the
+  pipeline" is the product).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: architecture
+    type: enum
+    required: true
+    description: |
+      "lakehouse" | "warehouse" | "stream" | "mesh" — picks the
+      storage + compute paradigm.
+  - name: source_systems
+    type: string
+    required: false
+    description: |
+      Comma-separated source systems (e.g. "postgres,salesforce,stripe,s3").
+  - name: downstream_consumers
+    type: string
+    required: false
+    description: |
+      Comma-separated consumers (e.g. "bi-dashboard,ml-model,partner-api").
+
+outputs:
+  - path: docs/data/architecture.md
+    type: artifact
+    description: |
+      Data architecture: source → staging → mart flow, schema
+      strategy, lineage, freshness SLAs.
+  - path: docs/data/quality-checks.md
+    type: artifact
+    description: |
+      Data quality checks per dataset: completeness, freshness,
+      uniqueness, referential integrity.
+
+gates:
+  - name: schema-evolution-decided
+    description: |
+      Strategy decided BEFORE schema changes ship: expand-and-contract
+      vs migration vs dual-write. Changing mid-flight is data corruption.
+  - name: lineage-tracked
+    description: |
+      Every column has a known source. "Where does this number come
+      from?" must have an answer.
+  - name: freshness-sla-documented
+    description: |
+      Every pipeline declares its freshness SLA. "How stale is this
+      OK?" must have an answer per dataset.
+
+context_provides:
+  - state.md
+  - docs/data/
+
+commands_available:
+  - radiant data <architecture>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - incident
+
+anti_patterns:
+  - |
+    "Just dump it all in S3 and we'll figure it out later." Data
+    lakes without structure become data swamps. Plan partitioning
+    + format upfront.
+  - |
+    In-place schema migration. Always expand-and-contract:
+    add new column → backfill → switch reads → drop old column.
+  - |
+    No data tests. Data is code; pipelines are tests; if you don't
+    assert on row counts / nulls / ranges, you'll ship bad data
+    silently.
+
+author: radiant-harness contributors
+license: MIT

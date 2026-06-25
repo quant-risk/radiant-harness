@@ -1547,6 +1547,112 @@ func TestNextIncidentSeqIncrement(t *testing.T) {
 	}
 }
 
+func TestRecordTelemetryNoOpWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Telemetry disabled by default → recordTelemetry should be a no-op.
+	recordTelemetry("release")
+	if _, err := os.Stat(telemetryLogPath); !os.IsNotExist(err) {
+		t.Errorf("recordTelemetry should be no-op when disabled; log file should not exist; got err=%v", err)
+	}
+}
+
+func TestRecordTelemetryWritesWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	recordTelemetry("release")
+	data, err := os.ReadFile(telemetryLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"command":"release"`) {
+		t.Errorf("recorded event missing command=release: %s", data)
+	}
+	if !strings.Contains(string(data), `"radiant_ver":`) {
+		t.Errorf("recorded event missing radiant_ver: %s", data)
+	}
+}
+
+func TestShortHashDeterministic(t *testing.T) {
+	a := shortHash("hello")
+	b := shortHash("hello")
+	if a != b {
+		t.Errorf("shortHash not deterministic: %s vs %s", a, b)
+	}
+	if len(a) != 8 {
+		t.Errorf("shortHash should return 8 chars, got %d (%s)", len(a), a)
+	}
+}
+
+func TestTelemetrySummaryDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetrySummary(); err != nil {
+		t.Errorf("summary when disabled should not error; got %v", err)
+	}
+}
+
+func TestTelemetrySummaryCountsAndGroups(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	// Hand-craft a log with 4 events across 2 days and 3 commands.
+	lines := []string{
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"spec","hash":"a1","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T10:01:00Z","command":"spec","hash":"a2","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T11:00:00Z","command":"audit","hash":"a3","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-24T09:00:00Z","command":"release","hash":"a4","radiant_ver":"0.6.2"}`,
+	}
+	data := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(telemetryLogPath, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Capture stdout to verify counts.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runTelemetrySummary()
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, want := range []string{
+		"Total events: 4",
+		"Distinct commands: 3",
+		"Distinct days: 2",
+		"spec                 2",
+		"audit                1",
+		"release              1",
+		"2026-06-24  1",
+		"2026-06-25  3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary output missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 // getOrigWD returns the original working directory before any
 // test chdir'd. Used by tests that chdir to a tempdir to clean
 // up after themselves.

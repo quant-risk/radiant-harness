@@ -1,0 +1,87 @@
+name: frontend
+version: 1.0.0
+description: |
+  Frontend-first guidance for shipping web apps with radiant.
+  Covers component architecture, state management, performance
+  budgets, accessibility, and modern build tooling. Use when the
+  project ships a browser-rendered UI — SPA, SSR, or static site.
+when_to_use: |
+  Project target is the browser (web app). The user spends time
+  in the UI; performance and accessibility matter. Frontend has
+  different invariants than backend (bundle size matters, SEO may
+  matter, a11y is required in many jurisdictions, the network is
+  slow on phones).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: framework
+    type: enum
+    required: true
+    description: |
+      "react" | "vue" | "svelte" | "solid" | "vanilla" — framework choice.
+  - name: rendering
+    type: enum
+    required: false
+    description: |
+      "spa" | "ssr" | "ssg" | "isr" — how the page reaches the browser.
+  - name: target_browser_share
+    type: number
+    required: false
+    description: |
+      Percentage of users on evergreen browsers (>=95% = no IE11 needed).
+
+outputs:
+  - path: docs/frontend/architecture.md
+    type: artifact
+    description: |
+      Frontend architecture: framework, rendering, state
+      management, data fetching, build pipeline.
+  - path: docs/frontend/performance-budget.md
+    type: artifact
+    description: |
+      Performance budgets: bundle size, LCP, INP, CLS, transfer
+      size per route.
+
+gates:
+  - name: framework-decided
+    description: |
+      Framework chosen BEFORE the second PR. Mid-project migrations
+      are brutal.
+  - name: a11y-target-set
+    description: |
+      Accessibility target set (WCAG 2.1 AA is the common baseline).
+      Audit tool chosen (axe / pa11y / Lighthouse).
+  - name: perf-budget-set
+    description: |
+      Performance budget set BEFORE the first PR ships.
+      Bundle size, LCP, INP all defined.
+
+context_provides:
+  - state.md
+  - docs/frontend/
+
+commands_available:
+  - radiant frontend <framework>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - mobile
+
+anti_patterns:
+  - |
+    Adding dependencies without checking bundle size. A 200KB
+    date library adds 200KB to every page. Use bundlephobia /
+    bundle-analyzer before adding.
+  - |
+    Building without a performance budget. "It's fast enough on
+    my MacBook" is not a budget. Set LCP < 2.5s, INP < 200ms,
+    bundle < 200KB, then enforce.
+  - |
+    Skipping a11y until "later". a11y retrofits are painful and
+    often incomplete. Bake it in from the first component.
+
+author: radiant-harness contributors
+license: MIT
