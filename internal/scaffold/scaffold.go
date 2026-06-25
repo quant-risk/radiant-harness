@@ -166,10 +166,20 @@ func Init(cfg Config) Result {
 	return Result{Written: written, Skipped: skipped, Errors: errors}
 }
 
-// generateAgentsMD produces the universal AGENTS.md. ≤100 lines,
+// GenerateAgentsMD produces the universal AGENTS.md. ≤100 lines,
 // links to docs, lists skills + commands. Video research #6: keep
 // this minimal — LLM-generated AGENTS.md can hurt task success.
-func generateAgentsMD() string {
+//
+// This is the SINGLE SOURCE OF TRUTH for the AGENTS.md template.
+// Both `Init` (which writes .radiant-harness/AGENTS.md) and the
+// `radiant update` CLI (which writes AGENTS.md at the project root)
+// delegate to this function. The audit (radiant camada-agentica)
+// cross-checks that both locations stay in sync via the bundled
+// skill versions.
+//
+// Exported so `cmd/radiant` can call it without duplicating the
+// template — see Sprint 14.3 (unify AGENTS.md templates).
+func GenerateAgentsMD() string {
 	infos, _ := skill.Bundle()
 	var b strings.Builder
 
@@ -191,50 +201,24 @@ func generateAgentsMD() string {
 	b.WriteString("## Available skills\n\n")
 	b.WriteString("| Skill | When to use | CLI command |\n")
 	b.WriteString("|-------|-------------|-------------|\n")
-	if len(infos) == 0 {
-		b.WriteString("| (no skills bundled) | — | — |\n\n")
-	} else {
-		for _, info := range infos {
-			cmd := ""
-			for _, c := range info.CommandsAvailable {
-				cmd = c
-				break
-			}
-			desc := strings.SplitN(info.Description, "\n", 2)[0]
-			if len(desc) > 60 {
-				desc = desc[:57] + "..."
-			}
-			fmt.Fprintf(&b, "| `%s` | %s | `%s` |\n", info.Name, desc, cmd)
+	for _, info := range infos {
+		desc := strings.SplitN(info.Description, "\n", 2)[0]
+		if len(desc) > 60 {
+			desc = desc[:57] + "..."
 		}
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "| %s | %s | `radiant %s` |\n", info.Name, desc, "help")
 	}
-
-	b.WriteString("## Quick reference\n\n")
-	b.WriteString("- Start a feature: `radiant spec <intent>`\n")
-	b.WriteString("- Resume a session: `radiant state` (read) / `radiant handoff` (write)\n")
-	b.WriteString("- Run a feature: `radiant run specs/<NNNN>-<slug>/`\n")
-	b.WriteString("- Validate: `radiant validate specs/<NNNN>-<slug>/`\n")
-	b.WriteString("- List skills: `radiant skills list`\n")
-	b.WriteString("- Validate a skill: `radiant skills validate <dir>`\n\n")
-
-	b.WriteString("## Where to find more\n\n")
-	b.WriteString("- Spec templates: `specs/_templates/` (per tier)\n")
-	b.WriteString("- Project conventions: `CLAUDE.md` (if generated) or `docs/CONVENTIONS.md`\n")
-	b.WriteString("- Glossary: `docs/glossary.md`\n")
-	b.WriteString("- Architecture: `docs/architecture/context-map.md` (when present)\n")
-	b.WriteString("- Resume point: `.radiant-harness/state.md` (volatile, updated by handoff)\n\n")
-
-	b.WriteString("## For the agent\n\n")
-	b.WriteString("- **Vendor-neutral.** Skills are plain Markdown + YAML. No\n")
-	b.WriteString("  Claude/Cursor/etc. namespaces. Any modern LLM can consume them.\n")
-	b.WriteString("- **Tier-aware.** Trivial/Feature/Architecture determines which\n")
-	b.WriteString("  artifacts are required. Don't add ceremony beyond the tier.\n")
-	b.WriteString("- **Tests are non-negotiable.** Every AC must map to a task\n")
-	b.WriteString("  with a gate command. The harness runs the gates; you write them.\n")
-	b.WriteString("- **Plan is self-contained.** After spec.md + tasks.md exist,\n")
-	b.WriteString("  close the planning context and open a fresh one for implementation.\n")
-
+	b.WriteString("\n## How to use\n\n")
+	b.WriteString("1. Read the SKILL.md for any skill before invoking it.\n")
+	b.WriteString("2. Run `radiant run <spec-dir>` to execute a spec end-to-end.\n")
+	b.WriteString("3. Run `radiant handoff --feature=<slug> --tier=<tier> --next-command=<cmd> --note=<summary>` between sessions.\n")
 	return b.String()
+}
+
+// generateAgentsMD is a thin wrapper kept for the Init() flow
+// (which used it before Sprint 14.3). Delegates to GenerateAgentsMD.
+func generateAgentsMD() string {
+	return GenerateAgentsMD()
 }
 
 // generateInitialState produces the volatile session memory. The

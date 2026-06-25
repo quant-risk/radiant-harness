@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.5.1"
+var version = "0.6.0"
 
 func main() {
 	root := &cobra.Command{
@@ -926,6 +928,53 @@ func main() {
 	releaseCmd.Flags().Bool("skip-commit", false, "skip the git commit step (only bump version)")
 	root.AddCommand(releaseCmd)
 
+	// ── audit (Sprint 14.2 — project layout audit CLI) ──
+	// `radiant audit [--scope=full|docs|specs|adrs] [--output=...]`
+	// runs the project-wide conformity check from the `auditar`
+	// skill as a CLI. MVP scope: AC traceability (every AC has
+	// ≥1 task, every task has ≥1 AC), spec frontmatter validity,
+	// ADR status validity. Returns non-zero if any errors found.
+	auditCmd := &cobra.Command{
+		Use:   "audit",
+		Short: "Run the auditar skill: project layout, AC traceability, ADR validity",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, _ := cmd.Flags().GetString("scope")
+			outPath, _ := cmd.Flags().GetString("output")
+			failOnWarn, _ := cmd.Flags().GetBool("fail-on-warning")
+			return runAudit(scope, outPath, failOnWarn)
+		},
+	}
+	auditCmd.Flags().String("scope", "full", "audit scope: full | docs | specs | adrs")
+	auditCmd.Flags().StringP("output", "o", "", "output path (default: docs/audit-report.md)")
+	auditCmd.Flags().Bool("fail-on-warning", false, "exit non-zero on warnings (default: only errors)")
+	root.AddCommand(auditCmd)
+
+	// ── mcp (Sprint 14.5 — MCP server, stdio transport) ──
+	// `radiant mcp serve` exposes a JSON-RPC 2.0 server over stdio
+	// that implements the Model Context Protocol (MCP) so agents
+	// that prefer MCP can call radiant commands. Tools exposed:
+	//   - radiant_spec: scaffold a feature
+	//   - radiant_adr: create an ADR
+	//   - radiant_product: start a Lean Inception
+	//   - radiant_evals: AC→test coverage report
+	//   - radiant_audit: project layout audit
+	//   - radiant_release: cut a release
+	// Reads newline-delimited JSON-RPC from stdin; writes
+	// responses to stdout.
+	mcpCmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "MCP server commands",
+	}
+	mcpServeCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the MCP server (stdio transport)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMCPServe(os.Stdin, os.Stdout)
+		},
+	}
+	mcpCmd.AddCommand(mcpServeCmd)
+	root.AddCommand(mcpCmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1410,28 +1459,14 @@ func readFrontmatterVersion(path string) string {
 // research, bloated AGENTS.md files hurt LLM behaviour. The
 // canonical list of skills is appended as a one-line-per-skill
 // section so an agent can grep the file to discover what exists.
+//
+// As of Sprint 14.3 this is a thin wrapper that delegates to
+// `scaffold.GenerateAgentsMD()` — the SINGLE SOURCE OF TRUTH for
+// the AGENTS.md template. Both `radiant init` and `radiant update`
+// now produce identical content; the audit (`radiant camada-agentica`)
+// cross-checks consistency.
 func generateAgentsMD() string {
-	infos, err := skill.Bundle()
-	if err != nil {
-		// Fail closed: emit a stub that still tells the agent
-		// what the file is for. Real regeneration happens on
-		// the next `radiant update`.
-		return "# AGENTS.md\n\n(project metadata; regenerate with `radiant update`)\n"
-	}
-
-	var b strings.Builder
-	b.WriteString("# AGENTS.md\n\n")
-	b.WriteString("This project uses **radiant-harness**. Skills live in\n")
-	b.WriteString("`.radiant-harness/skills/<name>/{SKILL.md, frontmatter.yaml}`.\n\n")
-	b.WriteString("## Available skills\n\n")
-	for _, info := range infos {
-		fmt.Fprintf(&b, "- **%s** (v%s) — %s\n", info.Name, info.Version, info.Description)
-	}
-	b.WriteString("\n## How to use\n\n")
-	b.WriteString("1. Read the SKILL.md for any skill before invoking it.\n")
-	b.WriteString("2. Run `radiant run <spec-dir>` to execute a spec end-to-end.\n")
-	b.WriteString("3. Run `radiant handoff --feature=<slug> --tier=<tier> --next-command=<cmd> --note=<summary>` between sessions.\n")
-	return b.String()
+	return scaffold.GenerateAgentsMD()
 }
 
 // nextADRSequence scans `docs/architecture/adr/` for the highest
@@ -1477,11 +1512,40 @@ type featureCoverage struct {
 }
 
 // runEvals walks specs/ in scope, parses ACs + tasks coverage,
-// and writes a fidelity report. MVP scope = "all" only; the
-// "since-last-release" half requires git-state awareness
-// (deferred; documented as future work in the report).
+// and writes a fidelity report. Scopes:
+//   - "all" — every feature in specs/
+//   - "since-last-release" — every feature modified since the last
+//     git tag (per git log --tags). If no tags exist, falls back
+//     to all.
+//   - <spec-path> — single feature (e.g. specs/0001-jwt/)
 func runEvals(scope, outPath string) error {
 	specsDir := "specs"
+
+	// Resolve "since-last-release" to a set of feature slugs.
+	var includeSlugs map[string]bool // nil = include all
+	if scope == "since-last-release" {
+		lastTag, err := lastGitTag()
+		if err != nil || lastTag == "" {
+			fmt.Println("  (no tags found; falling back to scope=all)")
+		} else {
+			fmt.Printf("  (scoping to features modified since %s)\n", lastTag)
+			changed, err := specsChangedSince(lastTag)
+			if err != nil {
+				return fmt.Errorf("git log since %s: %w", lastTag, err)
+			}
+			includeSlugs = map[string]bool{}
+			for _, s := range changed {
+				includeSlugs[s] = true
+			}
+			if len(includeSlugs) == 0 {
+				fmt.Println("  (no features modified since last release; reporting empty scope)")
+			}
+		}
+	} else if scope != "all" && strings.HasPrefix(scope, "specs/") {
+		// Treat scope as a single spec path.
+		includeSlugs = map[string]bool{filepath.Base(scope): true}
+	}
+
 	entries, err := os.ReadDir(specsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1496,6 +1560,9 @@ func runEvals(scope, outPath string) error {
 			continue
 		}
 		slug := e.Name()
+		if includeSlugs != nil && !includeSlugs[slug] {
+			continue
+		}
 		feat, err := computeFeatureCoverage(filepath.Join(specsDir, slug))
 		if err != nil {
 			fmt.Printf("  [skip] %s: %v\n", slug, err)
@@ -1755,6 +1822,303 @@ func runCamadaAgentica(agentFlag string, fix bool) error {
 		fmt.Printf("\n  Re-run with --fix to regenerate AGENTS.md from current bundled skills.\n")
 	}
 	return nil
+}
+
+// lastGitTag returns the most recent git tag reachable from HEAD.
+// Returns "" if no tags exist (the caller falls back to scope=all).
+// We use `git describe --tags --abbrev=0` which is the standard
+// way to get the "last release tag".
+func lastGitTag() (string, error) {
+	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	out, err := cmd.Output()
+	if err != nil {
+		// Exit code 128 with "fatal: No names found" is normal
+		// when no tags exist. Return empty string + nil error so
+		// the caller falls back.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// specsChangedSince returns the slugs of features in specs/ whose
+// files (spec.md, tasks.md) have changed since `ref` (a git ref).
+// Implemented via `git diff --name-only <ref>..HEAD -- specs/`.
+// Only counts changes to spec.md / tasks.md; src/ changes are
+// out of scope for evals (they're implementation, not spec).
+func specsChangedSince(ref string) ([]string, error) {
+	cmd := exec.Command("git", "diff", "--name-only", ref+"..HEAD", "--", "specs/")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var slugs []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Line format: "specs/0001-jwt/spec.md" or "specs/0001-jwt/tasks.md"
+		// Extract the slug (second path component).
+		parts := strings.Split(line, "/")
+		if len(parts) >= 2 {
+			slug := parts[1]
+			if !seen[slug] {
+				seen[slug] = true
+				slugs = append(slugs, slug)
+			}
+		}
+	}
+	return slugs, nil
+}
+
+// auditFinding is one row in the audit report. The audit
+// collects these and renders them sorted by severity.
+type auditFinding struct {
+	Severity string // "ERROR" | "WARNING" | "INFO"
+	Location string // file:line where the issue was found
+	Message  string
+}
+
+// runAudit runs the project-wide conformity check from the
+// `auditar` skill as a CLI. MVP scope: AC traceability +
+// ADR status validity. Returns non-zero if any ERROR found
+// (or any WARNING when --fail-on-warning).
+func runAudit(scope, outPath string, failOnWarning bool) error {
+	if outPath == "" {
+		outPath = "docs/audit-report.md"
+	}
+
+	var findings []auditFinding
+
+	// Step 1: AC traceability per spec.
+	if scope == "full" || scope == "specs" {
+		findings = append(findings, auditACTraceability()...)
+	}
+
+	// Step 2: ADR status validity (every ADR file should have
+	// a valid status header).
+	if scope == "full" || scope == "adrs" {
+		findings = append(findings, auditADRStatus()...)
+	}
+
+	// Step 3: doc frontmatter (any .md with frontmatter must
+	// parse as YAML).
+	if scope == "full" || scope == "docs" {
+		findings = append(findings, auditDocFrontmatter()...)
+	}
+
+	// Sort: ERROR first, then WARNING, then INFO.
+	severityRank := map[string]int{"ERROR": 0, "WARNING": 1, "INFO": 2}
+	sort.SliceStable(findings, func(i, j int) bool {
+		return severityRank[findings[i].Severity] < severityRank[findings[j].Severity]
+	})
+
+	// Counts.
+	errors, warnings, infos := 0, 0, 0
+	for _, f := range findings {
+		switch f.Severity {
+		case "ERROR":
+			errors++
+		case "WARNING":
+			warnings++
+		case "INFO":
+			infos++
+		}
+	}
+
+	body := renderAuditReport(scope, findings, errors, warnings, infos)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if err := atomicWrite(outPath, body); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
+	}
+
+	fmt.Printf("  ✓ wrote %s\n", outPath)
+	fmt.Printf("\n  Summary: %d errors, %d warnings, %d info\n", errors, warnings, infos)
+	if errors > 0 || (failOnWarning && warnings > 0) {
+		return fmt.Errorf("audit found %d error(s) and %d warning(s) — see %s", errors, warnings, outPath)
+	}
+	return nil
+}
+
+// auditACTraceability walks specs/ and verifies that every AC
+// in spec.md has at least one task in tasks.md that covers it,
+// and that every task in tasks.md references at least one AC.
+// Returns one finding per violation.
+func auditACTraceability() []auditFinding {
+	var findings []auditFinding
+	entries, err := os.ReadDir("specs")
+	if err != nil {
+		// specs/ missing is not an audit failure (project may
+		// not use specs/).
+		return findings
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "_templates" || e.Name() == "quick" {
+			continue
+		}
+		dir := filepath.Join("specs", e.Name())
+		specBody, err := os.ReadFile(filepath.Join(dir, "spec.md"))
+		if err != nil {
+			findings = append(findings, auditFinding{
+				Severity: "WARNING",
+				Location: dir + "/spec.md",
+				Message:  "spec.md missing or unreadable",
+			})
+			continue
+		}
+		tasksBody, err := os.ReadFile(filepath.Join(dir, "tasks.md"))
+		if err != nil {
+			findings = append(findings, auditFinding{
+				Severity: "INFO",
+				Location: dir + "/tasks.md",
+				Message:  "tasks.md missing — ACs have no coverage claim",
+			})
+			continue
+		}
+
+		acs := parseAcceptanceCriteria(string(specBody))
+		tasksBodyStr := string(tasksBody)
+		for _, ac := range acs {
+			if !strings.Contains(tasksBodyStr, ac.ID) {
+				findings = append(findings, auditFinding{
+					Severity: "WARNING",
+					Location: dir + "/spec.md",
+					Message:  fmt.Sprintf("AC %s (%s) has no covering task in tasks.md", ac.ID, ac.Title),
+				})
+			}
+		}
+	}
+	return findings
+}
+
+// auditADRStatus scans docs/architecture/adr/ for status headers
+// and verifies each is one of the canonical values.
+func auditADRStatus() []auditFinding {
+	var findings []auditFinding
+	adrDir := "docs/architecture/adr"
+	entries, err := os.ReadDir(adrDir)
+	if err != nil {
+		return findings // no ADRs yet
+	}
+	validStatuses := map[string]bool{
+		"proposed":   true,
+		"accepted":   true,
+		"deprecated": true,
+		"superseded": true,
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(adrDir, e.Name())
+		body, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		// Look for "## Status" then the next non-empty line.
+		found := false
+		lines := strings.Split(string(body), "\n")
+		for i, line := range lines {
+			if strings.TrimSpace(line) != "## Status" {
+				continue
+			}
+			found = true
+			if i+1 < len(lines) {
+				status := strings.TrimSpace(lines[i+1])
+				if status == "" {
+					findings = append(findings, auditFinding{
+						Severity: "WARNING",
+						Location: path,
+						Message:  "## Status header has no value on the next line",
+					})
+				} else if !validStatuses[strings.ToLower(status)] {
+					findings = append(findings, auditFinding{
+						Severity: "WARNING",
+						Location: path,
+						Message:  fmt.Sprintf("## Status value %q is not one of proposed|accepted|deprecated|superseded", status),
+					})
+				}
+			}
+			break
+		}
+		if !found && !strings.HasPrefix(e.Name(), "_") {
+			findings = append(findings, auditFinding{
+				Severity: "INFO",
+				Location: path,
+				Message:  "ADR file has no '## Status' section",
+			})
+		}
+	}
+	return findings
+}
+
+// auditDocFrontmatter walks docs/ for .md files and reports any
+// with malformed YAML frontmatter (unclosed --- block).
+func auditDocFrontmatter() []auditFinding {
+	var findings []auditFinding
+	err := filepath.WalkDir("docs", func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		s := string(body)
+		if !strings.HasPrefix(s, "---") {
+			return nil // no frontmatter, that's fine
+		}
+		// Look for closing "---" on its own line.
+		rest := strings.TrimPrefix(s, "---")
+		idx := strings.Index(rest, "\n---")
+		if idx < 0 {
+			findings = append(findings, auditFinding{
+				Severity: "WARNING",
+				Location: path,
+				Message:  "frontmatter opened (---) but never closed",
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		// docs/ missing is not an audit failure
+		return findings
+	}
+	return findings
+}
+
+// renderAuditReport produces docs/audit-report.md content.
+func renderAuditReport(scope string, findings []auditFinding, errors, warnings, infos int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Audit report — scope=%s\n\n", scope)
+	b.WriteString("> Generated by `radiant audit`. Per the `auditar`\n")
+	b.WriteString("> skill: project-wide conformity check (frontmatter,\n")
+	b.WriteString("> AC traceability, ADR validity, deviations).\n\n")
+
+	b.WriteString("## Summary\n\n")
+	b.WriteString("| Severity | Count |\n")
+	b.WriteString("|----------|-------|\n")
+	fmt.Fprintf(&b, "| ERROR    | %d |\n", errors)
+	fmt.Fprintf(&b, "| WARNING  | %d |\n", warnings)
+	fmt.Fprintf(&b, "| INFO     | %d |\n\n", infos)
+
+	if len(findings) == 0 {
+		b.WriteString("No findings. Project passes the audit.\n")
+		return b.String()
+	}
+
+	b.WriteString("## Findings\n\n")
+	for _, f := range findings {
+		fmt.Fprintf(&b, "### [%s] %s\n\n", f.Severity, f.Message)
+		fmt.Fprintf(&b, "- **Location**: %s\n\n", f.Location)
+	}
+	return b.String()
 }
 
 // runRelease cuts a release. Pipeline:
@@ -2027,6 +2391,245 @@ func bumpVersionInSource(newVersion string, dryRun bool) error {
 	}
 	fmt.Printf("  ✓ %s: %s\n", path, newLine)
 	return nil
+}
+
+// mcpTool is one tool exposed by the MCP server.
+type mcpTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema mcpInputSchema `json:"inputSchema"`
+}
+
+// mcpInputSchema is the JSON Schema describing the tool's args.
+type mcpInputSchema struct {
+	Type       string                    `json:"type"`
+	Properties map[string]mcpPropertyDef `json:"properties"`
+	Required   []string                  `json:"required,omitempty"`
+}
+
+// mcpPropertyDef is one property in the input schema.
+type mcpPropertyDef struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// mcpRequest is a JSON-RPC 2.0 request from the client.
+type mcpRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      any             `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+// mcpResponse is a JSON-RPC 2.0 response to the client.
+type mcpResponse struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      any         `json:"id,omitempty"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *mcpError   `json:"error,omitempty"`
+}
+
+// mcpError is the error block of a JSON-RPC response.
+type mcpError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// runMCPServe reads newline-delimited JSON-RPC requests from `in`,
+// writes JSON-RPC responses to `out`. Implements the Model Context
+// Protocol (MCP) over stdio. Tools exposed are radiant commands
+// (spec, adr, product, evals, audit, release). Each tool call
+// spawns the corresponding command as a subprocess and returns
+// stdout as the result.
+func runMCPServe(in io.Reader, out io.Writer) error {
+	tools := []mcpTool{
+		{Name: "radiant_spec", Description: "Scaffold a new feature (spec.md + tasks.md)", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"intent": {Type: "string", Description: "The feature intent (1-3 sentences)"},
+			},
+			Required: []string{"intent"},
+		}},
+		{Name: "radiant_adr", Description: "Create an Architecture Decision Record (Nygard format)", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"decision": {Type: "string", Description: "The decision title"},
+				"status":   {Type: "string", Description: "proposed | accepted | deprecated | superseded"},
+			},
+			Required: []string{"decision"},
+		}},
+		{Name: "radiant_product", Description: "Start a Lean Inception", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"vision":    {Type: "string", Description: "The product vision (1-3 sentences)"},
+				"mvp_weeks": {Type: "number", Description: "Target weeks to MVP"},
+			},
+			Required: []string{"vision"},
+		}},
+		{Name: "radiant_evals", Description: "Measure AC→test coverage fidelity", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"scope": {Type: "string", Description: "all | since-last-release | <spec-path>"},
+			},
+		}},
+		{Name: "radiant_audit", Description: "Run project layout audit", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"scope": {Type: "string", Description: "full | docs | specs | adrs"},
+			},
+		}},
+		{Name: "radiant_release", Description: "Cut a release (dry-run only via MCP for safety)", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"version": {Type: "string", Description: "Semver version (e.g. 0.5.1)"},
+			},
+			Required: []string{"version"},
+		}},
+	}
+
+	enc := json.NewEncoder(out)
+	scanner := bufio.NewScanner(in)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var req mcpRequest
+		if err := json.Unmarshal(line, &req); err != nil {
+			_ = enc.Encode(mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32700, Message: "parse error"}})
+			continue
+		}
+		resp := handleMCPRequest(req, tools)
+		_ = enc.Encode(resp)
+	}
+	return scanner.Err()
+}
+
+// handleMCPRequest dispatches one JSON-RPC request to the
+// appropriate MCP method handler.
+func handleMCPRequest(req mcpRequest, tools []mcpTool) mcpResponse {
+	switch req.Method {
+	case "initialize":
+		return mcpResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"serverInfo": map[string]string{
+					"name":    "radiant-harness",
+					"version": version,
+				},
+				"capabilities": map[string]interface{}{
+					"tools": map[string]interface{}{},
+				},
+			},
+		}
+	case "tools/list":
+		return mcpResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]interface{}{"tools": tools},
+		}
+	case "tools/call":
+		var params struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params"}}
+		}
+		return callMCPTool(params.Name, params.Arguments)
+	default:
+		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32601, Message: "method not found: " + req.Method}}
+	}
+}
+
+// callMCPTool dispatches a tools/call request to the matching
+// radiant CLI command. Returns the stdout as a content array.
+func callMCPTool(name string, args json.RawMessage) mcpResponse {
+	var argv []string
+	argv = append(argv, name)
+	// Each tool has its own CLI shape. Map tools to subcommands.
+	switch name {
+	case "radiant_spec":
+		var a struct {
+			Intent string `json:"intent"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"spec", a.Intent}
+	case "radiant_adr":
+		var a struct {
+			Decision string `json:"decision"`
+			Status   string `json:"status"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if a.Status != "" {
+			argv = []string{"adr", a.Decision, "--status=" + a.Status}
+		} else {
+			argv = []string{"adr", a.Decision}
+		}
+	case "radiant_product":
+		var a struct {
+			Vision   string `json:"vision"`
+			MVPWeeks int    `json:"mvp_weeks"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if a.MVPWeeks > 0 {
+			argv = []string{"product", a.Vision, "--mvp-weeks=" + strconv.Itoa(a.MVPWeeks)}
+		} else {
+			argv = []string{"product", a.Vision}
+		}
+	case "radiant_evals":
+		var a struct {
+			Scope string `json:"scope"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if a.Scope == "" {
+			a.Scope = "all"
+		}
+		argv = []string{"evals", "--scope=" + a.Scope}
+	case "radiant_audit":
+		var a struct {
+			Scope string `json:"scope"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if a.Scope == "" {
+			a.Scope = "full"
+		}
+		argv = []string{"audit", "--scope=" + a.Scope}
+	case "radiant_release":
+		var a struct {
+			Version string `json:"version"`
+		}
+		_ = json.Unmarshal(args, &a)
+		// Always dry-run via MCP for safety — never let an MCP
+		// caller tag a release without explicit CLI confirmation.
+		argv = []string{"release", a.Version, "--dry-run"}
+	default:
+		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
+	}
+
+	cmd := exec.Command("radiant", argv...)
+	stdout, err := cmd.CombinedOutput()
+	if err != nil {
+		// Return the error as content (text) so the MCP client
+		// sees the failure message. Don't bubble up a JSON-RPC
+		// error — tools/call errors are tool-call failures, not
+		// protocol errors.
+		return mcpResponse{
+			JSONRPC: "2.0",
+			Result: map[string]interface{}{
+				"content": []map[string]string{{"type": "text", "text": string(stdout)}},
+				"isError": true,
+			},
+		}
+	}
+	return mcpResponse{
+		JSONRPC: "2.0",
+		Result: map[string]interface{}{
+			"content": []map[string]string{{"type": "text", "text": string(stdout)}},
+		},
+	}
 }
 
 // runSetupCI generates the CI workflow for the chosen provider.

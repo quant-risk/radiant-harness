@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/skill"
 )
 
 // TestGenerateViewsForAgentKnownAgents checks that every adapter
@@ -130,5 +131,41 @@ func TestGenerateViewsForAgentKeepsFrontmatter(t *testing.T) {
 		if !strings.HasPrefix(strings.TrimSpace(body), "---") {
 			t.Errorf("%s: instructions should start with frontmatter (keep mode), got:\n%.200s", agent, body)
 		}
+	}
+}
+
+// TestGenerateAgentsMDShape checks the canonical AGENTS.md format:
+// ≤100 lines, includes every bundled skill by name, has the
+// universal-index header. This is the regression guard for
+// Sprint 14.3 (unify AGENTS.md templates) — both `Init` and
+// `radiant update` must produce content matching this contract.
+func TestGenerateAgentsMDShape(t *testing.T) {
+	body := GenerateAgentsMD()
+	lines := strings.Split(body, "\n")
+	if len(lines) > 100 {
+		t.Errorf("AGENTS.md should stay <=100 lines (video research #6); got %d", len(lines))
+	}
+	if !strings.HasPrefix(body, "# AGENTS.md") {
+		t.Errorf("AGENTS.md should start with '# AGENTS.md'; got first line: %q", strings.SplitN(body, "\n", 2)[0])
+	}
+	infos, err := skill.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range infos {
+		if !strings.Contains(body, info.Name) {
+			t.Errorf("AGENTS.md should reference skill %q", info.Name)
+		}
+	}
+}
+
+// TestGenerateAgentsMDStable calls GenerateAgentsMD twice and
+// ensures the output is byte-identical (no flakiness from map
+// iteration order, time-dependent content, etc.).
+func TestGenerateAgentsMDStable(t *testing.T) {
+	a := GenerateAgentsMD()
+	b := GenerateAgentsMD()
+	if a != b {
+		t.Errorf("GenerateAgentsMD is not stable across calls:\n--- a ---\n%s\n--- b ---\n%s", a, b)
 	}
 }

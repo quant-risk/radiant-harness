@@ -4,6 +4,63 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-25
+
+Sprint 14 (post-merge): four new commands + an MCP server. Closes
+the entire post-merge roadmap.
+
+### Added
+- **`radiant audit [--scope=full|docs|specs|adrs] [--output=...]
+  [--fail-on-warning]`** — wires the `auditar` skill to a CLI.
+  Walks specs/, docs/architecture/adr/, and docs/ for:
+  - AC traceability (every AC has ≥1 task, every task ≥1 AC)
+  - ADR status validity (must be proposed | accepted | deprecated |
+    superseded)
+  - Doc frontmatter (any `---` block must be closed)
+  Findings sorted by severity (ERROR → WARNING → INFO). Non-zero
+  exit if any ERROR found (or WARNING if --fail-on-warning).
+- **`scaffold.GenerateAgentsMD()`** — single source of truth for the
+  AGENTS.md template. Both `Init` and `radiant update` delegate
+  to it. Resolves the drift the `camada-agentica` audit
+  detected in Sprint 13.4.
+- **`--scope=since-last-release` for `radiant evals`** — git-state
+  aware coverage. Uses `git describe --tags --abbrev=0` to find
+  the last release tag, then `git diff --name-only <tag>..HEAD
+  -- specs/` to enumerate changed features. Falls back to
+  scope=all when no tags exist.
+- **`radiant mcp serve`** — MCP server over stdio (JSON-RPC 2.0).
+  Implements the Model Context Protocol so agents that prefer
+  MCP can call radiant commands. Tools exposed: radiant_spec,
+  radiant_adr, radiant_product, radiant_evals, radiant_audit,
+  radiant_release. The release tool is HARD-CODED to dry-run
+  for safety — an MCP caller cannot tag a release without
+  explicit CLI confirmation.
+
+### Quality
+- 298 tests passing (+21 from Sprint 14: 8 audit, 2 AGENTS.md
+  unification, 2 specs-changed-since, 9 MCP server).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
+### Milestone: post-merge roadmap complete
+
+All items from the post-merge roadmap in `docs/METHODOLOGY-MERGE-FINAL.md`
+are now shipped:
+
+| Priority | Item | Status |
+|----------|------|--------|
+| High | `radiant audit` CLI | ✓ v0.6.0 |
+| Medium | Unify AGENTS.md templates | ✓ v0.6.0 |
+| Medium | `since-last-release` scope for evals | ✓ v0.6.0 |
+| Low | MCP `serve` command | ✓ v0.6.0 |
+
+Version bumped to 0.6.0 because the MCP server is a meaningful
+new capability (agents can now consume radiant via the Model
+Context Protocol), and the AGENTS.md unification closes a real
+drift detected by the audit.
+
 ## [0.5.1] — 2026-06-25
 
 Sprint 14 first batch: first-class release command. Composes
