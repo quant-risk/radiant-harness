@@ -1,0 +1,94 @@
+name: incident
+version: 1.0.0
+description: |
+  Incident response playbook: triage, mitigate, communicate,
+  post-mortem. Generates a structured incident document at
+  docs/incidents/NNNN-<slug>.md with timeline, RCA, and follow-ups.
+  Used by on-call engineers and SREs when an alert fires.
+when_to_use: |
+  An alert fires OR a customer reports an outage OR a security
+  incident is detected. The first 15 minutes matter; this skill
+  structures the response so nothing falls through the cracks.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: severity
+    type: enum
+    required: true
+    description: |
+      "sev1" (full outage, major customer impact) | "sev2"
+      (degraded, partial impact) | "sev3" (minor, workaround
+      exists) | "sev4" (cosmetic, no customer impact).
+  - name: summary
+    type: string
+    required: true
+    description: |
+      One-sentence description of what's broken. Used as the
+      incident title.
+  - name: detected_at
+    type: string
+    required: false
+    description: |
+      ISO-8601 timestamp of detection. Defaults to "now".
+
+outputs:
+  - path: docs/incidents/<NNNN>-<slug>.md
+    type: artifact
+    description: |
+      Incident document with timeline, RCA, action items.
+      Follows the "blameless post-mortem" template.
+  - path: docs/incidents/<NNNN>-<slug>-timeline.md
+    type: artifact
+    description: |
+      Standalone timeline file (events in chronological order).
+      Useful for stakeholder updates.
+
+gates:
+  - name: severity-assigned
+    description: |
+      Severity is one of sev1..sev4. Wrong severity wastes
+      resources (too high) or hides impact (too low).
+  - name: commander-named
+    description: |
+      An incident commander is named within 5 minutes of
+      detection. Single point of coordination.
+  - name: comms-published
+    description: |
+      Status page updated within 15 minutes for sev1/sev2.
+      Customers can't fix what they don't know is broken.
+  - name: postmortem-scheduled
+    description: |
+      Blameless post-mortem scheduled within 5 business days of
+      resolution. The post-mortem is the most valuable output.
+
+context_provides:
+  - state.md
+  - docs/architecture/context-map.md
+  - .radiant-harness/skills/
+
+commands_available:
+  - radiant incident <severity> <summary>
+
+related_skills:
+  - auditar
+  - validar
+  - roadmap
+
+anti_patterns:
+  - |
+    Skipping severity assignment. "It'll be fine" wastes time
+    when it's not fine, and wastes resources when it is.
+  - |
+    No incident commander. With multiple responders, decisions
+    conflict and nothing ships.
+  - |
+    Skipping the post-mortem. The incident repeats if you don't
+    learn from it.
+  - |
+    Blaming people in the post-mortem. The system produced the
+    incident; fix the system.
+
+author: radiant-harness contributors
+license: MIT

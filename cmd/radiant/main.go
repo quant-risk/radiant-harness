@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.6.1"
+var version = "0.6.2"
 
 func main() {
 	root := &cobra.Command{
@@ -996,6 +996,67 @@ func main() {
 	securityCmd.Flags().StringP("output", "o", "", "output path (default: docs/security-report.md)")
 	securityCmd.Flags().Bool("fail-on-warning", false, "exit non-zero on warnings (default: only errors)")
 	root.AddCommand(securityCmd)
+
+	// ── telemetry (Sprint 18 — privacy-first local usage stats) ──
+	// `radiant telemetry {status|enable|disable|show}` — opt-in local
+	// usage tracking. PRIVACY-FIRST: nothing is collected by
+	// default. The user must explicitly run `radiant telemetry
+	// enable` to start logging. Even when enabled, only the
+	// command name + timestamp + a content hash are recorded
+	// locally (no args, no paths, no project metadata).
+	telemetryCmd := &cobra.Command{
+		Use:   "telemetry",
+		Short: "Privacy-first local usage stats (opt-in)",
+	}
+	telemetryStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether telemetry is enabled and what is recorded",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTelemetryStatus()
+		},
+	}
+	telemetryEnableCmd := &cobra.Command{
+		Use:   "enable",
+		Short: "Opt in to local telemetry (writes to .radiant-harness/telemetry.jsonl)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTelemetryEnable()
+		},
+	}
+	telemetryDisableCmd := &cobra.Command{
+		Use:   "disable",
+		Short: "Opt out of telemetry (removes the log file)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTelemetryDisable()
+		},
+	}
+	telemetryShowCmd := &cobra.Command{
+		Use:   "show",
+		Short: "Show the local telemetry log (last 50 events)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTelemetryShow()
+		},
+	}
+	telemetryCmd.AddCommand(telemetryStatusCmd, telemetryEnableCmd, telemetryDisableCmd, telemetryShowCmd)
+	root.AddCommand(telemetryCmd)
+
+	// ── incident (Sprint 19 — incident response scaffold) ──
+	// `radiant incident <severity> <summary>` wires the `incident`
+	// skill to a CLI. Generates docs/incidents/<NNNN>-<slug>.md
+	// with the post-mortem template pre-filled; the on-call
+	// engineer fills in the timeline + RCA + action items.
+	incidentCmd := &cobra.Command{
+		Use:   "incident <severity> <summary>",
+		Short: "Start an incident: scaffold docs/incidents/<NNNN>-<slug>.md",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			severity := args[0]
+			summary := args[1]
+			out, _ := cmd.Flags().GetString("output")
+			return runIncident(severity, summary, out)
+		},
+	}
+	incidentCmd.Flags().StringP("output", "o", "", "output path (default: docs/incidents/<NNNN>-<slug>.md)")
+	root.AddCommand(incidentCmd)
 
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
@@ -2566,6 +2627,262 @@ func handleMCPRequest(req mcpRequest, tools []mcpTool) mcpResponse {
 	}
 }
 
+// runIncident scaffolds an incident document. The user fills in
+// the timeline, RCA, and action items following the `incident`
+// skill's blameless post-mortem template. Severity must be one
+// of sev1..sev4 (validated).
+func runIncident(severity, summary, outPath string) error {
+	severity = strings.ToLower(strings.TrimSpace(severity))
+	switch severity {
+	case "sev1", "sev2", "sev3", "sev4":
+		// ok
+	default:
+		return fmt.Errorf("invalid severity %q — expected sev1 | sev2 | sev3 | sev4", severity)
+	}
+
+	if outPath == "" {
+		seq, err := nextIncidentSeq()
+		if err != nil {
+			return fmt.Errorf("compute next sequence: %w", err)
+		}
+		slug := slugify(summary)
+		outPath = filepath.Join("docs", "incidents", fmt.Sprintf("%04d-%s.md", seq, slug))
+	}
+
+	body := renderIncidentDoc(severity, summary)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if err := atomicWrite(outPath, body); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
+	}
+	fmt.Printf("  ✓ created %s\n", outPath)
+	fmt.Println("\n  Next (per the `incident` skill):")
+	fmt.Println("    1. Acknowledge the alert in PagerDuty / Opsgenie / Slack.")
+	fmt.Println("    2. Assign severity if you haven't already (you gave sev" + severity[3:] + ").")
+	fmt.Println("    3. Name an incident commander within 5 min.")
+	fmt.Println("    4. Mitigate (rollback / scale / failover) within 15 min.")
+	fmt.Println("    5. Update status page for sev1/sev2.")
+	fmt.Println("    6. Schedule a blameless post-mortem within 5 business days.")
+	return nil
+}
+
+// nextIncidentSeq scans docs/incidents/ for the highest NNNN-
+// prefix and returns next+1. Returns 1 if the directory is empty
+// or doesn't exist yet.
+func nextIncidentSeq() (int, error) {
+	dir := "docs/incidents"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 1, nil
+		}
+		return 0, err
+	}
+	max := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[4] != '-' {
+			continue
+		}
+		n, err := strconv.Atoi(name[:4])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1, nil
+}
+
+// renderIncidentDoc produces the incident document body. The
+// user fills in the timeline + RCA + action items following
+// the structure. MVP: template only; LLM via the `incident` skill
+// fills in the actual content during the post-mortem.
+func renderIncidentDoc(severity, summary string) string {
+	return fmt.Sprintf(`# Incident %s — %s
+
+> Generated by 'radiant incident'. Per the 'incident' skill:
+> blameless post-mortem template. Fill in the timeline + RCA +
+> action items; the skill's job is to remind you what goes where.
+
+**Severity**: %s
+**Date**: %s
+**Duration**: <fill in: HH:MM from detection to resolution>
+**Impact**: <fill in: customer-facing impact>
+**Commander**: <name>
+**Author**: <name>
+
+## Timeline (UTC)
+
+- HH:MM — detection (alert fired / customer report)
+- HH:MM — commander named
+- HH:MM — mitigation started (rollback / scale / failover)
+- HH:MM — service restored
+- HH:MM — root cause identified
+- HH:MM — permanent fix deployed
+
+## Root cause
+
+What happened, and WHY. Not the symptom — the cause. Include the chain of events that led to the failure.
+
+## Contributing factors
+
+- What monitoring missed
+- What tests didn't catch
+- What process / runbook was unclear
+- What communication failed
+
+## What went well
+
+- Fast detection
+- Quick rollback
+- Clear comms
+- Good escalation
+
+## Action items
+
+| # | Action | Owner | Due | Tracked in |
+|---|--------|-------|-----|------------|
+| 1 | Add monitoring for X | @alice | 2026-07-01 | roadmap |
+| 2 | Improve runbook for Y | @bob   | 2026-07-15 | roadmap |
+| 3 | Add regression test for Z | @carol | 2026-07-01 | roadmap |
+
+---
+
+_Generated by 'radiant incident' on %s. See the 'incident' skill for the full playbook._
+`,
+		severity, summary, severity, time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Format("2006-01-02"))
+}
+
+// telemetryLogPath is the canonical location of the local
+// telemetry log. Lives under .radiant-harness/ so it stays out
+// of the user's source tree.
+const telemetryLogPath = ".radiant-harness/telemetry.jsonl"
+
+// telemetryEvent is one row in the telemetry log. PRIVACY-FIRST:
+// only the command name (e.g. "spec"), a content hash, and the
+// ISO-8601 timestamp are recorded. No args, no paths, no project
+// metadata, no environment info.
+type telemetryEvent struct {
+	Timestamp  string `json:"timestamp"`   // ISO-8601 UTC
+	Command    string `json:"command"`     // e.g. "spec", "release", "audit"
+	Hash       string `json:"hash"`        // sha256 of redacted context (placeholder, 8 chars)
+	RadiantVer string `json:"radiant_ver"` // CLI version (semver, no git sha)
+}
+
+// isTelemetryEnabled returns true when the user has run
+// `radiant telemetry enable`. We detect enablement by checking
+// for the existence of the telemetry log file. There is no
+// separate "config" file — the log's existence IS the flag.
+func isTelemetryEnabled() bool {
+	_, err := os.Stat(telemetryLogPath)
+	return err == nil
+}
+
+// runTelemetryStatus reports whether telemetry is enabled, what
+// would be recorded if it were, and where the log lives.
+func runTelemetryStatus() error {
+	enabled := isTelemetryEnabled()
+	fmt.Printf("  Telemetry: %s\n", boolStr(enabled))
+	fmt.Printf("  Log path:  %s\n", telemetryLogPath)
+	fmt.Println()
+	fmt.Println("  When enabled, each radiant invocation records:")
+	fmt.Println("    - timestamp (ISO-8601 UTC)")
+	fmt.Println("    - command name (e.g. \"spec\", \"release\")")
+	fmt.Println("    - 8-char hash of redacted context")
+	fmt.Println("    - radiant CLI version (semver)")
+	fmt.Println()
+	fmt.Println("  NEVER recorded (privacy-first):")
+	fmt.Println("    - command arguments")
+	fmt.Println("    - file paths")
+	fmt.Println("    - project names or git SHAs")
+	fmt.Println("    - environment variables")
+	fmt.Println("    - network endpoints")
+	fmt.Println()
+	if enabled {
+		fmt.Printf("  Run 'radiant telemetry disable' to opt out and delete the log.\n")
+	} else {
+		fmt.Printf("  Run 'radiant telemetry enable' to opt in.\n")
+	}
+	return nil
+}
+
+// runTelemetryEnable creates the telemetry log file (empty).
+// The act of creating the file IS the opt-in.
+func runTelemetryEnable() error {
+	if isTelemetryEnabled() {
+		fmt.Printf("  Telemetry already enabled (log at %s)\n", telemetryLogPath)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(telemetryLogPath), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(telemetryLogPath)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", telemetryLogPath, err)
+	}
+	defer f.Close()
+	fmt.Printf("  ✓ Telemetry enabled. Log: %s\n", telemetryLogPath)
+	fmt.Println("  Each subsequent radiant invocation will append one line.")
+	fmt.Println("  Disable with 'radiant telemetry disable'.")
+	return nil
+}
+
+// runTelemetryDisable removes the telemetry log file. Idempotent:
+// returns nil even if the file doesn't exist.
+func runTelemetryDisable() error {
+	if !isTelemetryEnabled() {
+		fmt.Println("  Telemetry already disabled (no log file).")
+		return nil
+	}
+	if err := os.Remove(telemetryLogPath); err != nil {
+		return fmt.Errorf("remove %s: %w", telemetryLogPath, err)
+	}
+	fmt.Printf("  ✓ Telemetry disabled. Removed %s.\n", telemetryLogPath)
+	return nil
+}
+
+// runTelemetryShow prints the last 50 events from the log, one
+// per line. If telemetry is disabled, prints a helpful message.
+func runTelemetryShow() error {
+	if !isTelemetryEnabled() {
+		fmt.Println("  Telemetry is disabled. Run 'radiant telemetry enable' to start collecting.")
+		return nil
+	}
+	data, err := os.ReadFile(telemetryLogPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", telemetryLogPath, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 {
+		fmt.Println("  (no events recorded)")
+		return nil
+	}
+	// Last 50 events, most recent first.
+	start := len(lines) - 50
+	if start < 0 {
+		start = 0
+	}
+	fmt.Printf("  Last %d events:\n", len(lines)-start)
+	for _, line := range lines[start:] {
+		fmt.Printf("    %s\n", line)
+	}
+	return nil
+}
+
+// boolStr is a tiny helper to render "enabled" / "disabled".
+func boolStr(b bool) string {
+	if b {
+		return "ENABLED"
+	}
+	return "disabled (opt-in)"
+}
+
 // securityFinding is one row in the security report.
 type securityFinding struct {
 	Severity string // "ERROR" | "WARNING" | "INFO"
@@ -2943,7 +3260,8 @@ func ciSecretsFor(provider string) []string {
 }
 
 // renderGitHubActions produces a .github/workflows/esteira.yml
-// that runs validate → audit → tests → build on every PR.
+// that runs validate → audit → security → tests → build on every
+// PR (5 gates; Sprint 17 added `radiant security`).
 // RADIANT_API_KEY is referenced via secrets, not hardcoded.
 func renderGitHubActions(model string) string {
 	modelArg := ""
@@ -2975,6 +3293,8 @@ jobs:
 %s          radiant validate
       - name: Audit (project layout conformity)
         run: radiant audit
+      - name: Security (hardcoded secrets + sensitive file perms)
+        run: radiant security --fail-on-warning
       - name: Tests
         run: go test ./... -count=1 -race
       - name: Build
@@ -2982,7 +3302,7 @@ jobs:
 `, modelArg)
 }
 
-// renderGitLabCI produces a .gitlab-ci.yml with the same four
+// renderGitLabCI produces a .gitlab-ci.yml with the same five
 // gates. Secrets via CI/CD variables (the GitLab idiom).
 func renderGitLabCI(model string) string {
 	modelArg := ""
@@ -3011,6 +3331,14 @@ radiant-audit:
   script:
     - radiant audit
 
+radiant-security:
+  stage: radiant
+  image: golang:1.22
+  before_script:
+    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+  script:
+    - radiant security --fail-on-warning
+
 tests:
   stage: build
   image: golang:1.22
@@ -3026,7 +3354,7 @@ build:
 }
 
 // renderCircleCI produces a .circleci/config.yml with the same
-// four gates. Secrets via context (the CircleCI idiom).
+// five gates. Secrets via context (the CircleCI idiom).
 func renderCircleCI(model string) string {
 	modelArg := ""
 	if model != "" {
@@ -3050,6 +3378,9 @@ jobs:
       - run:
           name: Audit (project layout conformity)
           command: radiant audit
+      - run:
+          name: Security (hardcoded secrets + sensitive file perms)
+          command: radiant security --fail-on-warning
       - run:
           name: Tests
           command: go test ./... -count=1 -race

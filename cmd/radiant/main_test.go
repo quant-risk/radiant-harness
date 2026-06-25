@@ -1332,6 +1332,221 @@ func TestRenderSecurityReportWithFindings(t *testing.T) {
 	}
 }
 
+func TestCITemplatesIncludeSecurityGate(t *testing.T) {
+	// Sprint 17 wired `radiant security` as the 5th CI gate in
+	// all 3 templates (GitHub Actions / GitLab CI / CircleCI).
+	bodies := map[string]string{
+		"github":   renderGitHubActions(""),
+		"gitlab":   renderGitLabCI(""),
+		"circleci": renderCircleCI(""),
+	}
+	for provider, body := range bodies {
+		// Each template must call `radiant security` with --fail-on-warning
+		// so the build fails on any WARNING finding (chmod 600 violations etc.).
+		if !strings.Contains(body, "radiant security --fail-on-warning") {
+			t.Errorf("%s template missing 'radiant security --fail-on-warning' gate", provider)
+		}
+		// And the 4 existing gates must still be present.
+		for _, gate := range []string{"radiant validate", "radiant audit", "go test", "go build"} {
+			if !strings.Contains(body, gate) {
+				t.Errorf("%s template missing gate %q", provider, gate)
+			}
+		}
+	}
+}
+
+func TestIsTelemetryEnabledDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// No telemetry log exists → disabled.
+	if isTelemetryEnabled() {
+		t.Error("telemetry should be disabled by default (no log file)")
+	}
+}
+
+func TestTelemetryEnableDisable(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatalf("runTelemetryEnable: %v", err)
+	}
+	if !isTelemetryEnabled() {
+		t.Error("after enable, telemetry should be enabled")
+	}
+	if _, err := os.Stat(telemetryLogPath); err != nil {
+		t.Errorf("expected log file to exist at %s: %v", telemetryLogPath, err)
+	}
+	if err := runTelemetryDisable(); err != nil {
+		t.Fatalf("runTelemetryDisable: %v", err)
+	}
+	if isTelemetryEnabled() {
+		t.Error("after disable, telemetry should be disabled")
+	}
+	if _, err := os.Stat(telemetryLogPath); !os.IsNotExist(err) {
+		t.Errorf("expected log file to be removed; stat err = %v", err)
+	}
+}
+
+func TestTelemetryEnableIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatalf("first enable: %v", err)
+	}
+	// Second enable should not error.
+	if err := runTelemetryEnable(); err != nil {
+		t.Errorf("second enable should be idempotent; got %v", err)
+	}
+}
+
+func TestTelemetryDisableIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Disable without prior enable should not error.
+	if err := runTelemetryDisable(); err != nil {
+		t.Errorf("disable with no prior enable should be idempotent; got %v", err)
+	}
+}
+
+func TestTelemetryShowWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Show without enable should print a helpful message and not error.
+	if err := runTelemetryShow(); err != nil {
+		t.Errorf("show when disabled should not error; got %v", err)
+	}
+}
+
+func TestTelemetryStatusReportsState(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Status is read-only; should not error in either state.
+	if err := runTelemetryStatus(); err != nil {
+		t.Errorf("status (disabled) error: %v", err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if err := runTelemetryStatus(); err != nil {
+		t.Errorf("status (enabled) error: %v", err)
+	}
+}
+
+func TestTelemetryEventShape(t *testing.T) {
+	// The telemetryEvent struct should have only the 4 privacy-
+	// safe fields. No PII: no args, no paths, no env vars.
+	e := telemetryEvent{
+		Timestamp:  "2026-06-25T10:00:00Z",
+		Command:    "spec",
+		Hash:       "abcdef12",
+		RadiantVer: "0.6.1",
+	}
+	// Marshal and confirm no extra fields leak.
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"timestamp":"2026-06-25T10:00:00Z"`, `"command":"spec"`, `"hash":"abcdef12"`, `"radiant_ver":"0.6.1"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("telemetry event missing %q in JSON: %s", want, data)
+		}
+	}
+}
+
+func TestRunIncidentRejectsBadSeverity(t *testing.T) {
+	if err := runIncident("bogus", "test", "/tmp/should-not-exist.md"); err == nil {
+		t.Error("expected error for invalid severity")
+	}
+}
+
+func TestRunIncidentAcceptsAllSeverities(t *testing.T) {
+	for _, sev := range []string{"sev1", "sev2", "sev3", "sev4", "SEV1", "Sev2"} {
+		dir := t.TempDir()
+		outPath := filepath.Join(dir, "incident.md")
+		if err := runIncident(sev, "test incident", outPath); err != nil {
+			t.Errorf("runIncident(%q) should accept valid severity; got %v", sev, err)
+		}
+		if _, err := os.Stat(outPath); err != nil {
+			t.Errorf("expected file at %s; stat err = %v", outPath, err)
+		}
+	}
+}
+
+func TestRenderIncidentDocIncludesSections(t *testing.T) {
+	body := renderIncidentDoc("sev1", "API outage")
+	for _, want := range []string{
+		"# Incident sev1",
+		"## Timeline (UTC)",
+		"## Root cause",
+		"## Action items",
+		"API outage",
+		"radiant incident", // CLI command name appears in footer
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("renderIncidentDoc missing %q", want)
+		}
+	}
+}
+
+func TestNextIncidentSeqEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("docs/incidents", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seq, err := nextIncidentSeq()
+	if err != nil {
+		t.Fatalf("nextIncidentSeq: %v", err)
+	}
+	if seq != 1 {
+		t.Errorf("expected seq=1 on empty dir, got %d", seq)
+	}
+}
+
+func TestNextIncidentSeqIncrement(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("docs/incidents", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"0001-foo.md", "0007-bar.md", "0003-baz.md"} {
+		if err := os.WriteFile(filepath.Join("docs/incidents", name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq, err := nextIncidentSeq()
+	if err != nil {
+		t.Fatalf("nextIncidentSeq: %v", err)
+	}
+	if seq != 8 {
+		t.Errorf("expected seq=8 (highest was 0007), got %d", seq)
+	}
+}
+
 // getOrigWD returns the original working directory before any
 // test chdir'd. Used by tests that chdir to a tempdir to clean
 // up after themselves.

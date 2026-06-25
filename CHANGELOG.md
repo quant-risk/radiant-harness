@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-06-25
+
+Sprints 17-19: three post-merge additions.
+
+### Added
+- **`radiant security` now wired into setup-ci templates** (5th gate).
+  The CI templates now run `radiant security --fail-on-warning`
+  after `audit` and before `tests`/`build`. Any hardcoded-secret
+  or permissive-mode finding fails the build.
+- **`radiant telemetry {status|enable|disable|show}`** — privacy-first
+  local usage stats. Nothing is collected by default. The user
+  must explicitly run `radiant telemetry enable` to opt in.
+  When enabled, only the command name + timestamp + 8-char hash
+  + CLI version are recorded (no args, no paths, no project
+  metadata, no env vars). Stored at `.radiant-harness/telemetry.jsonl`.
+- **`incident` skill** — incident response playbook: triage,
+  mitigate, communicate, post-mortem. Decision tree, timeline
+  template, severity matrix, blameless post-mortem structure.
+  The 18th bundled skill.
+- **`radiant incident <severity> <summary>`** — scaffolds
+  `docs/incidents/<NNNN>-<slug>.md` with the post-mortem template
+  pre-filled. Severity validated against sev1..sev4.
+
+### Quality
+- 319 tests passing (+13 from Sprints 17-19: 1 CI gate regression,
+  7 telemetry, 5 incident).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.6.1] — 2026-06-25
 
 Sprint 16: post-release new command. First content shipped after the
