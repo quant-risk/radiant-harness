@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-06-25
+
+Sprint 16: post-release new command. First content shipped after the
+v0.6.0 dogfood tag.
+
+### Added
+- **`radiant security [--scope=secrets|perms|all] [--output=...]
+  [--fail-on-warning]`** — security posture audit. MVP scope:
+  hardcoded secret scan + sensitive file permissions.
+  - **Secret patterns detected**: AWS access key, GitHub PAT (classic
+    + fine-grained), Slack token, OpenAI key, Anthropic key, Google
+    API key, generic Bearer tokens. Test files (`*_test.go`,
+    `.test.ts`/`.test.js`, `_test.py`) are skipped to avoid
+    flagging fake secrets in test fixtures.
+  - **Permission checks**: `.env`, `*.key`, `*.pem`, `*.p12`,
+    `*.pfx`, `id_rsa` etc. Flagged at WARNING if mode allows group
+    or world access; `chmod 600` recommended.
+  - Sorted by severity (ERROR → WARNING → INFO).
+  - Non-zero exit if any ERROR found (or WARNING if
+    `--fail-on-warning`).
+
+### Quality
+- 306 tests passing (+8 from Sprint 16: 4 secret scan, 2 perms scan,
+  2 renderSecurityReport).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.6.0] — 2026-06-25
 
 **Released via `radiant release v0.6.0`** — the first dogfood run

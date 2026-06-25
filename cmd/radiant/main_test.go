@@ -1195,6 +1195,143 @@ func TestMCPServeHandlesMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestScanSecretsDetectsAWSAccessKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("app.go", []byte(`package main
+
+const KEY = "AKIAIOSFODNN7EXAMPLE"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanSecrets()
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding (AWS key), got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != "ERROR" {
+		t.Errorf("expected ERROR severity, got %s", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "AWS") {
+		t.Errorf("expected message to mention AWS, got %q", findings[0].Message)
+	}
+}
+
+func TestScanSecretsDetectsMultiplePatterns(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// 3 different secrets in one file → 3 findings.
+	if err := os.WriteFile("creds.go", []byte(`package main
+
+const (
+	A = "AKIAIOSFODNN7EXAMPLE"
+	B = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	C = "sk-proj-abcdefghijklmnopqrstuvwxyz"
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanSecrets()
+	if len(findings) != 3 {
+		t.Errorf("expected 3 findings, got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestScanSecretsIgnoresTestFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("app_test.go", []byte(`package main
+
+const FAKE = "AKIAIOSFODNN7EXAMPLE"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanSecrets()
+	if len(findings) != 0 {
+		t.Errorf("test files should be skipped; got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestScanSecretsNoFalsePositivesOnCleanCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("app.go", []byte(`package main
+
+const VERSION = "0.6.0"
+const MESSAGE = "hello world"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanSecrets()
+	if len(findings) != 0 {
+		t.Errorf("clean code should have no findings; got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestScanPermsDetectsWorldReadableEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".env", []byte("SECRET=x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanPerms()
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding (.env with 0644), got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != "WARNING" {
+		t.Errorf("expected WARNING severity, got %s", findings[0].Severity)
+	}
+}
+
+func TestScanPermsIgnores0600Env(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".env", []byte("SECRET=x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	findings := scanPerms()
+	if len(findings) != 0 {
+		t.Errorf("0600 .env should have no findings; got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestRenderSecurityReportEmpty(t *testing.T) {
+	body := renderSecurityReport("all", nil, 0, 0, 0)
+	if !strings.Contains(body, "No findings") {
+		t.Errorf("renderSecurityReport empty should say 'No findings'")
+	}
+}
+
+func TestRenderSecurityReportWithFindings(t *testing.T) {
+	findings := []securityFinding{
+		{Severity: "ERROR", Location: "app.go:5", Message: "AWS Access Key leaked"},
+		{Severity: "WARNING", Location: ".env", Message: "permissive mode 0644"},
+	}
+	body := renderSecurityReport("all", findings, 1, 1, 0)
+	for _, want := range []string{"# Security report", "Summary", "ERROR", "WARNING", "AWS", "permissive"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("renderSecurityReport missing %q", want)
+		}
+	}
+}
+
 // getOrigWD returns the original working directory before any
 // test chdir'd. Used by tests that chdir to a tempdir to clean
 // up after themselves.
