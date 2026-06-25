@@ -1,254 +1,209 @@
-<div align="center">
+# radiant-harness
 
-# Radiant Harness
+> A vendor-neutral Spec-Driven Development harness for any LLM.
+> Shipped as a single binary — works with Claude Code, Cursor,
+> Codex, Copilot, Gemini CLI, and Windsurf.
 
-**Spec-Driven Development para agentes de IA — escrito em Go.**
-
-Scaffold e execute pipelines SDD para Claude Code, Codex, Cursor, Copilot, Gemini CLI e Windsurf.
-
-![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-57%2B%20passing-brightgreen?style=flat-square)
-![CI](https://img.shields.io/badge/CI-GitHub_Actions-blue?style=flat-square)
-
-*Parte dos instrumentos da [Fortvna Risk Solutions](https://github.com/Fortvna-Risk-Solutions)*
-
-</div>
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-298_pass-green.svg)](CHANGELOG.md)
+[![Cross-compile](https://img.shields.io/badge/cross--compile-6_of_6-blueviolet.svg)](CHANGELOG.md)
 
 ---
 
-## O que é
+## What it is
 
-Radiant Harness é um **harness** — não apenas um scaffold. Ele fecha o loop
-entre especificação e execução com validação automática, auto-correção e
-persistência crash-safe.
+`radiant` is a CLI that implements an end-to-end Spec-Driven
+Development methodology, designed to work with **any modern LLM**
+through an open skill schema (no Claude-centrism, no vendor lock-in).
+The CLI ships 18 commands and 17 vendor-neutral skills.
 
-```
-Spec (O QUE construir)          Harness (COMO executar)
-─────────────────────         ─────────────────────────
-spec.md                       orchestrator.go
-tasks.md                      validator.go
-design.md                     feedback.go (auto-correção)
-CLAUDE.md                     state.go (atômico + flock)
-skills/                       context.go (RPI budget)
-templates/                    agent.go (allowlist + timeout)
-```
+The methodology runs in five phases:
 
-### Por que Go?
+1. **Discover** — `radiant product` (Lean Inception)
+2. **Specify** — `radiant spec` (AC→test mapping)
+3. **Implement** — `radiant run` (the LLM agent drives this)
+4. **Verify** — `radiant validate`, `radiant review-pr`, `radiant evals`, `radiant audit`
+5. **Operate** — `radiant update`, `radiant release`, `radiant mcp serve`, `radiant setup-ci`
 
-Single binary (zero runtime deps), concorrência nativa (goroutines, não
-async), e tipagem forte para um domínio regulado. O
-[ADR-0002](docs/adr-0002-go-rewrite.md) documenta o trade-off completo.
+Plus companion commands: `radiant adr` (decisions), `radiant diagramar`
+(C4 Mermaid), `radiant integrations list` (MCP discovery), `radiant views`
+(native agent views), `radiant handoff` (session pause).
 
-## Instalação
+## Install
 
 ```bash
-# Via go install
+# from source
 go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
 
-# Ou build from source
-git clone https://github.com/Fortvna-Risk-Solutions/radiant-harness.git
-cd radiant-harness
-go build -o radiant ./cmd/radiant/
+# or download a release binary
+# https://github.com/quant-risk/radiant-harness/releases
+
+# verify
+radiant --version
 ```
 
-Ou via Docker:
+Cross-platform: Linux (amd64, arm64), macOS (amd64, arm64),
+Windows (amd64, arm64). All binaries are statically linked.
+
+## Quick start
 
 ```bash
-docker build -t radiant .
-docker run --rm -v $(pwd):/work radiant init --all
+# 1. Initialize a project
+mkdir my-saas && cd my-saas
+radiant init . --all --yes
+
+# 2. Start a product (Lean Inception)
+radiant product "API observability for small dev teams"
+
+# 3. Spec the first feature
+radiant spec "JWT auth so users stay logged in across restarts"
+
+# 4. Run the implementation (the LLM does this)
+radiant run specs/0001-jwt-auth --model <your-model>
+
+# 5. Validate after implementation
+radiant validate specs/0001-jwt-auth --gates
+
+# 6. Audit + measure fidelity
+radiant audit
+radiant evals
+
+# 7. Cut a release
+radiant release v0.1.0
 ```
 
-## Uso
+## Day-1 workflow (project setup)
+
+| Step | Command | What it produces |
+|------|---------|------------------|
+| 1 | `radiant init .` | `.radiant-harness/skills/`, `AGENTS.md`, `state.md`, native views |
+| 2 | `radiant product "..."` | `docs/product/inception.md` + `personas.md` |
+| 3 | `radiant spec "..."` | `specs/0001-<slug>/spec.md` + `tasks.md` |
+| 4 | `radiant run specs/0001-<slug>/` | implementation (LLM-driven) |
+| 5 | `radiant validate specs/0001-<slug>/ --gates` | UAT report |
+| 6 | `radiant audit` | project-wide conformity check |
+| 7 | `radiant evals` | AC→test coverage metrics |
+| 8 | `radiant release v0.1.0` | version bump + tests + cross-compile + tag |
+
+## Upgrade workflow (existing project)
 
 ```bash
-# Scaffold um projeto para um ou mais agentes (vendor-neutral)
-radiant init --agent=claude,codex,cursor
+# 1. Pull the new binary
+go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
 
-# Ou todos os 6 adapters suportados
-radiant init --all
+# 2. Refresh bundled skills + AGENTS.md (preserves user's docs)
+radiant update
 
-# Validar conformidade do pipeline (audit + fidelity)
-radiant validate
+# 3. Regenerate native views for the new bundled skills
+radiant views --agent=claude,cursor --force
 
-# Validar + executar gates das tasks (UAT de verdade)
-radiant validate --gates
+# 4. Audit the agentic layer
+radiant camada-agentica --fix
 
-# Executar o harness em uma feature (modo agent — chama qualquer CLI da allowlist)
-radiant run specs/0001-collect-feedback/ --agent=codex --retries=3
-
-# Executar via LLM API direta (sem agente instalado, multi-provider)
-radiant run specs/0001-collect-feedback/ \
-  --provider=openrouter \
-  --model=gpt-5 \
-  --api-key=$OPENROUTER_API_KEY
-
-# Ou direto na OpenAI, Anthropic, etc
-radiant run specs/0001-collect-feedback/ \
-  --provider=openai \
-  --model=o3 \
-  --api-key=$OPENAI_API_KEY
-
-# Listar modelos disponíveis (presets curados)
-radiant models
+# 5. Measure fidelity after the upgrade
+radiant evals
 ```
 
-### Modelos suportados (10 presets)
+## Commands (18 total)
 
-Os presets cobrem os principais laboratórios e podem ser usados com qualquer
-provedor OpenAI-compatible (OpenRouter, OpenAI, Anthropic via proxy, custom
-BaseURL). Default `MaxTokens` de 32k; override por modelo.
+| Command | Version | Purpose |
+|---------|---------|---------|
+| `init` | 0.2.0+ | Scaffold the SDD pipeline |
+| `config` | 0.2.0+ | Configure LLM provider/model |
+| `run` | 0.2.0+ | Execute a spec end-to-end (LLM-driven) |
+| `models` | 0.2.0+ | List model presets |
+| `validate` | 0.2.0+ | Static spec→code→tests UAT |
+| `eval` | 0.2.0+ | Latency/cost benchmark for one prompt × N runs |
+| `bench` | 0.2.0+ | Compare against other frameworks |
+| `doctor` | 0.2.0+ | Local environment diagnostic |
+| `state` | 0.4.2 | Show current session state |
+| `handoff` | 0.4.2 | Pause + write session state atomically |
+| `spec` | 0.4.2 | Create spec.md + tasks.md from flag inputs |
+| `skills list` / `skills validate` | 0.4.0 | Manage skills |
+| `adr` | 0.4.3 | Create an Architecture Decision Record (Nygard) |
+| `update` | 0.4.3 | Refresh bundled skills + AGENTS.md |
+| `diagramar` | 0.4.3 | C4 Mermaid templates |
+| `product` | 0.4.4 | Lean Inception scaffold |
+| `integrations list` | 0.4.5 | Read-only MCP listing |
+| `views` | 0.4.6 | Native agent views on demand |
+| `review-pr` | 0.4.7 | PR review scaffold |
+| `setup-ci` | 0.4.8 | CI workflow generator |
+| `camada-agentica` | 0.4.9 | Agentic layer audit |
+| `evals` | 0.5.0 | AC→test coverage metrics |
+| `release` | 0.5.1 | Cut a release |
+| `audit` | 0.6.0 | Project layout audit |
+| `mcp serve` | 0.6.0 | MCP server (stdio) |
 
-| Família | Presets |
-|---|---|
-| Anthropic | `claude-opus-4.1`, `claude-sonnet-4.5`, `claude-sonnet-4` |
-| OpenAI | `gpt-5`, `gpt-5-codex`, `gpt-4o` |
-| Google | `gemini-2.5-pro` |
-| DeepSeek | `deepseek-v4-pro`, `deepseek-v4-flash` |
-| Xiaomi | `mimo-v2.5-pro` |
+## Skills (17 bundled)
 
-## Camada Spec (feed-forward)
+The CLI ships these vendor-neutral skills in `.radiant-harness/skills/`:
 
-| Componente | Descrição |
-|---|---|
-| **15 skills** | Comandos slash para o ciclo SDD completo |
-| **7 templates** | spec, tasks, product, design, domain, lean, agent-contract |
-| **Quality gates** | Audit, fidelity, mermaid, validate (com `--gates`) |
-| **CI workflow** | GitHub Actions (lint + test + cross-build em Go 1.22–1.24) |
-| **6 adaptadores** | Claude, Codex, Cursor, Copilot, Gemini, Windsurf |
+**Core methodology:** `nova-feature`, `nova-product`, `kickoff`, `clarificar`
 
-## Camada Harness (feedback)
+**Quality:** `validar`, `auditar`, `metricas`, `evals`, `revisar-pr`
 
-| Componente | Descrição |
-|---|---|
-| **Orchestrator** | Implementação + validação como processos separados |
-| **Validator** | Contexto isolado, não subagente do implementador |
-| **Auto-correction** | Falha → fix → re-teste (retries configuráveis) |
-| **Agent teams** | Goroutines + semáforo (cap em 4 paralelos) |
-| **State machine** | 8 estados, transições guardadas, persistência atômica |
-| **Advisory flock** | `radiant run` concorrentes no mesmo projeto serializam |
-| **Command allowlists** | Agentes e gates restritos a conjunto fechado |
-| **Timeouts** | 10 min agent, 5 min gate, propagação via context |
+**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`
 
-## O Framework RPI
+**Operations:** `integracoes`, `setup-ci`, `update`, `handoff`, `roadmap`
 
-Toda feature segue **Research → Plan → Implement**, cada um em sua própria
-janela de contexto:
+Each skill is plain Markdown + YAML frontmatter — any LLM can
+consume them. The open spec is at `docs/SKILL-SCHEMA.md`.
 
-1. **Research** — descobrir o que construir. Salvar em markdown.
-2. **Plan** — definir como construir. Spec + design + tasks.
-3. **Implement** — construir. Contexto fresco. Executar, verificar, ship.
+## Architecture
 
-Orçamento de tokens: 30% Research / 20% Plan / 50% Implement. Smart zone
-< 40%, dumb zone > 60% — abra nova janela antes de passar.
-
-## Comandos
-
-| Comando | O que faz |
-|---|---|
-| `radiant init [dir]` | Scaffold do pipeline SDD |
-| `radiant validate [dir]` | Validar conformidade (audit + fidelity) |
-| `radiant validate --gates` | Validar + executar os gates das tasks |
-| `radiant run <spec-dir>` | Executar o harness em uma feature |
-| `radiant config` | Configurar provedor LLM |
-| `radiant models` | Listar modelos disponíveis |
-
-## Templates
-
-| Template | Propósito |
-|---|---|
-| `spec.template.md` | Critérios de aceitação (Given/When/Then) |
-| `tasks.template.md` | Decomposição de tarefas com gates |
-| `product.template.md` | PRD-lite (por quê e para quem) |
-| `design.template.md` | Documento de Design Técnico |
-| `domain.template.md` | Modelo de domínio DDD |
-| `lean-architecture.template.md` | Alternativa de 2 camadas |
-| `agent-contract.template.md` | Acordo implementador ↔ validador |
-
-## Skills (15)
-
-| Skill | Propósito |
-|---|---|
-| `/kickoff` | Constituição do projeto |
-| `/integracoes` | Ferramentas da equipe + MCPs |
-| `/mapear` | Mapear codebase existente |
-| `/diagramar` | Arquitetura Mermaid |
-| `/roadmap` | Now/Next/Later |
-| `/camada-agentica` | Regras, subagentes, skills, CI |
-| `/nova-feature` | Loop RPI |
-| `/clarificar` | Entrevista incansável |
-| `/validar` | UAT com gates |
-| `/revisar-pr` | Gate de conformidade SDD |
-| `/setup-ci` | Pipeline CI/CD |
-| `/metricas` | Lead Time, Throughput |
-| `/auditar` | Auditoria do pipeline |
-| `/evals` | Scoring de fidelidade da spec |
-| `/handoff` | Continuidade de sessão |
-
-## Arquitetura
-
-Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para o documento completo.
+`radiant` is structured as:
 
 ```
-cmd/radiant/          CLI principal (cobra)
-internal/
-  ├── engine/         Motor de execução (modo LLM-API)
-  ├── harness/        Orchestrator + state + agent runner (modo agent)
-  ├── llm/            Cliente universal (OpenRouter, OpenAI, Anthropic, custom)
-  ├── quality/        Audit, fidelity, mermaid, validate, gates
-  ├── scaffold/       Templates embutidos + adaptadores (embed.FS)
-  ├── spec/           Parsers robustos de spec.md / tasks.md
-  ├── benchmark/      Benchmarks de performance
-  └── plugin/         Sistema de plugins
-vscode-extension/      Tree views + status bar + CodeLens para gates
-.github/workflows/    CI: lint + test em Go 1.22, 1.23, 1.24
+cmd/radiant/main.go          ← CLI entrypoint (cobra commands)
+internal/skill/              ← skill schema validator + bundle loader
+internal/scaffold/           ← scaffold + native agent view generation
+internal/engine/             ← SDD execution engine (planner/implementer/validator)
+internal/harness/            ← quality gates + policy enforcement
+internal/llm/                ← OpenAI + Anthropic + OpenRouter clients
+internal/policy/             ← command allowlist + token estimator
+internal/spec/               ← spec + task + ADR parsing
+internal/quality/            ← fidelity scoring + drift detection
+internal/benchmark/          ← cross-framework benchmark harness
 ```
 
-## Segurança
+The CLI binary embeds 17 skills via `//go:embed` — no external
+dependencies at install time.
 
-- **Agent allowlist** — só `claude`, `codex`, `cursor`, `copilot`, `gemini`
-  podem ser invocados como agente, independente do que a spec pedir.
-- **Gate allowlist** — tasks.md gates são tokenizados; cada binário precisa
-  estar em `{node, npm, pnpm, yarn, bun, go, make, pytest, python, cargo,
-  rustc, jest, vitest, tsc, eslint, shellcheck}`. `rm`, `curl`, `wget`,
-  etc. são rejeitados.
-- **Path sandboxing** — code blocks emitidos pelo LLM são verificados
-  contra o diretório do projeto antes de serem escritos.
-- **Timeouts** — 10 min por agent run, 5 min por gate run; propagação
-  via `context.Context`.
+## Quality
 
-## Desenvolvimento
+Every commit passes the same battery:
 
-```bash
-go build ./...       # build todos os pacotes
-go test ./...        # executar todos os testes
-make build           # build binário
-make test            # testes com verbose
-make lint            # go vet
-make release         # binários cross-platform (linux/darwin/windows)
-make smoke           # smoke test do CLI
-```
+- `go build ./...` clean
+- `go vet ./...` clean
+- `gofmt -l .` clean
+- `CGO_ENABLED=0 go test ./... -count=1 -race` all green (298 tests)
+- `make release` cross-compiles 6/6 targets
 
-CI roda `gofmt`, `go vet`, build, test e smoke em Go 1.22, 1.23 e 1.24
-em todo PR. Veja `.github/workflows/ci.yml`.
+See `docs/METHODOLOGY-MERGE-FINAL.md` for the full history.
 
-## Referências
+## Examples
 
-- [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/)
-- [Anthropic: Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps)
-- [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/harness-engineering.html)
-- [Navigation Paradox paper (2026)](https://arxiv.org/html/2602.20048v1)
-- [AGENTS.md effectiveness study](https://arxiv.org/pdf/2602.11988)
-- [TLC Spec Driven](https://agent-skills.techleads.club/)
+The `internal/scaffold/templates/examples/pulse/` directory has a
+worked example project ("Pulse — feedback collector") that
+demonstrates every command end-to-end.
 
-## Licença
+## Documentation
 
-MIT
+- `docs/HARNESS-PLAN.md` — the methodology merge plan
+- `docs/SKILL-SCHEMA.md` — open MIT spec for the skill format
+- `docs/METHODOLOGY-MERGE-FINAL.md` — consolidated report of Sprints 10-13
+- `docs/ROADMAP.md` — current roadmap
+- `docs/CHANGELOG.md` (top-level) — version history
+- `docs/validation-report-*.md` — per-sprint validation reports
 
----
+## License
 
-<div align="center">
+MIT — see [LICENSE](LICENSE).
 
-**[Fortvna Risk Solutions](https://github.com/Fortvna-Risk-Solutions)** · *Audentes Fortvna Iuvat*
+## Contributing
 
-</div>
+Open an issue or PR at
+[github.com/quant-risk/radiant-harness](https://github.com/quant-risk/radiant-harness).
+The CLI is built around the open skill schema; new skills can be
+authored in any repo and consumed by `radiant` without recompilation.
