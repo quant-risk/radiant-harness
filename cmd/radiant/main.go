@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.5.0"
+var version = "0.5.1"
 
 func main() {
 	root := &cobra.Command{
@@ -895,6 +895,37 @@ func main() {
 	evalsCmd.Flags().StringP("output", "o", "", "output path (default: docs/evals-report.md)")
 	root.AddCommand(evalsCmd)
 
+	// ── release (Sprint 14 — first-class release command) ──
+	// `radiant release v0.X.Y [--dry-run] [--skip-tests]
+	// [--skip-cross-compile] [--skip-tag]` runs the full release
+	// pipeline: pre-flight (clean tree) → version bump → tests →
+	// cross-compile → commit → git tag. Composes everything we
+	// built in the methodology merge into one operation.
+	//
+	// Safety: refuses to run on a dirty working tree. Refuses to
+	// overwrite an existing tag of the same name. The user must
+	// have a clean main + the version they want to cut.
+	releaseCmd := &cobra.Command{
+		Use:   "release <version>",
+		Short: "Cut a release: version bump + tests + cross-compile + commit + git tag",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			version := args[0]
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			skipTests, _ := cmd.Flags().GetBool("skip-tests")
+			skipCrossCompile, _ := cmd.Flags().GetBool("skip-cross-compile")
+			skipTag, _ := cmd.Flags().GetBool("skip-tag")
+			skipCommit, _ := cmd.Flags().GetBool("skip-commit")
+			return runRelease(version, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit)
+		},
+	}
+	releaseCmd.Flags().Bool("dry-run", false, "show what would happen without writing/tagging anything")
+	releaseCmd.Flags().Bool("skip-tests", false, "skip the test step (use only when you've already validated)")
+	releaseCmd.Flags().Bool("skip-cross-compile", false, "skip the cross-compile step")
+	releaseCmd.Flags().Bool("skip-tag", false, "skip the git tag step (only bump version + commit)")
+	releaseCmd.Flags().Bool("skip-commit", false, "skip the git commit step (only bump version)")
+	root.AddCommand(releaseCmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1723,6 +1754,278 @@ func runCamadaAgentica(agentFlag string, fix bool) error {
 	} else {
 		fmt.Printf("\n  Re-run with --fix to regenerate AGENTS.md from current bundled skills.\n")
 	}
+	return nil
+}
+
+// runRelease cuts a release. Pipeline:
+//  1. Pre-flight: check git tree is clean
+//  2. Validate version format (semver, with optional leading 'v')
+//  3. Check the tag doesn't already exist
+//  4. Run quality gates (build, vet, fmt, test)
+//  5. Bump version in cmd/radiant/main.go
+//  6. Cross-compile (if not skipped)
+//  7. Commit version bump (if not skipped)
+//  8. Git tag vX.Y.Z (if not skipped)
+//
+// All destructive steps are skipped under --dry-run; the user
+// sees exactly what would happen.
+func runRelease(version string, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit bool) error {
+	// Normalize: accept both "0.5.1" and "v0.5.1".
+	version = strings.TrimPrefix(version, "v")
+	tagName := "v" + version
+
+	// 1. Validate semver format.
+	if !looksLikeSemver(version) {
+		return fmt.Errorf("invalid version %q — expected semver (e.g. 0.5.1 or v0.5.1)", version)
+	}
+
+	fmt.Printf("  → Cutting release %s\n\n", tagName)
+
+	// 2. Pre-flight: clean tree.
+	if !dryRun {
+		out, err := runGit("status", "--porcelain")
+		if err != nil {
+			return fmt.Errorf("git status: %w", err)
+		}
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("working tree is dirty — commit or stash before cutting a release:\n%s", out)
+		}
+		fmt.Println("  ✓ working tree clean")
+	} else {
+		fmt.Println("  [skip] pre-flight (--dry-run)")
+	}
+
+	// 3. Check tag doesn't exist.
+	if !dryRun && !skipTag {
+		out, err := runGit("tag", "-l", tagName)
+		if err != nil {
+			return fmt.Errorf("git tag: %w", err)
+		}
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("tag %s already exists — delete it first or pick a different version", tagName)
+		}
+		fmt.Printf("  ✓ tag %s does not exist yet\n", tagName)
+	} else if dryRun {
+		fmt.Printf("  [skip] tag existence check (--dry-run); would check %s\n", tagName)
+	}
+
+	// 4. Quality gates.
+	if !skipTests {
+		fmt.Println("\n  → Running quality gates")
+		if !dryRun {
+			if err := runGoStep("build", "build", "./..."); err != nil {
+				return err
+			}
+			if err := runGoStep("vet", "vet", "./..."); err != nil {
+				return err
+			}
+			if err := runFmtCheck(); err != nil {
+				return err
+			}
+			if err := runTestRace(); err != nil {
+				return err
+			}
+			fmt.Println("  ✓ build / vet / fmt / test (-race) all green")
+		} else {
+			fmt.Println("  [skip] quality gates (--dry-run)")
+		}
+	} else {
+		fmt.Println("  [skip] quality gates (--skip-tests)")
+	}
+
+	// 5. Bump version in cmd/radiant/main.go.
+	fmt.Println("\n  → Bumping version")
+	if err := bumpVersionInSource(version, dryRun); err != nil {
+		return err
+	}
+
+	// 6. Cross-compile.
+	if !skipCrossCompile {
+		fmt.Println("\n  → Cross-compiling (6 targets)")
+		if !dryRun {
+			if err := runMakeRelease(); err != nil {
+				return err
+			}
+			fmt.Println("  ✓ 6/6 targets built (see dist/)")
+		} else {
+			fmt.Println("  [skip] cross-compile (--dry-run)")
+		}
+	} else {
+		fmt.Println("  [skip] cross-compile (--skip-cross-compile)")
+	}
+
+	// 7. Commit.
+	if !skipCommit {
+		fmt.Println("\n  → Committing version bump")
+		if !dryRun {
+			if err := runGitCommit(fmt.Sprintf("release: cut %s", tagName), "cmd/radiant/main.go", "CHANGELOG.md"); err != nil {
+				return err
+			}
+			fmt.Printf("  ✓ committed 'release: cut %s'\n", tagName)
+		} else {
+			fmt.Println("  [skip] commit (--dry-run)")
+		}
+	} else {
+		fmt.Println("  [skip] commit (--skip-commit)")
+	}
+
+	// 8. Git tag.
+	if !skipTag {
+		fmt.Println("\n  → Tagging")
+		if !dryRun {
+			if _, err := runGit("tag", tagName); err != nil {
+				return fmt.Errorf("git tag: %w", err)
+			}
+			fmt.Printf("  ✓ tagged %s\n", tagName)
+		} else {
+			fmt.Printf("  [skip] tag (--dry-run); would create %s\n", tagName)
+		}
+	} else {
+		fmt.Println("  [skip] tag (--skip-tag)")
+	}
+
+	fmt.Printf("\n  ✓ Release %s complete\n", tagName)
+	fmt.Printf("    Next: git push origin main && git push origin %s\n", tagName)
+	return nil
+}
+
+// looksLikeSemver is a relaxed semver check: MAJOR.MINOR.PATCH
+// with optional pre-release / build suffix. We don't enforce the
+// strict semver spec (it would block "0.5.0-rc.1" etc.); we just
+// require three numeric components separated by dots. Accepts
+// an optional leading "v" (so both "0.5.1" and "v0.5.1" pass).
+func looksLikeSemver(v string) bool {
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) < 3 {
+		return false
+	}
+	for _, p := range parts {
+		// Allow trailing pre-release (e.g. "0-rc.1") by stripping.
+		if idx := strings.IndexAny(p, "-+"); idx >= 0 {
+			p = p[:idx]
+		}
+		if p == "" {
+			return false
+		}
+		for _, r := range p {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// runGit runs a git subcommand in the project root and returns stdout.
+func runGit(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runGoStep runs a `go` subcommand (build/vet) with the project env.
+func runGoStep(label, sub string, args ...string) error {
+	cmd := exec.Command("go", append([]string{sub}, args...)...)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go %s: %w\n%s", label, err, string(out))
+	}
+	return nil
+}
+
+// runFmtCheck fails if any .go file is not gofmt'd.
+func runFmtCheck() error {
+	cmd := exec.Command("gofmt", "-l", ".")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gofmt -l: %w", err)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return fmt.Errorf("files not gofmt'd:\n%s", string(out))
+	}
+	return nil
+}
+
+// runTestRace runs the full test suite under -race.
+func runTestRace() error {
+	cmd := exec.Command("go", "test", "./...", "-count=1", "-race", "-timeout=180s")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go test: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+// runMakeRelease invokes `make release` and forwards output.
+func runMakeRelease() error {
+	cmd := exec.Command("make", "release")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("make release: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+// runGitCommit commits the given paths with the given message.
+// Uses -c user.name/email to avoid touching global git config.
+func runGitCommit(msg string, paths ...string) error {
+	args := []string{"add", "--"}
+	args = append(args, paths...)
+	if _, err := runGit(args...); err != nil {
+		return err
+	}
+	commit := []string{
+		"-c", "user.name=Henrique",
+		"-c", "user.email=henrique@fortvna.com.br",
+		"commit", "-m", msg,
+	}
+	cmd := exec.Command("git", commit...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git commit: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+// bumpVersionInSource updates `var version = "..."` in
+// cmd/radiant/main.go to the new version. The file is rewritten
+// line-by-line to avoid touching other content. With dryRun=true,
+// prints what would change without writing.
+func bumpVersionInSource(newVersion string, dryRun bool) error {
+	path := "cmd/radiant/main.go"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	body := string(data)
+	oldLine := ""
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "var version =") {
+			oldLine = line
+			break
+		}
+	}
+	if oldLine == "" {
+		return fmt.Errorf("could not find 'var version = ...' in %s", path)
+	}
+	newLine := fmt.Sprintf(`var version = "%s"`, newVersion)
+	if oldLine == newLine {
+		fmt.Printf("  = %s (no change)\n", path)
+		return nil
+	}
+	if dryRun {
+		fmt.Printf("  [would-replace] %s\n        %s\n      → %s\n", path, oldLine, newLine)
+		return nil
+	}
+	updated := strings.Replace(body, oldLine, newLine, 1)
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	fmt.Printf("  ✓ %s: %s\n", path, newLine)
 	return nil
 }
 

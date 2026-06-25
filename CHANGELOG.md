@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-06-25
+
+Sprint 14 first batch: first-class release command. Composes
+everything we built in the methodology merge into one operation.
+
+### Added
+- **`radiant release <version> [--dry-run] [--skip-tests]
+  [--skip-cross-compile] [--skip-tag] [--skip-commit]`** —
+  cuts a release end-to-end:
+  1. **Pre-flight**: check working tree is clean (no uncommitted changes).
+  2. **Validate version**: relaxed semver (accepts `v` prefix and
+     `-rc.N` / `+build.N` suffixes).
+  3. **Tag existence**: refuse to overwrite an existing tag.
+  4. **Quality gates**: `go build`, `go vet`, `gofmt -l`, `go test
+     -race`. All green or fail-fast.
+  5. **Version bump**: update `var version = "..."` in
+     `cmd/radiant/main.go`.
+  6. **Cross-compile**: `make release` → 6/6 binaries in `dist/`.
+  7. **Commit**: `release: cut vX.Y.Z` with the version bump.
+  8. **Tag**: `git tag vX.Y.Z`.
+
+  All destructive steps are skipped under `--dry-run` (the user
+  sees exactly what would happen).
+- **Helpers**: `runRelease(version, dryRun, skipTests,
+  skipCrossCompile, skipTag, skipCommit)` (the body),
+  `looksLikeSemver(v)` (validates version string), `runGit(args)`
+  (helper for git subcommands), `runGoStep/runFmtCheck/runTestRace/
+  runMakeRelease` (CI-gate helpers), `runGitCommit(msg, paths)`
+  (commits with `-c user.name/email` to avoid touching global
+  config), `bumpVersionInSource(newVersion, dryRun)` (rewrites
+  `var version = ...` line).
+
+### Quality
+- 277 tests passing (+9 from Sprint 14: 1 looksLikeSemver, 4
+  runRelease, 4 bumpVersion).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.5.0] — 2026-06-25
 
 Sprint 13 fifth batch: wires the existing `evals` skill to a working

@@ -763,3 +763,123 @@ func TestRenderEvalsReportComputesAggregate(t *testing.T) {
 		t.Errorf("expected 100%% aggregate (only non-empty feature), got:\n%s", body)
 	}
 }
+
+func TestLooksLikeSemver(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"0.5.0", true},
+		{"0.5.1", true},
+		{"1.0.0", true},
+		{"10.20.30", true},
+		{"v0.5.0", true},
+		{"0.5.0-rc.1", true},     // pre-release suffix
+		{"0.5.0+build.42", true}, // build metadata
+		{"0.5", false},           // too few components
+		{"not-a-version", false}, // non-numeric
+		{"0.5.x", false},         // non-numeric in patch
+		{"", false},
+		{"1", false},
+	}
+	for _, c := range cases {
+		got := looksLikeSemver(c.in)
+		if got != c.want {
+			t.Errorf("looksLikeSemver(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestReleaseRejectsInvalidVersion(t *testing.T) {
+	// No chdir — version validation happens before any file read.
+	if err := runRelease("not-a-version", true, true, true, true, true); err == nil {
+		t.Error("expected error for invalid version")
+	}
+}
+
+// chdirToTemp sets the CWD to a fresh tempdir with a stub
+// cmd/radiant/main.go. Returns the tempdir; the deferred
+// os.Chdir restores the original CWD.
+func chdirToTemp(t *testing.T, versionLine string) string {
+	t.Helper()
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(oldWD) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("cmd/radiant", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("cmd/radiant/main.go", []byte("package main\n\n"+versionLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReleaseAcceptsSemver(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := runRelease("0.5.1", true, true, true, true, true); err != nil {
+		t.Errorf("runRelease dry-run with valid semver should succeed; got %v", err)
+	}
+}
+
+func TestReleaseAcceptsVPrefix(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := runRelease("v0.5.1", true, true, true, true, true); err != nil {
+		t.Errorf("runRelease should accept v-prefix; got %v", err)
+	}
+}
+
+func TestReleaseAcceptsPreRelease(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := runRelease("0.5.0-rc.1", true, true, true, true, true); err != nil {
+		t.Errorf("runRelease should accept pre-release suffix; got %v", err)
+	}
+}
+
+func TestBumpVersionInSourceDryRun(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := bumpVersionInSource("0.5.1", true); err != nil {
+		t.Fatalf("bumpVersionInSource dry-run: %v", err)
+	}
+	// File should be unchanged under dry-run.
+	body, _ := os.ReadFile("cmd/radiant/main.go")
+	if !strings.Contains(string(body), `var version = "0.5.0"`) {
+		t.Errorf("dry-run should not modify file; got:\n%s", body)
+	}
+}
+
+func TestBumpVersionInSourceReal(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := bumpVersionInSource("0.6.0", false); err != nil {
+		t.Fatalf("bumpVersionInSource real: %v", err)
+	}
+	body, _ := os.ReadFile("cmd/radiant/main.go")
+	if !strings.Contains(string(body), `var version = "0.6.0"`) {
+		t.Errorf("real bump should update file; got:\n%s", body)
+	}
+	if strings.Contains(string(body), `var version = "0.5.0"`) {
+		t.Errorf("real bump should remove old version; got:\n%s", body)
+	}
+}
+
+func TestBumpVersionInSourceNoChange(t *testing.T) {
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := bumpVersionInSource("0.5.0", false); err != nil {
+		t.Errorf("bumping to same version should be a no-op; got %v", err)
+	}
+}
+
+func TestBumpVersionInSourceMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(oldWD) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// No cmd/radiant/main.go
+	if err := bumpVersionInSource("0.5.1", false); err == nil {
+		t.Error("expected error for missing file")
+	}
+}
