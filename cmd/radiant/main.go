@@ -1081,6 +1081,20 @@ func main() {
 	}
 	telemetryRotateCmd.Flags().Int("max-entries", 1000, "max events to keep in the active log; older events archived to telemetry-YYYY-MM-DD.jsonl")
 	telemetryCmd.AddCommand(telemetryRotateCmd)
+	telemetryExportCmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export telemetry log as JSON or CSV (default: JSON to stdout)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
+			output, _ := cmd.Flags().GetString("output")
+			since, _ := cmd.Flags().GetString("since")
+			return runTelemetryExport(format, output, since)
+		},
+	}
+	telemetryExportCmd.Flags().String("format", "json", "export format: json or csv")
+	telemetryExportCmd.Flags().String("output", "", "output file path (default: stdout)")
+	telemetryExportCmd.Flags().String("since", "", "filter events to >= YYYY-MM-DD (inclusive); empty = no filter")
+	telemetryCmd.AddCommand(telemetryExportCmd)
 	root.AddCommand(telemetryCmd)
 
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
@@ -2835,6 +2849,102 @@ func runTelemetryRotate(maxEntries int) error {
 	fmt.Printf("  ✓ Archived %d events to %s\n", len(archive), archivePath)
 	fmt.Printf("  ✓ Active log now has %d entries (cap: %d)\n", len(keep), maxEntries)
 	return nil
+}
+
+// runTelemetryExport dumps the local telemetry log in JSON or CSV.
+// Default: JSON to stdout (pipe-friendly). Pass --output=<path> to
+// write to a file. Pass --since=YYYY-MM-DD to filter.
+//
+// Privacy: exports ONLY the 4 fields already recorded locally
+// (timestamp, command, hash, radiant_ver). The user must explicitly
+// invoke this command AND pipe/save the output. No network egress.
+//
+// Format selection:
+//
+//	json — pretty-printed array of events (one per line in the log).
+//	csv  — header row + one row per event.
+//
+// Disabled or missing log → no-op, returns nil.
+func runTelemetryExport(format, output, since string) error {
+	if format != "json" && format != "csv" {
+		return fmt.Errorf("--format must be 'json' or 'csv' (got %q)", format)
+	}
+	if !isTelemetryEnabled() {
+		fmt.Println("  Telemetry is disabled. Run 'radiant telemetry enable' to start collecting.")
+		return nil
+	}
+	data, err := os.ReadFile(telemetryLogPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", telemetryLogPath, err)
+	}
+	raw := strings.TrimRight(string(data), "\n")
+	if raw == "" {
+		return nil
+	}
+
+	// Build a normalized slice of events. Skip lines that don't parse
+	// as JSON (defensive — shouldn't happen given how we record, but
+	// user could have hand-edited the log).
+	type ev struct {
+		Timestamp  string `json:"timestamp"`
+		Command    string `json:"command"`
+		Hash       string `json:"hash"`
+		RadiantVer string `json:"radiant_ver"`
+	}
+	var events []ev
+	for _, line := range strings.Split(raw, "\n") {
+		var e ev
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		// Apply --since filter (date portion of timestamp >= since).
+		if since != "" {
+			if len(e.Timestamp) < 10 || e.Timestamp[:10] < since {
+				continue
+			}
+		}
+		events = append(events, e)
+	}
+
+	var out string
+	switch format {
+	case "json":
+		b, err := json.MarshalIndent(events, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal: %w", err)
+		}
+		out = string(b) + "\n"
+	case "csv":
+		var sb strings.Builder
+		sb.WriteString("timestamp,command,hash,radiant_ver\n")
+		for _, e := range events {
+			fmt.Fprintf(&sb, "%s,%s,%s,%s\n",
+				csvField(e.Timestamp), csvField(e.Command),
+				csvField(e.Hash), csvField(e.RadiantVer))
+		}
+		out = sb.String()
+	}
+
+	if output != "" {
+		if err := os.WriteFile(output, []byte(out), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", output, err)
+		}
+		fmt.Printf("  ✓ Exported %d events to %s (%s)\n", len(events), output, format)
+	} else {
+		fmt.Print(out)
+	}
+	return nil
+}
+
+// csvField quotes a value iff it contains a comma, double-quote, or newline.
+func csvField(s string) string {
+	if strings.ContainsAny(s, ",\"\n") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
 }
 
 // runTelemetrySummary reads the local telemetry log and prints

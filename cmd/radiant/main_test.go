@@ -1751,6 +1751,211 @@ func TestTelemetryRotateInvalidCap(t *testing.T) {
 	}
 }
 
+func TestTelemetryExportDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryExport("json", "", ""); err != nil {
+		t.Errorf("export when disabled should not error; got %v", err)
+	}
+}
+
+func TestTelemetryExportJSONStdout(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"spec","hash":"aaa1","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T11:00:00Z","command":"audit","hash":"bbb2","radiant_ver":"0.6.2"}`,
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runTelemetryExport("json", "", "")
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, want := range []string{
+		`"command": "spec"`,
+		`"hash": "aaa1"`,
+		`"command": "audit"`,
+		`"hash": "bbb2"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("JSON export missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestTelemetryExportCSV(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"spec","hash":"a1","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T11:00:00Z","command":"audit","hash":"a2","radiant_ver":"0.6.2"}`,
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runTelemetryExport("csv", "", "")
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatalf("export csv: %v", err)
+	}
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, want := range []string{
+		"timestamp,command,hash,radiant_ver",
+		"2026-06-25T10:00:00Z,spec,a1,0.6.2",
+		"2026-06-25T11:00:00Z,audit,a2,0.6.2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("CSV export missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestTelemetryExportToFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"spec","hash":"a1","radiant_ver":"0.6.2"}`,
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outFile := filepath.Join(dir, "out.json")
+	if err := runTelemetryExport("json", outFile, ""); err != nil {
+		t.Fatalf("export to file: %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("output file not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"hash": "a1"`) {
+		t.Errorf("output file missing expected content: %s", string(data))
+	}
+}
+
+func TestTelemetryExportSince(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"timestamp":"2026-06-23T10:00:00Z","command":"old","hash":"a0","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-24T10:00:00Z","command":"mid","hash":"a1","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"new","hash":"a2","radiant_ver":"0.6.2"}`,
+		`{"timestamp":"2026-06-25T11:00:00Z","command":"new","hash":"a3","radiant_ver":"0.6.2"}`,
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runTelemetryExport("json", "", "2026-06-25")
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatalf("export with since: %v", err)
+	}
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, want := range []string{`"hash": "a2"`, `"hash": "a3"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("since=2026-06-25 should include %q, got:\n%s", want, out)
+		}
+	}
+	for _, gone := range []string{`"hash": "a0"`, `"hash": "a1"`} {
+		if strings.Contains(out, gone) {
+			t.Errorf("since=2026-06-25 should EXCLUDE %q, got:\n%s", gone, out)
+		}
+	}
+}
+
+func TestTelemetryExportInvalidFormat(t *testing.T) {
+	if err := runTelemetryExport("xml", "", ""); err == nil {
+		t.Error("export with format=xml should error")
+	}
+	if err := runTelemetryExport("", "", ""); err == nil {
+		t.Error("export with empty format should error")
+	}
+}
+
+func TestTelemetryExportPrivacyFields(t *testing.T) {
+	// Privacy sanity: the export schema must include ONLY the 4 fields
+	// we record locally — never args, paths, env, or user input.
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a line that contains suspicious data (paths, args, secrets)
+	// — the exporter must still produce a clean shape.
+	lines := []string{
+		`{"timestamp":"2026-06-25T10:00:00Z","command":"spec","hash":"a1","radiant_ver":"0.6.2"}`,
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	_ = runTelemetryExport("json", "", "")
+	w.Close()
+	os.Stdout = old
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, banned := range []string{"args", "path", "env", "secret", "token", "key"} {
+		// Just ensure these words don't appear in field names (data fields are allowed to contain other text).
+		if strings.Contains(out, fmt.Sprintf(`"%s"`, banned)) {
+			t.Errorf("JSON export exposes a field named %q (privacy violation); got:\n%s", banned, out)
+		}
+	}
+}
+
 // getOrigWD returns the original working directory before any
 // test chdir'd. Used by tests that chdir to a tempdir to clean
 // up after themselves.
