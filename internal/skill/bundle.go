@@ -12,7 +12,8 @@ import (
 
 // bundledFS holds the canonical skills shipped with the radiant
 // CLI. Use Bundle() to enumerate them, ExtractTo() to write them
-// into a project during `radiant init`.
+// into a project during `radiant init`, and ExtractSkillTo() to
+// write a single skill (used by `radiant update`).
 //
 //go:embed all:skills
 var bundledFS embed.FS
@@ -99,10 +100,10 @@ func LoadFromFS(fsys fs.FS, dir string) (*Skill, error) {
 }
 
 // ExtractTo writes every bundled skill into the target directory
-// (e.g. `.radiant-harness/skills/`). Existing files are overwritten
-// unless `force` is false — in which case they are skipped silently
-// (the user's local edits win; they can use `radiant update` to
-// review + accept changes explicitly).
+// (e.g. `.radiant-harness/skills/`). With `force=false`, skills
+// that already exist at the destination are skipped silently (the
+// user's local edits win; they can use `radiant update` to review
+// + accept changes explicitly).
 func ExtractTo(targetDir string, force bool) error {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir target: %w", err)
@@ -120,41 +121,49 @@ func ExtractTo(targetDir string, force bool) error {
 		if _, err := fs.Stat(bundledFS, fmPath); err != nil {
 			continue
 		}
-		dest := filepath.Join(targetDir, e.Name())
-		if !force {
-			if _, err := os.Stat(dest); err == nil {
-				// Already exists — skip
-				continue
-			}
-		}
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", dest, err)
-		}
-		// Walk the embedded skill dir and copy every file.
-		err := fs.WalkDir(bundledFS, "skills/"+e.Name(), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			data, err := fs.ReadFile(bundledFS, path)
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel("skills/"+e.Name(), path)
-			if err != nil {
-				return err
-			}
-			destPath := filepath.Join(dest, rel)
-			if err := os.WriteFile(destPath, data, 0o644); err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("extract %s: %w", e.Name(), err)
+		if err := ExtractSkillTo(targetDir, e.Name(), force); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// ExtractSkillTo writes a single bundled skill (by name) into the
+// target directory. Used by `radiant update` so only the skill
+// whose version changed is touched — `ExtractTo` would re-write
+// every skill and defeat the per-skill comparison update cares
+// about. With `force=false`, a pre-existing destination is left
+// alone (caller should detect this via readFrontmatterVersion
+// before calling).
+func ExtractSkillTo(targetDir, name string, force bool) error {
+	srcDir := "skills/" + name
+	if _, err := fs.Stat(bundledFS, srcDir+"/frontmatter.yaml"); err != nil {
+		return fmt.Errorf("bundled skill %q not found", name)
+	}
+	dest := filepath.Join(targetDir, name)
+	if !force {
+		if _, err := os.Stat(dest); err == nil {
+			return nil // silent skip — caller's responsibility to detect
+		}
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dest, err)
+	}
+	return fs.WalkDir(bundledFS, srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := fs.ReadFile(bundledFS, path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dest, rel), data, 0o644)
+	})
 }

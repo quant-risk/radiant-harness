@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.2"
+var version = "0.4.3"
 
 func main() {
 	root := &cobra.Command{
@@ -587,6 +587,181 @@ func main() {
 	specCmd.Flags().StringArray("covers", nil, "comma-separated AC numbers per task (e.g. '1,2'); AC→test mapping enforced")
 	root.AddCommand(specCmd)
 
+	// ── adr (Sprint 11 — Architecture Decision Records, Nygard format) ──
+	// `radiant adr "<decision>"` creates docs/architecture/adr/NNNN-<slug>.md
+	// in Nygard format. The file's path is auto-numbered (next NNNN in
+	// the directory) and the title is derived from the decision text.
+	// Per the `adr` skill: context + alternatives + consequences are
+	// required sections (the validator catches missing ones).
+	adrCmd := &cobra.Command{
+		Use:   "adr <decision>",
+		Short: "Create an Architecture Decision Record in Nygard format",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			decision := args[0]
+			statusFlag, _ := cmd.Flags().GetString("status")
+			adrDir := filepath.Join("docs", "architecture", "adr")
+			if err := os.MkdirAll(adrDir, 0o755); err != nil {
+				return err
+			}
+			seq, err := nextADRSequence(adrDir)
+			if err != nil {
+				return err
+			}
+			slug := slugify(decision)
+			if slug == "" {
+				return fmt.Errorf("could not derive slug from decision; pass a more descriptive decision text")
+			}
+			fileName := fmt.Sprintf("%04d-%s.md", seq, slug)
+			dest := filepath.Join(adrDir, fileName)
+			body := renderADR(seq, decision, statusFlag)
+			if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
+				return err
+			}
+			fmt.Printf("  ✓ created %s\n", dest)
+			fmt.Printf("\n  Next steps:\n")
+			fmt.Printf("    1. Edit %s to fill in:\n", dest)
+			fmt.Printf("       - Context: the forces at play\n")
+			fmt.Printf("       - Alternatives considered (≥2)\n")
+			fmt.Printf("       - Consequences (positive AND negative)\n")
+			fmt.Printf("    2. Reference this ADR in code comments where the decision applies.\n")
+			fmt.Printf("    3. Commit alongside the change it justifies.\n")
+			return nil
+		},
+	}
+	adrCmd.Flags().String("status", "proposed", "ADR status: proposed | accepted | deprecated | superseded")
+	root.AddCommand(adrCmd)
+
+	// ── diagramar (Sprint 11.3 — C4 Mermaid scaffold) ──
+	// `radiant diagramar <level>` produces a starter Mermaid
+	// diagram at the chosen C4 level (context, container, component,
+	// code). The output is a template — the user (or an agent)
+	// fills in the actual nodes/edges. This is intentionally
+	// lighter than auto-extraction: most useful diagrams need
+	// domain context the LLM should add via the diagramar skill.
+	diagramarCmd := &cobra.Command{
+		Use:   "diagramar <level>",
+		Short: "Generate a C4 Mermaid diagram template (context|container|component|code)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out, _ := cmd.Flags().GetString("out")
+			level := strings.ToLower(args[0])
+			diagram, err := renderDiagram(level)
+			if err != nil {
+				return err
+			}
+			if out == "" {
+				fmt.Print(diagram)
+				return nil
+			}
+			if err := atomicWrite(out, diagram); err != nil {
+				return fmt.Errorf("write %s: %w", out, err)
+			}
+			fmt.Printf("  ✓ wrote %s\n", out)
+			return nil
+		},
+	}
+	diagramarCmd.Flags().StringP("out", "o", "", "output file (default: stdout)")
+	root.AddCommand(diagramarCmd)
+
+	// ── update (Sprint 11 — refresh skills preserving user work) ──
+	// `radiant update` compares the bundled skill versions with the
+	// project's installed versions and updates only those that have
+	// changed. User's own files (spec.md, tasks.md, docs/) are
+	// NEVER touched — only `.radiant-harness/skills/*` and the
+	// `AGENTS.md` index are refreshed.
+	//
+	// Safety: by default, conflicts (where local version diverges
+	// from bundled) are reported and NOT overwritten. Pass --force
+	// to overwrite everything (user loses local edits).
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Refresh bundled skills + AGENTS.md without touching user docs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			force, _ := cmd.Flags().GetBool("force")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			infos, err := skill.Bundle()
+			if err != nil {
+				return fmt.Errorf("load bundled skills: %w", err)
+			}
+
+			skillsDir := filepath.Join(".radiant-harness", "skills")
+			if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+				return err
+			}
+
+			var added, updated, conflict int
+			for _, info := range infos {
+				localFrontmatter := filepath.Join(skillsDir, info.Name, "frontmatter.yaml")
+				localVersion := readFrontmatterVersion(localFrontmatter)
+
+				action := "unchanged"
+				switch {
+				case localVersion == "":
+					action = "added"
+				case localVersion != info.Version:
+					if force {
+						action = "updated"
+					} else {
+						action = "conflict"
+					}
+				}
+				switch action {
+				case "added":
+					fmt.Printf("  [added]   %s (local=<missing> bundled=%s)\n", info.Name, info.Version)
+					if !dryRun {
+						if err := skill.ExtractSkillTo(skillsDir, info.Name, force); err != nil {
+							return fmt.Errorf("extract skill %s: %w", info.Name, err)
+						}
+						added++
+					}
+				case "updated":
+					fmt.Printf("  [updated] %s (local=%s bundled=%s)\n", info.Name, localVersion, info.Version)
+					if !dryRun {
+						if err := skill.ExtractSkillTo(skillsDir, info.Name, force); err != nil {
+							return fmt.Errorf("extract skill %s: %w", info.Name, err)
+						}
+						updated++
+					}
+				case "conflict":
+					fmt.Printf("  [conflict] %s (local=%s bundled=%s) — pass --force to overwrite\n", info.Name, localVersion, info.Version)
+					conflict++
+				default:
+					if dryRun {
+						fmt.Printf("  [unchanged] %s (local=%s bundled=%s)\n", info.Name, localVersion, info.Version)
+					}
+				}
+			}
+
+			// Always regenerate AGENTS.md (it has no user-edited content
+			// worth preserving — the design is "user edits AGENTS.md and
+			// we still overwrite it", per video #6 the user must
+			// review after each update).
+			agentsMD := generateAgentsMD()
+			agentsPath := "AGENTS.md"
+			if dryRun {
+				fmt.Printf("  [regenerate] %s (always — review after update)\n", agentsPath)
+			} else {
+				if err := os.WriteFile(agentsPath, []byte(agentsMD), 0o644); err != nil {
+					return fmt.Errorf("write %s: %w", agentsPath, err)
+				}
+				fmt.Printf("  [regenerated] %s\n", agentsPath)
+			}
+
+			fmt.Printf("\n  Summary: %d added, %d updated, %d conflict(s)\n",
+				added, updated, conflict)
+			if conflict > 0 {
+				fmt.Println("  Re-run with --force to overwrite local skill edits.")
+			}
+			return nil
+		},
+	}
+	updateCmd.Flags().Bool("force", false, "overwrite local skill edits (DESTRUCTIVE — loses local changes)")
+	updateCmd.Flags().Bool("dry-run", false, "show what would change without writing anything")
+	root.AddCommand(updateCmd)
+
 	// ── state + handoff (session continuity, see handoff skill) ──
 	// `radiant state` shows the current resume point.
 	// `radiant handoff` writes a new resume point before closing the
@@ -942,6 +1117,278 @@ func atomicWrite(path, data string) error {
 		return err
 	}
 	return nil
+}
+
+// readFrontmatterVersion reads the `version:` field from a skill's
+// frontmatter.yaml. Returns "" if the file is missing or has no
+// version field. Used by `radiant update` to compare bundled vs.
+// local skill versions. We don't unmarshal full YAML — a partial
+// line scan is enough for one field and avoids a dependency in
+// main.go (yaml.v3 already lives in internal/skill/).
+func readFrontmatterVersion(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "version:") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(trimmed, "version:"))
+		// Strip surrounding quotes (YAML permits both).
+		v = strings.Trim(v, "\"'")
+		return v
+	}
+	return ""
+}
+
+// generateAgentsMD returns the canonical AGENTS.md content. It is
+// intentionally minimal (<=100 lines) — per the AI-dev video
+// research, bloated AGENTS.md files hurt LLM behaviour. The
+// canonical list of skills is appended as a one-line-per-skill
+// section so an agent can grep the file to discover what exists.
+func generateAgentsMD() string {
+	infos, err := skill.Bundle()
+	if err != nil {
+		// Fail closed: emit a stub that still tells the agent
+		// what the file is for. Real regeneration happens on
+		// the next `radiant update`.
+		return "# AGENTS.md\n\n(project metadata; regenerate with `radiant update`)\n"
+	}
+
+	var b strings.Builder
+	b.WriteString("# AGENTS.md\n\n")
+	b.WriteString("This project uses **radiant-harness**. Skills live in\n")
+	b.WriteString("`.radiant-harness/skills/<name>/{SKILL.md, frontmatter.yaml}`.\n\n")
+	b.WriteString("## Available skills\n\n")
+	for _, info := range infos {
+		fmt.Fprintf(&b, "- **%s** (v%s) — %s\n", info.Name, info.Version, info.Description)
+	}
+	b.WriteString("\n## How to use\n\n")
+	b.WriteString("1. Read the SKILL.md for any skill before invoking it.\n")
+	b.WriteString("2. Run `radiant run <spec-dir>` to execute a spec end-to-end.\n")
+	b.WriteString("3. Run `radiant handoff --feature=<slug> --tier=<tier> --next-command=<cmd> --note=<summary>` between sessions.\n")
+	return b.String()
+}
+
+// nextADRSequence scans `docs/architecture/adr/` for the highest
+// NNNN- prefix and returns next+1. Returns 1 if the directory is
+// empty or doesn't exist yet. Same algorithm as nextSpecSeq but
+// kept separate so the two domains can evolve independently.
+func nextADRSequence(adrDir string) (int, error) {
+	max := 0
+	entries, err := os.ReadDir(adrDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 1, nil
+		}
+		return 0, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[4] != '-' {
+			continue
+		}
+		n, err := strconv.Atoi(name[:4])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1, nil
+}
+
+// renderDiagram produces a starter Mermaid C4 diagram for the
+// given level. It is intentionally minimal — the goal is to give
+// the user (or an agent invoking the diagramar skill) a working
+// skeleton with valid C4 syntax, not auto-extract the codebase.
+// Auto-extraction is a future enhancement.
+func renderDiagram(level string) (string, error) {
+	switch level {
+	case "context":
+		return contextDiagram(), nil
+	case "container":
+		return containerDiagram(), nil
+	case "component":
+		return componentDiagram(), nil
+	case "code":
+		return codeDiagram(), nil
+	default:
+		return "", fmt.Errorf("unknown level %q — choose: context | container | component | code", level)
+	}
+}
+
+func contextDiagram() string {
+	return `# C4 Level 1 — System Context
+#
+# Edit the Person/System entries below to describe who uses your
+# system and what external systems it talks to. See the diagramar
+# skill for guidance.
+
+` + "```mermaid" + `
+C4Context
+    title System Context diagram for <Your System>
+
+    Person(user, "User", "A human who wants to <achieve goal>")
+    System(system, "<Your System>", "Provides <capability>")
+    System_Ext(external, "<External System>", "Does <thing> for us")
+
+    Rel(user, system, "Uses")
+    Rel(system, external, "Calls")
+` + "```" + `
+`
+}
+
+func containerDiagram() string {
+	return `# C4 Level 2 — Containers
+#
+# Break <Your System> into deployable units: web app, API, DB,
+# background worker, etc. See the diagramar skill.
+
+` + "```mermaid" + `
+C4Container
+    title Container diagram for <Your System>
+
+    Person(user, "User", "A human who wants to <achieve goal>")
+
+    System_Boundary(c1, "<Your System>") {
+        Container(web, "Web App", "React/Vue/...", "Browser UI")
+        Container(api, "API", "Go/Node/Python", "JSON/HTTP API")
+        ContainerDb(database, "Database", "Postgres/SQLite", "Stores <data>")
+    }
+
+    Rel(user, web, "Uses", "HTTPS")
+    Rel(web, api, "Calls", "JSON/HTTPS")
+    Rel(api, database, "Reads/writes", "SQL")
+` + "```" + `
+`
+}
+
+func componentDiagram() string {
+	return `# C4 Level 3 — Components
+#
+# Zoom into ONE container (the API in this example) and show its
+// internal building blocks. See the diagramar skill.
+
+` + "```mermaid" + `
+C4Component
+    title Component diagram for <API>
+
+    Container(web, "Web App", "React", "Browser UI")
+    ContainerDb(database, "Database", "Postgres", "Stores data")
+
+    Container_Boundary(api, "<API>") {
+        Component(handler, "Handler", "HTTP layer", "Translates requests to commands")
+        Component(svc, "Service", "Business logic", "Enforces invariants")
+        Component(repo, "Repository", "Data access", "Owns SQL queries")
+    }
+
+    Rel(web, handler, "Calls", "JSON")
+    Rel(handler, svc, "Invokes")
+    Rel(svc, repo, "Uses")
+    Rel(repo, database, "Reads/writes", "SQL")
+` + "```" + `
+`
+}
+
+func codeDiagram() string {
+	return `# C4 Level 4 — Code
+#
+# UML-style class diagram for a focused unit. The diagramar skill
+# recommends staying at Level 3 unless a specific class has
+# complex internal relationships worth visualising.
+
+` + "```mermaid" + `
+classDiagram
+    class Service {
+        +repo Repository
+        +logger Logger
+        +DoThing(input Input) (Output, error)
+    }
+    class Repository {
+        <<interface>>
+        +Get(id string) (Entity, error)
+        +Put(entity Entity) error
+    }
+    Service --> Repository : depends on
+`
+}
+
+// renderADR produces a Nygard-format ADR template. The user is
+// expected to fill in Context, Decision, and Consequences after
+// the file is generated.
+func renderADR(seq int, decision, status string) string {
+	if status == "" {
+		status = "proposed"
+	}
+	switch status {
+	case "proposed", "accepted", "deprecated", "superseded":
+		// ok
+	default:
+		status = "proposed"
+	}
+	return fmt.Sprintf(`# %04d. %s
+
+## Status
+
+%s
+
+> Status transitions: proposed → accepted (when team agrees) →
+> deprecated or superseded (when replaced). Edit this section in
+> place to record the transition.
+
+## Context
+
+What forces are at play? What problem are we solving? What
+constraints exist?
+
+**Alternatives considered** (fill in at least 2; ADRs are valuable
+*because* they record what was rejected, not only what was chosen):
+
+- **Alternative A: <name>** — <one-line description>
+  - Pro: ...
+  - Con: ...
+- **Alternative B: <name>** — <one-line description>
+  - Pro: ...
+  - Con: ...
+
+## Decision
+
+We will <the chosen approach>.
+
+(One paragraph. State the decision clearly so a reader who knows
+nothing about the discussion can understand what was decided and
+why.)
+
+## Consequences
+
+What becomes easier? What becomes harder? What trade-offs did we
+accept?
+
+### Positive
+
+- ...
+
+### Negative
+
+- ...
+
+### Neutral
+
+- (Anything that changes but isn't clearly positive or negative)
+
+---
+
+_Generated by 'radiant adr' on %s. Edit the placeholders above.
+See the 'adr' skill ('.radiant-harness/skills/adr/SKILL.md') for
+the full Decision Tree, anti-patterns, and failure modes._
+`, seq, decision, status, time.Now().UTC().Format("2006-01-02"))
 }
 
 // summaryFor produces the human-readable one-liner that goes into

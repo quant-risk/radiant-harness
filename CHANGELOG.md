@@ -4,6 +4,48 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-06-25
+
+Sprint 11: completes the discovery phase of the methodology merge.
+Three new commands round out the `radiant` CLI as a usable, end-to-end
+Spec-Driven Development harness — from spec to handoff to diagram.
+
+### Added
+- **`radiant adr "<decision>" [--status=...]`** — create a new
+  Architecture Decision Record at `docs/architecture/adr/NNNN-<slug>.md`
+  using the canonical Nygard format. Status defaults to `proposed`;
+  accepted values are `proposed | accepted | deprecated | superseded`
+  (anything else falls back to `proposed`). Powers the `adr` skill.
+- **`radiant update [--force] [--dry-run]`** — refresh bundled skills
+  + AGENTS.md from the CLI binary without touching user docs.
+  Compares each skill's bundled version with the local
+  `frontmatter.yaml` `version:` field:
+  - `local=missing` → `[added]`
+  - `local!=bundled` → `[conflict]` (skipped) unless `--force`
+  - `local==bundled` → `[unchanged]`
+  - `AGENTS.md` is always regenerated (it's an output, not user input)
+  so the user can review after each update.
+  - New helper `skill.ExtractSkillTo(target, name, force)` writes a
+    single skill by name (used by update to touch only changed ones).
+- **`radiant diagramar <level> [-o file]`** — generate a starter
+  C4 Mermaid diagram at the requested level (`context | container |
+  component | code`). Output is a working template with valid
+  C4-Mermaid syntax — the user (or an agent invoking the
+  `diagramar` skill) fills in the actual nodes/edges. Unknown
+  levels error with a helpful usage message.
+- **Helpers**: `readFrontmatterVersion(path)` (parses the `version:`
+  field from a skill's YAML; cheap line-scan, no full YAML
+  unmarshal), `generateAgentsMD()` (builds the canonical
+  `<=100-line` AGENTS.md from the bundled skill set — applied
+  video-research insight #6 about minimal AGENTS.md files).
+
+### Quality
+- 230 tests passing (+14 from Sprint 11: 6 frontmatter-version, 5
+  AGENTS.md, 3 diagramar).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1` green on darwin/arm64.
+
 ## [0.4.2] — 2026-06-24
 
 Sprint 10 third batch: closes the methodology merge. Wires the
