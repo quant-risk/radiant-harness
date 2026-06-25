@@ -116,15 +116,34 @@ report (this commit) for per-deliverable acceptance.
 
 Total: **216 tests, 16 skills bundled, 0 races, 6/6 cross-compile**.
 
-### Sprint 11 — Discovery + Design (Lean + DDD + RFC)
+### Sprint 11 — Discovery + Design (Lean + DDD + RFC) ✓ DONE
 
-**Tema**: `radiant product`, `radiant adr`, `radiant diagramar`,
-`radiant update`, skills `kickoff` + `integrations`.
+**Tema**: `radiant adr`, `radiant update`, `radiant diagramar`,
+helpers `readFrontmatterVersion` + `generateAgentsMD`,
+`skill.ExtractSkillTo`.
 
-### Sprint 12 — Brownfield + Governance
+**Entregue em** v0.4.3 (commit `9e5e424`):
+- `radiant adr "<decision>" [--status=...]` — Nygard-format ADR at
+  `docs/architecture/adr/NNNN-<slug>.md`; status validated against
+  proposed|accepted|deprecated|superseded.
+- `radiant update [--force] [--dry-run]` — per-skill version compare
+  via `readFrontmatterVersion`; conflicts skipped unless `--force`;
+  AGENTS.md always regenerated (output, not input).
+- `radiant diagramar <level> [-o file]` — C4 Mermaid template at
+  context|container|component|code.
 
-**Tema**: `radiant mapear`, `radiant audit`, `radiant metrics`,
-skills `mapear` + `audit` + `metricas`.
+**Testes**: 230 PASS (was 216, +14 em Sprint 11). 6/6 cross-compile.
+Ver `docs/validation-report-sprint-11-final.md`.
+
+`radiant product` + `radiant integrations list` foram postergados
+para Sprint 12 (governance).
+
+### Sprint 12 — Brownfield + Governance (next)
+
+**Tema**: `radiant product`, `radiant integrations list`,
+`radiant mapear`, `radiant audit`, `radiant metrics`, skills
+`mapear` + `audit` + `metricas`. `nova-product` skill (novo,
+top-of-line spec).
 
 ### Sprint 13 — PR + Multi-agent views
 
@@ -156,7 +175,7 @@ A cada fase:
 
 - [ ] Sprint 10: skill schema ratificado, 3 skills prontas, qualquer
       LLM pode consumir o projeto sem nada proprietário
-- [ ] Sprint 11: discovery (greenfield + brownfield) ponta a ponta
+- [x] Sprint 11: discovery (greenfield + brownfield) ponta a ponta — **v0.4.3**
 - [ ] Sprint 12: governance (audit + metrics) ponta a ponta
 - [ ] Sprint 13: 6 views nativas geradas, PR review automatizado
 
