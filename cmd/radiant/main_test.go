@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSlugify(t *testing.T) {
@@ -1650,6 +1652,102 @@ func TestTelemetrySummaryCountsAndGroups(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary output missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestTelemetryRotateDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Disabled → no-op, no error.
+	if err := runTelemetryRotate(100); err != nil {
+		t.Errorf("rotate when disabled should not error; got %v", err)
+	}
+}
+
+func TestTelemetryRotateUnderCap(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	// Write 5 events, cap 100 — should be no-op.
+	var lines []string
+	for i := 0; i < 5; i++ {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":"2026-06-25T10:0%d:00Z","command":"t","hash":"a","radiant_ver":"v"}`, i))
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryRotate(100); err != nil {
+		t.Fatalf("rotate under cap: %v", err)
+	}
+	// Log should still have 5 entries.
+	data, _ := os.ReadFile(telemetryLogPath)
+	if got := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; got != 5 {
+		t.Errorf("expected 5 entries after no-op rotation, got %d", got)
+	}
+}
+
+func TestTelemetryRotateOverCap(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryEnable(); err != nil {
+		t.Fatal(err)
+	}
+	// Write 5 events, cap 3 — should archive 2 and keep 3.
+	var lines []string
+	for i := 0; i < 5; i++ {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":"2026-06-25T10:0%d:00Z","command":"t","hash":"a%d","radiant_ver":"v"}`, i, i))
+	}
+	if err := os.WriteFile(telemetryLogPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTelemetryRotate(3); err != nil {
+		t.Fatalf("rotate over cap: %v", err)
+	}
+	// Active log should have 3 entries (latest).
+	data, _ := os.ReadFile(telemetryLogPath)
+	if got := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; got != 3 {
+		t.Errorf("active log expected 3 entries, got %d", got)
+	}
+	// The kept entries should be the LATEST 3 (timestamps 2, 3, 4).
+	body := string(data)
+	for _, want := range []string{`"hash":"a2"`, `"hash":"a3"`, `"hash":"a4"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("active log missing %q in:\n%s", want, body)
+		}
+	}
+	for _, gone := range []string{`"hash":"a0"`, `"hash":"a1"`} {
+		if strings.Contains(body, gone) {
+			t.Errorf("active log should NOT contain %q in:\n%s", gone, body)
+		}
+	}
+	// Archive file should exist with 2 entries.
+	archivePath := fmt.Sprintf("%s-%s.jsonl", strings.TrimSuffix(telemetryLogPath, ".jsonl"), time.Now().UTC().Format("2006-01-02"))
+	archiveData, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("archive file not created: %v", err)
+	}
+	if got := strings.Count(strings.TrimSpace(string(archiveData)), "\n") + 1; got != 2 {
+		t.Errorf("archive expected 2 entries, got %d", got)
+	}
+}
+
+func TestTelemetryRotateInvalidCap(t *testing.T) {
+	if err := runTelemetryRotate(0); err == nil {
+		t.Error("rotate with cap=0 should error")
+	}
+	if err := runTelemetryRotate(-1); err == nil {
+		t.Error("rotate with cap=-1 should error")
 	}
 }
 
