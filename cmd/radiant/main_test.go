@@ -799,7 +799,7 @@ func TestLooksLikeSemver(t *testing.T) {
 
 func TestReleaseRejectsInvalidVersion(t *testing.T) {
 	// No chdir — version validation happens before any file read.
-	if err := runRelease("not-a-version", true, true, true, true, true); err == nil {
+	if err := runRelease("not-a-version", true, true, true, true, true, false); err == nil {
 		t.Error("expected error for invalid version")
 	}
 }
@@ -826,22 +826,100 @@ func chdirToTemp(t *testing.T, versionLine string) string {
 
 func TestReleaseAcceptsSemver(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
-	if err := runRelease("0.5.1", true, true, true, true, true); err != nil {
+	if err := runRelease("0.5.1", true, true, true, true, true, false); err != nil {
 		t.Errorf("runRelease dry-run with valid semver should succeed; got %v", err)
 	}
 }
 
 func TestReleaseAcceptsVPrefix(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
-	if err := runRelease("v0.5.1", true, true, true, true, true); err != nil {
+	if err := runRelease("v0.5.1", true, true, true, true, true, false); err != nil {
 		t.Errorf("runRelease should accept v-prefix; got %v", err)
 	}
 }
 
 func TestReleaseAcceptsPreRelease(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
-	if err := runRelease("0.5.0-rc.1", true, true, true, true, true); err != nil {
+	if err := runRelease("0.5.0-rc.1", true, true, true, true, true, false); err != nil {
 		t.Errorf("runRelease should accept pre-release suffix; got %v", err)
+	}
+}
+
+func TestPromptConfirmYes(t *testing.T) {
+	old := os.Stdin
+	defer func() { os.Stdin = old }()
+	r, w, _ := os.Pipe()
+	w.WriteString("y\n")
+	w.Close()
+	os.Stdin = r
+	ok, err := promptConfirm("? ")
+	if err != nil {
+		t.Fatalf("promptConfirm: %v", err)
+	}
+	if !ok {
+		t.Error("expected true for 'y'")
+	}
+}
+
+func TestPromptConfirmDefaultYes(t *testing.T) {
+	old := os.Stdin
+	defer func() { os.Stdin = old }()
+	r, w, _ := os.Pipe()
+	w.WriteString("\n")
+	w.Close()
+	os.Stdin = r
+	ok, err := promptConfirm("? ")
+	if err != nil {
+		t.Fatalf("promptConfirm: %v", err)
+	}
+	if !ok {
+		t.Error("empty input should default to yes")
+	}
+}
+
+func TestPromptConfirmNo(t *testing.T) {
+	old := os.Stdin
+	defer func() { os.Stdin = old }()
+	r, w, _ := os.Pipe()
+	w.WriteString("no\n")
+	w.Close()
+	os.Stdin = r
+	ok, err := promptConfirm("? ")
+	if err != nil {
+		t.Fatalf("promptConfirm: %v", err)
+	}
+	if ok {
+		t.Error("expected false for 'no'")
+	}
+}
+
+func TestPromptConfirmInvalid(t *testing.T) {
+	old := os.Stdin
+	defer func() { os.Stdin = old }()
+	r, w, _ := os.Pipe()
+	w.WriteString("maybe\n")
+	w.Close()
+	os.Stdin = r
+	_, err := promptConfirm("? ")
+	if err == nil {
+		t.Error("expected error for invalid answer")
+	}
+}
+
+func TestIsTerminalPipe(t *testing.T) {
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(r) {
+		t.Error("pipe should not be a terminal")
+	}
+}
+
+func TestReleaseInteractiveDryRunSkipsPrompt(t *testing.T) {
+	// --dry-run should NOT prompt (even with --interactive=true).
+	chdirToTemp(t, `var version = "0.5.0"`)
+	if err := runRelease("0.5.1", true, true, true, true, true, true); err != nil {
+		t.Errorf("dry-run + interactive should not error; got %v", err)
 	}
 }
 

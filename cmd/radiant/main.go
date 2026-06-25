@@ -919,7 +919,8 @@ func main() {
 			skipCrossCompile, _ := cmd.Flags().GetBool("skip-cross-compile")
 			skipTag, _ := cmd.Flags().GetBool("skip-tag")
 			skipCommit, _ := cmd.Flags().GetBool("skip-commit")
-			return runRelease(version, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit)
+			interactive, _ := cmd.Flags().GetBool("interactive")
+			return runRelease(version, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit, interactive)
 		},
 	}
 	releaseCmd.Flags().Bool("dry-run", false, "show what would happen without writing/tagging anything")
@@ -927,6 +928,7 @@ func main() {
 	releaseCmd.Flags().Bool("skip-cross-compile", false, "skip the cross-compile step")
 	releaseCmd.Flags().Bool("skip-tag", false, "skip the git tag step (only bump version + commit)")
 	releaseCmd.Flags().Bool("skip-commit", false, "skip the git commit step (only bump version)")
+	releaseCmd.Flags().Bool("interactive", false, "prompt for confirmation before commit/tag (skipped automatically in non-tty mode)")
 	root.AddCommand(releaseCmd)
 
 	// ── audit (Sprint 14.2 — project layout audit CLI) ──
@@ -2255,7 +2257,7 @@ func renderAuditReport(scope string, findings []auditFinding, errors, warnings, 
 //
 // All destructive steps are skipped under --dry-run; the user
 // sees exactly what would happen.
-func runRelease(version string, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit bool) error {
+func runRelease(version string, dryRun, skipTests, skipCrossCompile, skipTag, skipCommit, interactive bool) error {
 	// Normalize: accept both "0.5.1" and "v0.5.1".
 	version = strings.TrimPrefix(version, "v")
 	tagName := "v" + version
@@ -2319,6 +2321,34 @@ func runRelease(version string, dryRun, skipTests, skipCrossCompile, skipTag, sk
 		fmt.Println("  [skip] quality gates (--skip-tests)")
 	}
 
+	// 4b. Interactive confirmation: prompt BEFORE any destructive step
+	// (version bump, commit, tag). Only fires when:
+	//   --interactive is set AND
+	//   we're not in --dry-run (nothing to confirm) AND
+	//   stdin is a terminal (CI/non-tty automatically skips prompts)
+	if interactive && !dryRun && isTerminal(os.Stdin) {
+		fmt.Println("\n  ────────────────────────────────────────────")
+		fmt.Printf("  About to bump version → %s\n", version)
+		if !skipCommit {
+			fmt.Printf("  Then commit 'release: cut %s'\n", tagName)
+		}
+		if !skipTag {
+			fmt.Printf("  Then create tag %s\n", tagName)
+		}
+		fmt.Println("  ────────────────────────────────────────────")
+		ok, err := promptConfirm("  Continue? [Y/n]: ")
+		if err != nil {
+			return fmt.Errorf("read confirmation: %w", err)
+		}
+		if !ok {
+			fmt.Println("  ✗ Aborted by user. No changes made.")
+			return nil
+		}
+		fmt.Println("  ✓ Confirmed")
+	} else if interactive && !dryRun {
+		fmt.Println("  [skip] interactive prompt (non-tty stdin — assuming yes)")
+	}
+
 	// 5. Bump version in cmd/radiant/main.go.
 	fmt.Println("\n  → Bumping version")
 	if err := bumpVersionInSource(version, dryRun); err != nil {
@@ -2379,6 +2409,41 @@ func runRelease(version string, dryRun, skipTests, skipCrossCompile, skipTag, sk
 		recordTelemetry("release")
 	}
 	return nil
+}
+
+// isTerminal reports whether the given file is connected to a terminal.
+// On unix, checks ModeCharDevice; on Windows every fd looks like one,
+// but for our purposes (CI vs interactive shell), this is sufficient.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// promptConfirm asks the user a yes/no question on stdin. Empty input
+// (just Enter) defaults to yes. "n"/"no" answers no. Anything else is
+// rejected with a clear error.
+//
+// Exposed for tests; the caller is responsible for ensuring stdin is
+// a terminal (or piping known input).
+func promptConfirm(question string) (bool, error) {
+	fmt.Print(question)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	answer := strings.TrimSpace(strings.ToLower(line))
+	switch answer {
+	case "", "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid answer %q — expected y/yes/n/no", answer)
+	}
 }
 
 // looksLikeSemver is a relaxed semver check: MAJOR.MINOR.PATCH
