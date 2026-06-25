@@ -323,7 +323,79 @@ func generateViews(adapter *radiant.AgentAdapter, templates fs.FS) []View {
 			views = append(views, View{Path: outPath, Content: content})
 		}
 	}
+	return views
+}
 
+// GenerateViewsForAgent returns the list of native-view files
+// that would be written for the given agent. Used by `radiant views`
+// to let users regenerate a single agent's view on demand (e.g.
+// after adding a new skill, or switching from Cursor to Codex).
+// Exported so cmd/radiant can call it without duplicating the
+// template walking logic.
+//
+// Reads from TWO sources:
+//  1. CONVENTIONS.md (the canonical instructions file) — gives
+//     us the agent's instructions body.
+//  2. The bundled skills in internal/skill/ — gives us the SKILL.md
+//     files to mirror into the agent's skills directory. This is
+//     the canonical source (scaffold's templates/skills/ is empty
+//     by design — it was a stub during early development).
+func GenerateViewsForAgent(agent radiant.AgentID) []View {
+	adapter := GetAdapter(agent)
+	if adapter == nil {
+		return nil
+	}
+	templates, err := fs.Sub(templatesFS, "templates")
+	if err != nil {
+		return nil
+	}
+	claudemd, err := fs.ReadFile(templates, "CONVENTIONS.md")
+	if err != nil {
+		return nil
+	}
+
+	var views []View
+	body := string(claudemd)
+	if adapter.InstFM == "strip" {
+		body = stripFrontmatter(body)
+	}
+	body = strings.ReplaceAll(body, "skills", adapter.SkillsDir)
+	views = append(views, View{Path: adapter.InstTo, Content: body})
+
+	// Pull skill views from the canonical bundled skill set.
+	infos, err := skill.Bundle()
+	if err != nil {
+		return views // at least the instructions file is there
+	}
+	for _, info := range infos {
+		s, err := skill.LoadFromFS(skill.BundledFS(), "skills/"+info.Name)
+		if err != nil {
+			continue
+		}
+		// SKILL.md body is what we mirror. Read it directly.
+		skmd, err := fs.ReadFile(skill.BundledFS(), "skills/"+info.Name+"/SKILL.md")
+		if err != nil {
+			continue
+		}
+		_ = s // not used; we just need the metadata check to succeed
+
+		var outPath, content string
+		if adapter.SkillsLayout == "skill-dir" {
+			outPath = adapter.SkillsDir + "/" + info.Name + "/SKILL.md"
+			content = string(skmd)
+		} else {
+			ext := adapter.SkillsExt
+			if ext == "" {
+				ext = "md"
+			}
+			outPath = adapter.SkillsDir + "/" + info.Name + "." + ext
+			content = string(skmd)
+			if adapter.ID == radiant.AgentGemini {
+				content = toToml(content)
+			}
+		}
+		views = append(views, View{Path: outPath, Content: content})
+	}
 	return views
 }
 

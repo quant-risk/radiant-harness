@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.5"
+var version = "0.4.6"
 
 func main() {
 	root := &cobra.Command{
@@ -737,6 +737,71 @@ func main() {
 	listCmd.Flags().String("write-docs", "", "also write docs/engineering/integrations.md from current MCPs (pass empty for default path)")
 	integrationsCmd.AddCommand(listCmd)
 	root.AddCommand(integrationsCmd)
+
+	// ── views (Sprint 13 — native agent views opt-in) ──
+	// `radiant views --agent=<list>` regenerates native agent
+	// views on demand (without re-running `radiant init`). Useful
+	// when:
+	//   - User adds a new skill and wants the agent to see it.
+	//   - User switches between agents (Cursor today, Codex tomorrow).
+	//   - User wants to drop a vendor (--force overwrites existing).
+	// By default, existing files are SKIPPED — user's local edits
+	// to .cursor/rules/sdd.mdc etc. win. Pass --force to overwrite.
+	viewsCmd := &cobra.Command{
+		Use:   "views",
+		Short: "Generate native agent views (.claude/, .cursor/, .codex/, etc.) on demand",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agentFlag, _ := cmd.Flags().GetString("agent")
+			force, _ := cmd.Flags().GetBool("force")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			if agentFlag == "" {
+				return fmt.Errorf("--agent=<list> required (e.g. --agent=claude,codex,cursor,copilot,gemini,windsurf)")
+			}
+			agents := resolveAgents(agentFlag, false)
+			if len(agents) == 0 {
+				return fmt.Errorf("no valid agents in --agent=%q (allowed: claude, codex, cursor, copilot, gemini, windsurf)", agentFlag)
+			}
+
+			var written, skipped int
+			for _, agent := range agents {
+				views := scaffold.GenerateViewsForAgent(agent)
+				if len(views) == 0 {
+					fmt.Printf("  [skip] %s: no adapter registered\n", agent)
+					continue
+				}
+				fmt.Printf("  [%s]\n", agent)
+				for _, v := range views {
+					if dryRun {
+						fmt.Printf("    [would-write] %s (%d bytes)\n", v.Path, len(v.Content))
+						continue
+					}
+					if _, err := os.Stat(v.Path); err == nil && !force {
+						fmt.Printf("    [skipped] %s (exists; pass --force to overwrite)\n", v.Path)
+						skipped++
+						continue
+					}
+					if err := os.MkdirAll(filepath.Dir(v.Path), 0o755); err != nil {
+						return fmt.Errorf("mkdir %s: %w", filepath.Dir(v.Path), err)
+					}
+					if err := atomicWrite(v.Path, v.Content); err != nil {
+						return fmt.Errorf("write %s: %w", v.Path, err)
+					}
+					fmt.Printf("    [wrote] %s\n", v.Path)
+					written++
+				}
+			}
+			fmt.Printf("\n  Summary: %d written, %d skipped\n", written, skipped)
+			if !force && skipped > 0 {
+				fmt.Println("  Re-run with --force to overwrite existing views.")
+			}
+			return nil
+		},
+	}
+	viewsCmd.Flags().String("agent", "", "comma-separated agent list (claude,codex,cursor,copilot,gemini,windsurf) or --agent=all")
+	viewsCmd.Flags().Bool("force", false, "overwrite existing views (DESTRUCTIVE — loses local edits)")
+	viewsCmd.Flags().Bool("dry-run", false, "show what would change without writing")
+	root.AddCommand(viewsCmd)
 
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the

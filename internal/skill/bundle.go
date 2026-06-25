@@ -18,6 +18,14 @@ import (
 //go:embed all:skills
 var bundledFS embed.FS
 
+// BundledFS returns the embedded skills filesystem so callers
+// outside this package (e.g. scaffold) can read individual SKILL.md
+// files. Returning the same fs.FS keeps the canonical source
+// singular.
+func BundledFS() fs.FS {
+	return bundledFS
+}
+
 // SkillInfo is a lightweight descriptor for a bundled skill — name
 // + description (from frontmatter.yaml). Used by `radiant skills
 // list` and by AGENTS.md generation so any agent can scan what's

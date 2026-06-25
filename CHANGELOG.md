@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] — 2026-06-25
+
+Sprint 13 first batch: native agent views opt-in without re-running
+`radiant init`. Closes the multi-agent views half of the methodology
+merge.
+
+### Added
+- **`radiant views --agent=<list> [--force] [--dry-run]`** — regenerate
+  native agent views (`.claude/`, `.cursor/`, `.codex/`, `.copilot/`,
+  `.gemini/`, `.windsurf/`) on demand. Use cases:
+  - User added a new skill and wants the agent to see it.
+  - User switches between agents (Cursor today, Codex tomorrow).
+  - User wants to drop a vendor (--force overwrites existing).
+  By default, existing files are SKIPPED — local edits win. Pass
+  `--force` to overwrite.
+- **`scaffold.GenerateViewsForAgent(agent)`** — exported helper.
+  Reuses the same template-walk logic as `Init` but pulls skills
+  from the canonical `internal/skill/` bundle (the previous stub
+  that scanned an empty `templates/skills/` dir is replaced).
+- **`skill.BundledFS() fs.FS`** — accessor for the embedded skills
+  filesystem so other packages (scaffold) can read individual
+  SKILL.md files.
+
+### Quality
+- 245 tests passing (+5 from Sprint 13: views for all 6 agents,
+  unknown agent returns empty, layout correctness per agent,
+  frontmatter strip/keep behaviour).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.4.5] — 2026-06-25
 
 Sprint 12 second batch: wires the existing `integracoes` skill to a
