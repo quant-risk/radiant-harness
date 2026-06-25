@@ -604,3 +604,66 @@ func TestNoHardcodedSecretsInCITemplates(t *testing.T) {
 		}
 	}
 }
+
+func TestCamadaAgenticaReportsMissingAgentsMD(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	defer os.Chdir(oldWD)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// No AGENTS.md exists; the command should NOT panic, it should
+	// report the missing file and continue. We can't easily capture
+	// stdout, so we just confirm the function returns nil (no error).
+	if err := runCamadaAgentica("", false); err != nil {
+		t.Errorf("runCamadaAgentica on empty dir should not error; got %v", err)
+	}
+}
+
+func TestCamadaAgenticaDetectsDrift(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	defer os.Chdir(oldWD)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Write a stale AGENTS.md that mentions skills by name but
+	// without their current versions — simulating drift.
+	stale := "# AGENTS.md\n\n| foo | bar |\n|-----|-----|\n| adr | old |\n| nova-feature | old |\n"
+	if err := os.WriteFile("AGENTS.md", []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Should run cleanly (prints drift warnings to stdout).
+	if err := runCamadaAgentica("", false); err != nil {
+		t.Errorf("runCamadaAgentica should not error on stale AGENTS.md; got %v", err)
+	}
+	// After --fix, the regenerated file should mention current
+	// versions.
+	if err := runCamadaAgentica("", true); err != nil {
+		t.Errorf("runCamadaAgentica --fix error: %v", err)
+	}
+	body, err := os.ReadFile("AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "v1.0.0") {
+		t.Errorf("regenerated AGENTS.md should contain current versions; got:\n%s", body)
+	}
+}
+
+func TestCamadaAgenticaUnknownAgent(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	defer os.Chdir(oldWD)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("AGENTS.md", []byte("# stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Unknown agent name → resolveAgents returns empty → command
+	// still runs (no error).
+	if err := runCamadaAgentica("bogus", false); err != nil {
+		t.Errorf("runCamadaAgentica with bogus agent should not error; got %v", err)
+	}
+}

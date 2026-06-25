@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] — 2026-06-25
+
+Sprint 13 fourth batch: wires the existing `camada-agentica` skill
+to an audit CLI. Per HARNESS-PLAN.md, this is the "check" half —
+the "generate" half is already `radiant init --agent=<list>` +
+`radiant update`.
+
+### Added
+- **`radiant camada-agentica [--agents=<list>] [--fix]`** — audits
+  the project's agentic layer:
+  - AGENTS.md presence + completeness (all bundled skills referenced)
+  - Version drift between AGENTS.md and the canonical skill bundle
+  - Native views presence for the agents the team uses
+  - With `--fix`, regenerates AGENTS.md from current bundled skills
+    (does NOT overwrite native views — those are user-owned).
+  - With `--agents=claude,codex,cursor,...`, also checks the
+    corresponding native view files exist.
+
+### Quality
+- 263 tests passing (+3 from Sprint 13.4: missing AGENTS.md,
+  drift detection + --fix, unknown agent).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.4.8] — 2026-06-25
 
 Sprint 13 third batch: wires the existing `setup-ci` skill to a

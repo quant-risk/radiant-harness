@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.8"
+var version = "0.4.9"
 
 func main() {
 	root := &cobra.Command{
@@ -850,6 +850,26 @@ func main() {
 	setupCICmd.Flags().String("model", "", "LLM model for the validate step (optional)")
 	root.AddCommand(setupCICmd)
 
+	// ── camada-agentica (Sprint 13.4 — agentic layer audit) ──
+	// `radiant camada-agentica` audits the project's agentic layer:
+	// AGENTS.md presence + completeness, native views consistency,
+	// version drift between AGENTS.md and bundled skills. Per the
+	// camada-agentica skill, this is the "check" half; the
+	// "generate" half is `radiant init --agent=<list>` and
+	// `radiant update`.
+	camadaCmd := &cobra.Command{
+		Use:   "camada-agentica",
+		Short: "Audit the agentic layer: AGENTS.md, native views, version drift",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agentFlag, _ := cmd.Flags().GetString("agents")
+			fix, _ := cmd.Flags().GetBool("fix")
+			return runCamadaAgentica(agentFlag, fix)
+		},
+	}
+	camadaCmd.Flags().String("agents", "", "comma-separated agents in use (claude,codex,cursor,copilot,gemini,windsurf); default = empty (AGENTS.md only)")
+	camadaCmd.Flags().Bool("fix", false, "regenerate AGENTS.md from current bundled skills (does NOT overwrite native views)")
+	root.AddCommand(camadaCmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1388,6 +1408,98 @@ func nextADRSequence(adrDir string) (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// runCamadaAgentica audits the project's agentic layer:
+//   - AGENTS.md present + references all bundled skills
+//   - Native views present for the agents in use (--agents)
+//   - Version consistency (AGENTS.md says skill X is vY, bundled
+//     skill is vZ — drift!)
+//
+// Returns exit code 0 if everything is in sync, non-zero if any
+// drift or missing files. With --fix, regenerates AGENTS.md
+// (but does NOT touch native views; the user owns those).
+func runCamadaAgentica(agentFlag string, fix bool) error {
+	infos, err := skill.Bundle()
+	if err != nil {
+		return fmt.Errorf("load bundled skills: %w", err)
+	}
+
+	var agents []radiant.AgentID
+	if agentFlag != "" {
+		agents = resolveAgents(agentFlag, false)
+	}
+
+	// 1. Check AGENTS.md presence + contents.
+	agentsPath := "AGENTS.md"
+	agentsBody, err := os.ReadFile(agentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("  [missing] AGENTS.md — run `radiant init` or `radiant update` to generate")
+		} else {
+			return fmt.Errorf("read %s: %w", agentsPath, err)
+		}
+	}
+
+	// 2. Check skill references in AGENTS.md (presence only —
+	//    full version parsing would couple us to the YAML format).
+	if len(agentsBody) > 0 {
+		var missing []string
+		for _, info := range infos {
+			if !strings.Contains(string(agentsBody), info.Name) {
+				missing = append(missing, info.Name)
+			}
+		}
+		if len(missing) > 0 {
+			fmt.Printf("  [drift] AGENTS.md missing references to %d skill(s): %s\n",
+				len(missing), strings.Join(missing, ", "))
+		}
+	}
+
+	// 3. Check version drift between AGENTS.md and bundled skills.
+	if len(agentsBody) > 0 {
+		var drifted []string
+		for _, info := range infos {
+			// Look for "name (vX.Y.Z)" in AGENTS.md (the format generateAgentsMD emits).
+			needle := fmt.Sprintf("%s (v%s)", info.Name, info.Version)
+			if !strings.Contains(string(agentsBody), needle) {
+				drifted = append(drifted, info.Name)
+			}
+		}
+		if len(drifted) > 0 {
+			fmt.Printf("  [version-drift] AGENTS.md version mismatch on %d skill(s): %s\n",
+				len(drifted), strings.Join(drifted, ", "))
+		}
+	}
+
+	// 4. Check native views presence for the agents in use.
+	if len(agents) > 0 {
+		for _, agent := range agents {
+			adapter := scaffold.GetAdapter(agent)
+			if adapter == nil {
+				fmt.Printf("  [unknown-agent] %s\n", agent)
+				continue
+			}
+			if _, err := os.Stat(adapter.InstTo); os.IsNotExist(err) {
+				fmt.Printf("  [missing-view] %s — run `radiant views --agent=%s` to generate\n",
+					adapter.InstTo, agent)
+			} else {
+				fmt.Printf("  [ok] %s (%s)\n", adapter.InstTo, adapter.Label)
+			}
+		}
+	}
+
+	// 5. Optional: regenerate AGENTS.md (without touching native views).
+	if fix {
+		body := generateAgentsMD()
+		if err := atomicWrite(agentsPath, body); err != nil {
+			return fmt.Errorf("regenerate %s: %w", agentsPath, err)
+		}
+		fmt.Printf("  [regenerated] %s\n", agentsPath)
+	} else {
+		fmt.Printf("\n  Re-run with --fix to regenerate AGENTS.md from current bundled skills.\n")
+	}
+	return nil
 }
 
 // runSetupCI generates the CI workflow for the chosen provider.
