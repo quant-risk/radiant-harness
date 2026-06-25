@@ -506,3 +506,101 @@ func TestRenderPRReviewWithDiffStats(t *testing.T) {
 		t.Errorf("renderPRReview should embed diff stats; got:\n%s", body)
 	}
 }
+
+func TestRenderGitHubActionsHasGates(t *testing.T) {
+	body := renderGitHubActions("")
+	for _, want := range []string{
+		"name: radiant-esteira",
+		"on:",
+		"pull_request:",
+		"actions/checkout@v4",
+		"radiant validate",
+		"radiant audit",
+		"go test ./...",
+		"go build ./...",
+		"RADIANT_API_KEY: ${{ secrets.RADIANT_API_KEY }}",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GitHub Actions workflow missing %q", want)
+		}
+	}
+}
+
+func TestRenderGitHubActionsRespectsModel(t *testing.T) {
+	body := renderGitHubActions("gpt-4o")
+	if !strings.Contains(body, "radiant validate --model gpt-4o") {
+		t.Errorf("model should be passed to validate; got:\n%s", body)
+	}
+}
+
+func TestRenderGitLabCIHasGates(t *testing.T) {
+	body := renderGitLabCI("")
+	for _, want := range []string{
+		"stages:",
+		"radiant-validate:",
+		"radiant audit",
+		"go test ./...",
+		"RADIANT_API_KEY: $RADIANT_API_KEY",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GitLab CI missing %q", want)
+		}
+	}
+}
+
+func TestRenderCircleCIHasGates(t *testing.T) {
+	body := renderCircleCI("")
+	for _, want := range []string{
+		"version: 2.1",
+		"cimg/go:1.22",
+		"radiant validate",
+		"radiant audit",
+		"go test ./...",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("CircleCI missing %q", want)
+		}
+	}
+}
+
+func TestCISecretsForProviders(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     []string
+	}{
+		{"github", []string{"RADIANT_API_KEY", "GITHUB_TOKEN"}},
+		{"gitlab", []string{"RADIANT_API_KEY", "GITLAB_TOKEN"}},
+		{"circleci", []string{"RADIANT_API_KEY", "CIRCLE_TOKEN"}},
+		{"unknown", []string{"RADIANT_API_KEY"}},
+	}
+	for _, c := range cases {
+		got := ciSecretsFor(c.provider)
+		if len(got) != len(c.want) {
+			t.Errorf("ciSecretsFor(%q) length = %d, want %d", c.provider, len(got), len(c.want))
+			continue
+		}
+		for i, s := range got {
+			if s != c.want[i] {
+				t.Errorf("ciSecretsFor(%q)[%d] = %q, want %q", c.provider, i, s, c.want[i])
+			}
+		}
+	}
+}
+
+func TestNoHardcodedSecretsInCITemplates(t *testing.T) {
+	// Sanity check: none of the three templates should embed a
+	// plausible API key (e.g. "sk-...", "key-..."). They must
+	// reference secrets via the provider's secret store.
+	bodies := map[string]string{
+		"github":   renderGitHubActions(""),
+		"gitlab":   renderGitLabCI(""),
+		"circleci": renderCircleCI(""),
+	}
+	for provider, body := range bodies {
+		for _, banned := range []string{"sk-", "key-", "api_key=", "apikey="} {
+			if strings.Contains(strings.ToLower(body), banned) {
+				t.Errorf("%s template contains hardcoded secret pattern %q", provider, banned)
+			}
+		}
+	}
+}

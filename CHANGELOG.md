@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] — 2026-06-25
+
+Sprint 13 third batch: wires the existing `setup-ci` skill to a
+working CLI scaffold. Closes the CI half of the methodology merge.
+
+### Added
+- **`radiant setup-ci [--provider=github|gitlab|circleci]
+  [-o output] [--model=...]`** — generates the CI workflow that
+  enforces radiant gates on every PR: validate, audit, tests,
+  build. Default provider is GitHub Actions.
+- **3 provider templates**:
+  - GitHub Actions → `.github/workflows/esteira.yml`. Triggers on
+    PR + push to main. Secrets via `${{ secrets.X }}`.
+  - GitLab CI → `.gitlab-ci.yml`. Two stages (`radiant`, `build`).
+    Secrets via `$VARIABLE` (GitLab CI/CD variables).
+  - CircleCI → `.circleci/config.yml`. Single job, docker image.
+    Secrets via context (CircleCI idiom).
+- **Safety**: refuses to overwrite existing CI files — user must
+  pass `--output=<new-path>` or remove first. Existing CI configs
+  are precious.
+- **Helpers**: `runSetupCI(provider, outPath, model)` (the body),
+  `ciSecretsFor(provider)` (returns the secret names to set),
+  `renderGitHubActions(model)`, `renderGitLabCI(model)`,
+  `renderCircleCI(model)`.
+
+### Quality
+- 260 tests passing (+6 from Sprint 13.3: 3 templates have gates,
+  GitHub respects `--model`, per-provider secret lists, no
+  hardcoded secrets in any template).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.4.7] — 2026-06-25
 
 Sprint 13 second batch: wires the existing `revisar-pr` skill to a

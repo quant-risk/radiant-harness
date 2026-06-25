@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.7"
+var version = "0.4.8"
 
 func main() {
 	root := &cobra.Command{
@@ -830,6 +830,26 @@ func main() {
 	reviewPRCmd.Flags().StringP("output", "o", "", "output path (default: <spec-path>/pr-review.md)")
 	root.AddCommand(reviewPRCmd)
 
+	// ── setup-ci (Sprint 13.3 — CI scaffold) ──
+	// `radiant setup-ci [--provider=github|gitlab|circleci]
+	// [--output=...] [--model=...]` generates the CI workflow
+	// that enforces radiant gates on every PR: validate, audit,
+	// tests, build. Default provider is GitHub Actions.
+	setupCICmd := &cobra.Command{
+		Use:   "setup-ci",
+		Short: "Generate CI workflow file (GitHub Actions / GitLab CI / CircleCI)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			provider, _ := cmd.Flags().GetString("provider")
+			outPath, _ := cmd.Flags().GetString("output")
+			model, _ := cmd.Flags().GetString("model")
+			return runSetupCI(provider, outPath, model)
+		},
+	}
+	setupCICmd.Flags().String("provider", "github", "CI provider: github | gitlab | circleci")
+	setupCICmd.Flags().StringP("output", "o", "", "output path (default: <provider's canonical path>)")
+	setupCICmd.Flags().String("model", "", "LLM model for the validate step (optional)")
+	root.AddCommand(setupCICmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1368,6 +1388,200 @@ func nextADRSequence(adrDir string) (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// runSetupCI generates the CI workflow for the chosen provider.
+// The output is a working template — secrets are referenced via
+// the provider's secret store (${{ secrets.X }} / $VARIABLE /
+// context.env), never hardcoded. All four radiant gates
+// (validate / audit / tests / build) are included.
+func runSetupCI(provider, outPath, model string) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if outPath == "" {
+		switch provider {
+		case "github":
+			outPath = ".github/workflows/esteira.yml"
+		case "gitlab":
+			outPath = ".gitlab-ci.yml"
+		case "circleci":
+			outPath = ".circleci/config.yml"
+		default:
+			return fmt.Errorf("unknown provider %q — choose: github | gitlab | circleci", provider)
+		}
+	}
+
+	var body string
+	switch provider {
+	case "github":
+		body = renderGitHubActions(model)
+	case "gitlab":
+		body = renderGitLabCI(model)
+	case "circleci":
+		body = renderCircleCI(model)
+	default:
+		return fmt.Errorf("unknown provider %q — choose: github | gitlab | circleci", provider)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(outPath); err == nil {
+		// Refuse to overwrite — the user must explicitly --force or
+		// pick a different path. Existing CI configs are precious.
+		return fmt.Errorf("%s already exists; pass --output=<new-path> or remove it first", outPath)
+	}
+	if err := atomicWrite(outPath, body); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
+	}
+	fmt.Printf("  ✓ wrote %s\n", outPath)
+	fmt.Printf("\n  Next steps:\n")
+	fmt.Printf("    1. Review the generated file — verify the gates match your project.\n")
+	fmt.Printf("    2. Set the required secrets in your CI provider:\n")
+	for _, s := range ciSecretsFor(provider) {
+		fmt.Printf("       - %s\n", s)
+	}
+	fmt.Printf("    3. Push to trigger the first run.\n")
+	return nil
+}
+
+// ciSecretsFor returns the list of secret names that the
+// generated workflow references. Used by runSetupCI to print
+// a helpful "set these secrets" reminder.
+func ciSecretsFor(provider string) []string {
+	common := []string{"RADIANT_API_KEY"}
+	switch provider {
+	case "github":
+		return append(common, "GITHUB_TOKEN")
+	case "gitlab":
+		return append(common, "GITLAB_TOKEN")
+	case "circleci":
+		return append(common, "CIRCLE_TOKEN")
+	default:
+		return common
+	}
+}
+
+// renderGitHubActions produces a .github/workflows/esteira.yml
+// that runs validate → audit → tests → build on every PR.
+// RADIANT_API_KEY is referenced via secrets, not hardcoded.
+func renderGitHubActions(model string) string {
+	modelArg := ""
+	if model != "" {
+		modelArg = fmt.Sprintf("          radiant validate --model %s\n", model)
+	}
+	return fmt.Sprintf(`name: radiant-esteira
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  radiant-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install radiant
+        run: go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+      - name: Validate (spec/code alignment)
+        env:
+          RADIANT_API_KEY: ${{ secrets.RADIANT_API_KEY }}
+        run: |
+%s          radiant validate
+      - name: Audit (project layout conformity)
+        run: radiant audit
+      - name: Tests
+        run: go test ./... -count=1 -race
+      - name: Build
+        run: go build ./...
+`, modelArg)
+}
+
+// renderGitLabCI produces a .gitlab-ci.yml with the same four
+// gates. Secrets via CI/CD variables (the GitLab idiom).
+func renderGitLabCI(model string) string {
+	modelArg := ""
+	if model != "" {
+		modelArg = fmt.Sprintf("        radiant validate --model %s\n", model)
+	}
+	return fmt.Sprintf(`stages:
+  - radiant
+  - build
+
+radiant-validate:
+  stage: radiant
+  image: golang:1.22
+  variables:
+    RADIANT_API_KEY: $RADIANT_API_KEY
+  before_script:
+    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+  script:
+    - radiant validate%s
+
+radiant-audit:
+  stage: radiant
+  image: golang:1.22
+  before_script:
+    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+  script:
+    - radiant audit
+
+tests:
+  stage: build
+  image: golang:1.22
+  script:
+    - go test ./... -count=1 -race
+
+build:
+  stage: build
+  image: golang:1.22
+  script:
+    - go build ./...
+`, modelArg)
+}
+
+// renderCircleCI produces a .circleci/config.yml with the same
+// four gates. Secrets via context (the CircleCI idiom).
+func renderCircleCI(model string) string {
+	modelArg := ""
+	if model != "" {
+		modelArg = fmt.Sprintf("          radiant validate --model %s\n", model)
+	}
+	return fmt.Sprintf(`version: 2.1
+
+jobs:
+  radiant-esteira:
+    docker:
+      - image: cimg/go:1.22
+    steps:
+      - checkout
+      - run:
+          name: Install radiant
+          command: go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+      - run:
+          name: Validate (spec/code alignment)
+          command: |
+%s            radiant validate
+      - run:
+          name: Audit (project layout conformity)
+          command: radiant audit
+      - run:
+          name: Tests
+          command: go test ./... -count=1 -race
+      - run:
+          name: Build
+          command: go build ./...
+
+workflows:
+  version: 2
+  radiant:
+    jobs:
+      - radiant-esteira
+`, modelArg)
 }
 
 // gateResult is one row in the pr-review.md "Gate results" table.
