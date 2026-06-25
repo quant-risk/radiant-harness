@@ -1,0 +1,152 @@
+name: blockchain
+version: 1.0.0
+description: |
+  Blockchain / web3 / smart-contract project guidance for shipping
+  on-chain systems with radiant. Covers chain selection, smart
+  contract architecture, security audits, gas optimisation,
+  upgrade patterns, oracle integration, and frontend integration
+  with wallets. Use this skill when the project's deliverable
+  includes on-chain logic — DeFi, NFTs, DAOs, tokenisation, or
+  any dApp with smart contracts as a core component.
+when_to_use: |
+  Project deploys smart contracts (Solidity, Cairo, Move, or
+  Rust on Solana). The deliverable includes an on-chain
+  component that holds value (tokens, NFTs, rights, identity,
+  collateral). Smart contracts have different invariants from
+  traditional software: code is law (deploys are immutable
+  unless upgradeable), exploits are public, and a bug can
+  drain a treasury in one transaction.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: chain_family
+    type: enum
+    required: true
+    description: '"evm" (Ethereum, L2s, sidechains) | "solana" | "move" (Aptos, Sui) | "cairo" (Starknet) | "cosmos" | "substrate" | "non-evm-l1"'
+  - name: value_at_risk
+    type: enum
+    required: true
+    description: '"low" (<$100k TVL) | "medium" ($100k-$10M) | "high" ($10M-$1B) | "critical" (>$1B)'
+  - name: upgradeability
+    type: enum
+    required: true
+    description: '"immutable" (no upgrade path) | "upgradeable-proxy" (UUPS / Transparent) | "diamond" (EIP-2535) | "module-based" (Aptos/Sui) | "governance-only"'
+  - name: oracle_needed
+    type: enum
+    required: false
+    description: '"none" | "chainlink" | "pyth" | "redstone" | "custom" | "uniswap-twap"'
+  - name: audit_status
+    type: enum
+    required: true
+    description: '"unaudited" | "internal-review" | "single-firm-audit" | "multi-firm-audit" | "formal-verification"'
+
+outputs:
+  - path: docs/blockchain/architecture.md
+    type: artifact
+    description: |
+      Chain choice, contract architecture, upgrade strategy,
+      role of access control, value flow, integration points.
+      Signed off BEFORE writing contract code.
+  - path: docs/blockchain/threat-model.md
+    type: artifact
+    description: |
+      Smart-contract threat model: re-entrancy, oracle manipulation,
+      flash loans, governance attacks, MEV exposure, economic
+      exploits.
+  - path: docs/blockchain/security-audit.md
+    type: artifact
+    description: |
+      Audit reports: scope, findings, severity, remediation,
+      sign-off. Required before mainnet deployment of value.
+  - path: docs/blockchain/upgrade-plan.md
+    type: artifact
+    description: |
+      How upgrades work: proxy pattern, governance role, timelock,
+      emergency pause. For each upgrade: scope, audit, migration
+      plan.
+
+gates:
+  - name: architecture-before-code
+    description: |
+      docs/blockchain/architecture.md signed off (chain choice,
+      contract design, upgrade strategy) BEFORE writing any
+      Solidity / Move / Cairo. Avoids "we built on the wrong
+      chain" or "we need to redeploy".
+  - name: threat-model-reviewed
+    description: |
+      docs/blockchain/threat-model.md reviewed by a security
+      engineer BEFORE deployment. Smart-contract exploits are
+      public and immediate.
+  - name: test-coverage-95-percent
+    description: |
+      Smart-contract tests cover ≥95% of branches. Fuzz testing
+      (Echidna, Foundry invariant testing) on value-bearing
+      contracts. Edge cases (zero, max, re-entrancy, oracle
+      stale) explicitly tested.
+  - name: audit-before-mainnet
+    description: |
+      External audit by a reputable firm (Trail of Bits, OpenZeppelin,
+      Spearbit, Code4rena, Cantina) BEFORE mainnet deployment
+      with value at risk >$100k. Multi-firm for >$10M.
+  - name: timelock-on-admin
+    description: |
+      Admin functions (mint, pause, upgrade, parameter change)
+      are behind a timelock (24-72h) so users see changes coming
+      and can exit if disagree.
+  - name: upgrade-tested-on-fork
+    description: |
+      Any upgradeable contract has been upgrade-tested on a
+      forked mainnet or testnet. Upgrade path verified to
+      preserve state.
+  - name: monitoring-and-pause
+    description: |
+      Monitoring on value flows (large transfers, oracle staleness,
+      governance proposals, contract upgrades). Emergency pause
+      capability on critical functions. Documented runbook for
+      incident response.
+
+context_provides:
+  - state.md
+  - docs/blockchain/
+
+commands_available:
+  - radiant blockchain <chain_family> --value-at-risk=<level>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - security
+  - api
+  - incident
+
+anti_patterns:
+  - |
+    Unaudited contract with value at risk. Smart-contract bugs
+    are public and immediate. Every contract holding value
+    needs an audit before mainnet.
+  - |
+    Single-key admin. One compromised key drains the contract.
+    Use multisig (Safe) + timelock for any admin action.
+  - |
+    Re-entrancy-unprotected external calls. Classic exploit;
+    every external call needs re-entrancy guard or checks-
+    effects-interactions pattern.
+  - |
+    Trusting a single oracle. One price feed goes stale →
+    liquidations at wrong prices. Use multiple oracles; check
+    staleness and deviation thresholds.
+  - |
+    Upgradeable without timelock. Admin can upgrade silently;
+    users have no time to exit. 24-72h timelock is the floor.
+  - |
+    Integer overflow / underflow (pre-0.8 Solidity). Use 0.8+
+    with checked arithmetic, or SafeMath for older versions.
+  - |
+    "It's just a frontend bug". Frontend bugs can drain wallets
+    (sign-phishing, malicious tx params). Treat frontend with
+    the same care as contracts.
+
+author: radiant-harness contributors
+license: MIT

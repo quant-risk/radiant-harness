@@ -1,0 +1,149 @@
+name: security
+version: 1.0.0
+description: |
+  Security-first project guidance for building systems with
+  radiant. Covers threat modelling, secret management, auth design,
+  input validation, dependency hygiene, audit logging, and
+  incident response. Use this skill when the project handles
+  sensitive data, is exposed to untrusted input, or must meet
+  a compliance regime (SOC2, ISO 27001, PCI DSS, HIPAA, GDPR).
+  Distinct from the `radiant security` CLI subcommand: this
+  skill is a planning guide; the command is a static scanner.
+when_to_use: |
+  Project handles credentials, PII, PHI, payment data, or any
+  data classified as regulated. Project is exposed to untrusted
+  input (user uploads, third-party API callbacks, public network
+  ingress). Project must pass a security audit (internal or
+  external). Project must comply with a regulatory regime.
+  Security is a property of the whole system, not a feature
+  bolted on at the end.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: threat_model
+    type: enum
+    required: true
+    description: '"public-internet" | "internal-trusted" | "byod" | "zero-trust" | "air-gapped"'
+  - name: data_classification
+    type: enum
+    required: true
+    description: '"public" | "internal" | "confidential" | "regulated-pii" | "regulated-phi" | "regulated-pci"'
+  - name: compliance
+    type: enum
+    required: false
+    description: '"soc2" | "iso27001" | "pci-dss" | "hipaa" | "gdpr" | "lgpd" | "fedramp" | "none"'
+  - name: deployment_model
+    type: enum
+    required: true
+    description: '"saas-public" | "saas-private" | "self-hosted" | "hybrid" | "on-prem-air-gapped"'
+  - name: auth_methods
+    type: enum
+    required: true
+    description: '"password" | "oauth2" | "sso-saml" | "sso-oidc" | "mfa-totp" | "passkey" | "mTLS" | "mixed"'
+
+outputs:
+  - path: docs/security/threat-model.md
+    type: artifact
+    description: |
+      STRIDE-style threat model: assets, adversaries, attack
+      surfaces, mitigations. Reviewed BEFORE feature work.
+  - path: docs/security/auth-design.md
+    type: artifact
+    description: |
+      Authentication + authorization design: who can access what,
+      how sessions are managed, how tokens are rotated.
+  - path: docs/security/secret-management.md
+    type: artifact
+    description: |
+      How secrets are stored, rotated, and accessed. No secrets
+      in code, env, or logs.
+  - path: docs/security/incident-response.md
+    type: artifact
+    description: |
+      Detection → triage → containment → eradication → recovery
+      → postmortem. With contacts, severity ladder, runbooks.
+
+gates:
+  - name: threat-model-before-code
+    description: |
+      docs/security/threat-model.md reviewed and signed off BEFORE
+      feature implementation. Catches architectural security flaws
+      that are 100x cheaper to fix at design time.
+  - name: secrets-not-in-repo
+    description: |
+      Zero secrets in git history, ever. Pre-commit hook (gitleaks
+      / trufflehog) + CI gate. Rotate any leaked secret the same
+      day it's discovered.
+  - name: input-validation-on-every-boundary
+    description: |
+      Every input from untrusted sources (user input, third-party
+      API, file uploads, network) is validated, sanitised, and
+      size-limited at the system boundary. Defence in depth.
+  - name: auth-decided-with-threat-model
+    description: |
+      Authentication and authorization are explicit choices driven
+      by the threat model. Defaults (e.g. "we'll add auth later")
+      are not acceptable.
+  - name: dependency-hygiene
+    description: |
+      Dependencies are pinned, scanned for CVEs (Dependabot /
+      Renovate + Trivy / Snyk), and updated on a cadence.
+      Lockfiles committed.
+  - name: audit-logging-on-security-events
+    description: |
+      Every authentication event, privilege change, secret
+      access, and admin action is logged with user_id, target,
+      timestamp, and result. Logs are tamper-evident.
+  - name: incident-response-runbook
+    description: |
+      Incident response runbook exists, contacts are current,
+      tabletop exercises have been run. Detection without
+      response is just noise.
+
+context_provides:
+  - state.md
+  - docs/security/
+
+commands_available:
+  - radiant security [--scope=secrets|perms|all]
+
+related_skills:
+  - api
+  - cli
+  - setup-ci
+  - incident
+  - data
+
+anti_patterns:
+  - |
+    "We'll add security later". Security is a property of the
+    architecture; retrofitting is 10-100x more expensive than
+    designing it in. Threat-model first.
+  - |
+    Secrets in code, env, or logs. Git history is forever; logs
+    are searchable; env dumps leak. Use a secret manager.
+  - |
+    Trusting client input. Any input from outside the trust
+    boundary must be validated. SQL injection, path traversal,
+    XSS, command injection are all "we trusted the input" bugs.
+  - |
+    Custom auth. Don't roll your own crypto, session management,
+    or password storage. Use vetted libraries and primitives.
+  - |
+    No logging of security events. If you can't see it, you
+    can't detect it, can't investigate it, can't prove you
+    handled it. Audit logs are a compliance AND incident
+    response requirement.
+  - |
+    Unrotated credentials + overly broad permissions. Service
+    tokens with admin scope that never expire are a breach
+    waiting to happen. Short TTLs + least privilege.
+  - |
+    "Security by obscurity". Hiding endpoints, custom binary
+    protocols, undocumented APIs. Real attackers find them;
+    you just made incident response harder.
+
+author: radiant-harness contributors
+license: MIT

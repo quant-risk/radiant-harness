@@ -1,0 +1,145 @@
+name: iot
+version: 1.0.0
+description: |
+  IoT / embedded systems / edge computing guidance for shipping
+  connected-device products with radiant. Covers hardware/firmware
+  architecture, sensor and actuator integration, connectivity
+  (Wi-Fi, BLE, LoRa, cellular), OTA updates, security at the edge,
+  power management, and cloud integration. Use this skill when
+  the project's deliverable includes physical hardware — sensors,
+  actuators, microcontrollers, or edge gateways — that runs
+  firmware and connects to a network.
+when_to_use: |
+  Project ships a connected device: microcontroller, sensor node,
+  edge gateway, or embedded system. The deliverable includes
+  firmware running on hardware, plus connectivity to a cloud or
+  local network. IoT has different invariants from pure software:
+  constrained resources (CPU/RAM/power), physical-world I/O,
+  firmware updates that risk bricking, and long deployment
+  lifetimes (10+ years in the field).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: device_class
+    type: enum
+    required: true
+    description: '"sensor-node" (microcontroller, battery) | "edge-gateway" (Linux SoC) | "appliance" (full system) | "wearable" | "automotive"'
+  - name: mcu_family
+    type: enum
+    required: false
+    description: '"esp32" | "stm32" | "nrf52" | "rp2040" | "linux-soc" | "arduino" | "custom"'
+  - name: connectivity
+    type: enum
+    required: true
+    description: '"wifi" | "ble" | "lora" | "zigbee" | "thread" | "cellular" | "ethernet" | "none" | "multi"'
+  - name: power_source
+    type: enum
+    required: true
+    description: '"mains" | "battery" | "energy-harvest" | "poe"'
+  - name: deployment_volume
+    type: enum
+    required: true
+    description: '"prototype" (<100 units) | "pilot" (100-10k) | "scale" (10k-1M) | "mass" (>1M)'
+
+outputs:
+  - path: docs/iot/architecture.md
+    type: artifact
+    description: |
+      Hardware + firmware architecture: MCU choice, sensor /
+      actuator list, connectivity, power budget, OTA strategy,
+      cloud integration. Signed off BEFORE prototype.
+  - path: docs/iot/firmware-update-plan.md
+    type: artifact
+    description: |
+      OTA update strategy: signed images, staged rollout,
+      rollback, recovery from brick, update cadence.
+  - path: docs/iot/security-model.md
+    type: artifact
+    description: |
+      Device identity, secure boot, encrypted storage, key
+      provisioning, certificate rotation.
+  - path: docs/iot/power-budget.md
+    type: artifact
+    description: |
+      Per-mode current draw, battery life estimate, sleep
+      strategy. Validated on hardware before mass production.
+
+gates:
+  - name: architecture-before-prototype
+    description: |
+      docs/iot/architecture.md signed off (hardware, firmware,
+      connectivity, power, OTA) BEFORE building prototype boards.
+      Prevents "we picked the wrong MCU" rework.
+  - name: ota-tested-on-hardware
+    description: |
+      OTA update path tested on real hardware BEFORE shipping
+      pilot units. Failed OTA bricks devices in the field.
+  - name: secure-boot-implemented
+    description: |
+      Secure boot verified (signature check on firmware); no
+      unsigned firmware accepted. Required for any device that
+      can be physically accessed.
+  - name: power-budget-validated
+    description: |
+      Power budget measured on hardware, not estimated. Battery
+      life verified by integration test, not calculation.
+  - name: keys-provisioned-securely
+    description: |
+      Device keys / certificates provisioned via a secure process
+      (factory provisioning with HSM, or per-device onboarding
+      with attestation). No shared keys across devices.
+  - name: failure-mode-tested
+    description: |
+      Tested on hardware: power loss mid-write; Wi-Fi dropout;
+      battery removed; sensor disconnected; OTA interrupted.
+      Devices must recover or fail safely.
+
+context_provides:
+  - state.md
+  - docs/iot/
+
+commands_available:
+  - radiant iot <device_class> --mcu=<family> --connectivity=<list>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - security
+  - api
+  - mobile
+  - data
+
+anti_patterns:
+  - |
+    Estimating power budget by calculation. "The datasheet says
+    80mA in active mode" is not a battery-life estimate.
+    Measure on hardware with a power profiler.
+  - |
+    Untested OTA. Bricking devices in the field is a recall;
+    bricking 1M devices is a company-ending event. Test the
+    OTA path exhaustively BEFORE pilot.
+  - |
+    Shared device keys. Every device shipped with the same
+    secret = one leak compromises the fleet. Per-device keys
+    with secure provisioning.
+  - |
+    "We'll add security later". Physical devices are accessible;
+    serial ports are exposed; flash can be read. Secure boot
+    + encrypted storage + signed firmware from day 1.
+  - |
+    Skipping watchdog / brownout detection. Embedded devices
+    hang. Without a watchdog timer, a hung sensor is a
+    field-call.
+  - |
+    Storing secrets in flash without encryption. Flash can be
+    read via JTAG / SWD; secrets must be in encrypted storage
+    (Secure Element, eFuse, or encrypted flash).
+  - |
+    Ignoring duty cycle / latency budget. "Send data every
+    10ms" on a battery device = 1 week battery life. Real-time
+    by definition, but at what cost?
+
+author: radiant-harness contributors
+license: MIT

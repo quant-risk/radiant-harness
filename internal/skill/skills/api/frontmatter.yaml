@@ -1,0 +1,133 @@
+name: api
+version: 1.0.0
+description: |
+  API design and operations guidance for shipping HTTP / RPC APIs
+  with radiant. Covers REST vs GraphQL vs gRPC selection, version-
+  ing, auth, rate limiting, error responses, observability, and
+  consumer onboarding. Use this skill when the project's primary
+  deliverable is an API surface — public or internal — that other
+  systems consume over a network.
+when_to_use: |
+  Project ships an API that other systems call. The deliverable
+  is a contract (OpenAPI, GraphQL SDL, or protobuf) and a runtime
+  that honours it. APIs have different invariants from CLI tools
+  or libraries: they're long-lived, they're consumed by code you
+  don't control, and a breaking change can take months to
+  propagate.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: protocol
+    type: enum
+    required: true
+    description: '"rest" | "graphql" | "grpc" | "trpc" | "websocket" | "mixed"'
+  - name: audience
+    type: enum
+    required: true
+    description: '"public" (third-party devs) | "partner" (B2B) | "internal" (other teams in same org) | "private" (first-party only)'
+  - name: scale
+    type: enum
+    required: true
+    description: '"small" (<1k req/s) | "medium" (1k-50k) | "large" (50k-1M) | "hyperscale" (>1M)'
+  - name: data_sensitivity
+    type: enum
+    required: true
+    description: '"public" | "internal" | "pii" | "regulated" (PCI / HIPAA / financial)'
+  - name: latency_budget
+    type: number
+    required: false
+    description: p99 latency target in ms (e.g. 50, 200, 1000). Drives caching + sync strategy.
+
+outputs:
+  - path: docs/api/contract.md
+    type: artifact
+    description: |
+      The API contract: OpenAPI / GraphQL SDL / protobuf. Versioned
+      with explicit semver; breaking changes are major bumps.
+  - path: docs/api/design-rationale.md
+    type: artifact
+    description: |
+      Why REST vs GraphQL vs gRPC, why this auth model, why this
+      pagination, why this versioning scheme. Reviewed BEFORE
+      implementation.
+  - path: docs/api/operations-runbook.md
+    type: artifact
+    description: |
+      Auth, rate limits, SLOs, observability (metrics, traces,
+      logs), incident response, deprecation policy.
+
+gates:
+  - name: contract-versioned
+    description: |
+      The contract has a version field in every response, and a
+      published deprecation timeline. Consumers can pin to a
+      version and migrate on their schedule.
+  - name: error-shape-stable
+    description: |
+      Errors follow a documented shape (code, message, details,
+      request_id). Consumers can parse errors programmatically;
+      the shape doesn't change between versions.
+  - name: auth-decided-before-publish
+    description: |
+      Authentication and authorization model decided BEFORE the
+      API is published. Changing auth on a live API is a breaking
+      change for every consumer.
+  - name: rate-limit-defined
+    description: |
+      Rate limits documented per endpoint class + per consumer
+      tier. Limits are enforced server-side, not just documented.
+  - name: observability-instrumented
+    description: |
+      Every endpoint emits: latency (p50/p95/p99), error rate,
+      request count, request ID. Distributed tracing propagated
+      to downstream calls. Logs structured (JSON) with request_id.
+  - name: deprecation-policy-published
+    description: |
+      Public APIs publish a deprecation timeline: minimum 6 months
+      notice for breaking changes, with a migration guide and a
+      sunset date.
+
+context_provides:
+  - state.md
+  - docs/api/
+
+commands_available:
+  - radiant api <protocol> --audience=<public|partner|internal>
+
+related_skills:
+  - kickoff
+  - roadmap
+  - security
+  - observability
+  - evals
+
+anti_patterns:
+  - |
+    Versioning via URL path with no contract (e.g. /v1, /v2)
+    without an OpenAPI spec per version. You end up with
+    undocumented behaviour consumers depend on.
+  - |
+    Error responses as free-form strings. "Something went wrong"
+    forces every consumer to write string-matching code. Use a
+    stable error shape with codes.
+  - |
+    No rate limits documented or enforced. A single bad consumer
+    (or a successful launch) takes down the API. Limits must be
+    enforced server-side.
+  - |
+    Breaking changes without a deprecation timeline. Removing
+    a field "because nobody uses it" breaks every consumer that
+    does. Deprecate → 6 months → sunset.
+  - |
+    Auth designed after the API ships. Cookies vs OAuth vs mTLS
+    vs API keys all have different consumer ergonomics and
+    different migration costs. Decide first.
+  - |
+    Logging the request body or auth headers. PII, secrets, and
+    PHI in logs is a compliance incident. Log request_id +
+    endpoint + status + latency; redact the rest.
+
+author: radiant-harness contributors
+license: MIT
