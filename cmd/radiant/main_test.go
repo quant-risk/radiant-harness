@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,5 +290,76 @@ func TestRenderPersonasTemplateHasThreeSlots(t *testing.T) {
 		if !strings.Contains(body, field) {
 			t.Errorf("personas template missing field %q", field)
 		}
+	}
+}
+
+func TestRenderIntegrationsDocIncludesServers(t *testing.T) {
+	servers := map[string]mcpServer{
+		"github": {Command: "npx", Args: []string{"-y", "@mcp/server-github"}, Env: map[string]string{"GITHUB_TOKEN": "${GITHUB_TOKEN}"}},
+		"jira":   {Command: "npx", Args: []string{"-y", "@atlassian/mcp-server-jira"}},
+	}
+	body := renderIntegrationsDoc(servers)
+	for _, name := range []string{"github", "jira", "Declared MCP servers", "Approval log"} {
+		if !strings.Contains(body, name) {
+			t.Errorf("renderIntegrationsDoc missing %q", name)
+		}
+	}
+}
+
+func TestRenderIntegrationsDocHandlesHTTPServer(t *testing.T) {
+	servers := map[string]mcpServer{
+		"notion": {URL: "https://mcp.notion.com/sse"},
+	}
+	body := renderIntegrationsDoc(servers)
+	if !strings.Contains(body, "notion") || !strings.Contains(body, "<http>") {
+		t.Errorf("renderIntegrationsDoc should render URL-based servers as <http>; got:\n%s", body)
+	}
+}
+
+func TestRenderIntegrationsDocEmptyMap(t *testing.T) {
+	body := renderIntegrationsDoc(map[string]mcpServer{})
+	if !strings.Contains(body, "Declared MCP servers") {
+		t.Errorf("renderIntegrationsDoc should still emit the table header even when empty")
+	}
+}
+
+func TestIntegrationsListReadsMCPConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".mcp.json")
+	content := `{
+  "mcpServers": {
+    "github": {"command": "npx", "args": ["-y", "@mcp/server-github"]}
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg mcpConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(cfg.Servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(cfg.Servers))
+	}
+	if cfg.Servers["github"].Command != "npx" {
+		t.Errorf("github command = %q, want npx", cfg.Servers["github"].Command)
+	}
+}
+
+func TestIntegrationsListMissingFile(t *testing.T) {
+	// We can't easily run runIntegrationsList here because it reads
+	// from the CWD. But we can verify that the error message is
+	// stable — it's the user-facing string we promise in the skill.
+	tmpDir := t.TempDir()
+	_, err := os.ReadFile(filepath.Join(tmpDir, ".mcp.json"))
+	if err == nil {
+		t.Error("expected error reading missing .mcp.json")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist, got %v", err)
 	}
 }

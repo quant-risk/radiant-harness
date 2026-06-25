@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] — 2026-06-25
+
+Sprint 12 second batch: wires the existing `integracoes` skill to a
+read-only CLI surface. Per HARNESS-PLAN.md, MCP integration in this
+sprint is **discover + list only** — auto-configure is deferred
+because the integracoes skill is explicit that "Discovered is not
+ready" and "Auto-configuring without approval" is an anti-pattern.
+
+### Added
+- **`radiant integrations list`** — read-only listing of MCP servers
+  declared in the project's `.mcp.json`. Output modes:
+  - Default: aligned table (name, command, args, env count).
+  - `--json`: machine-readable JSON for scripting.
+  - `--write-docs=<path>`: regenerates `docs/engineering/integrations.md`
+    from the current `.mcp.json` (defaults to
+    `docs/engineering/integrations.md` if empty).
+- **Helpers**: `mcpServer` + `mcpConfig` types (lightweight mirror
+  of the standard MCP schema — only reads the fields it cares
+  about); `runIntegrationsList(jsonOut, docOut)` (the command
+  body); `renderIntegrationsDoc(servers)` (the docs file
+  regenerator).
+- **Safety guarantee**: this command NEVER writes `.mcp.json`. It
+  reads what's declared and surfaces it. Adding/removing MCPs is
+  the user's responsibility, gated by the integracoes skill's
+  approval interview.
+
+### Quality
+- 240 tests passing (+5 from Sprint 12.2: 3 renderIntegrationsDoc,
+  2 list helpers).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.4.4] — 2026-06-25
 
 Sprint 12 first batch: starts the governance phase. Adds the

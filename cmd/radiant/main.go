@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.4"
+var version = "0.4.5"
 
 func main() {
 	root := &cobra.Command{
@@ -714,6 +714,30 @@ func main() {
 	productCmd.Flags().Int("mvp-weeks", 8, "target weeks to MVP (drives the When phase)")
 	root.AddCommand(productCmd)
 
+	// ── integrations (Sprint 12.2 — MCP discovery, read-only) ──
+	// `radiant integrations list` reads the project's `.mcp.json`
+	// (per the integracoes skill — NEVER auto-writes; the user/agent
+	// must approve each MCP via the skill first). The skill is
+	// explicit: "Discovered is not ready." This command is the
+	// READ-ONLY half: surface what's already declared.
+	integrationsCmd := &cobra.Command{
+		Use:   "integrations",
+		Short: "Manage declared MCP integrations (read-only listing; never auto-configures)",
+	}
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List MCP servers declared in the project's .mcp.json",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			jsonOut, _ := cmd.Flags().GetBool("json")
+			docOut, _ := cmd.Flags().GetString("write-docs")
+			return runIntegrationsList(jsonOut, docOut)
+		},
+	}
+	listCmd.Flags().Bool("json", false, "machine-readable JSON output")
+	listCmd.Flags().String("write-docs", "", "also write docs/engineering/integrations.md from current MCPs (pass empty for default path)")
+	integrationsCmd.AddCommand(listCmd)
+	root.AddCommand(integrationsCmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1252,6 +1276,147 @@ func nextADRSequence(adrDir string) (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// mcpServer mirrors the standard .mcp.json schema. We only care
+// about a few fields (name/command/args/env) — the rest is ignored.
+// Keeping this lightweight means a user can paste a real .mcp.json
+// from any MCP-aware tool and we just read what's relevant.
+type mcpServer struct {
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Notes   string            `json:"notes,omitempty"`
+}
+
+type mcpConfig struct {
+	Servers map[string]mcpServer `json:"mcpServers"`
+}
+
+// runIntegrationsList reads the project's .mcp.json and either
+// prints a table (default) or emits JSON. Optionally writes the
+// canonical docs/engineering/integrations.md from the same data.
+//
+// Per the integracoes skill, this command NEVER writes .mcp.json.
+// The user/agent must approve each MCP entry via the skill first.
+// We only surface what's already declared.
+func runIntegrationsList(jsonOut bool, docOut string) error {
+	cfgPath := ".mcp.json"
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no %s found — invoke the /integracoes skill (or run `radiant init --all`) to declare MCPs", cfgPath)
+		}
+		return fmt.Errorf("read %s: %w", cfgPath, err)
+	}
+
+	var cfg mcpConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse %s: %w", cfgPath, err)
+	}
+	if len(cfg.Servers) == 0 {
+		fmt.Println("  (no MCP servers declared in .mcp.json)")
+		return nil
+	}
+
+	// Sort by name for stable output.
+	names := make([]string, 0, len(cfg.Servers))
+	for n := range cfg.Servers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(cfg.Servers)
+	}
+
+	// Table output.
+	fmt.Printf("  MCP servers declared in %s (%d):\n\n", cfgPath, len(names))
+	fmt.Printf("    %-20s %-12s %-32s %s\n", "NAME", "COMMAND", "ARGS (truncated)", "ENV")
+	fmt.Printf("    %-20s %-12s %-32s %s\n", "----", "-------", "--------------", "---")
+	for _, name := range names {
+		s := cfg.Servers[name]
+		args := strings.Join(s.Args, " ")
+		if len(args) > 32 {
+			args = args[:29] + "..."
+		}
+		if args == "" {
+			args = "(none)"
+		}
+		cmd := s.Command
+		if cmd == "" && s.URL != "" {
+			cmd = "<http>"
+		}
+		if cmd == "" {
+			cmd = "?"
+		}
+		fmt.Printf("    %-20s %-12s %-32s %d vars\n", name, cmd, args, len(s.Env))
+	}
+
+	fmt.Printf("\n  To validate an MCP, invoke the /integracoes skill.\n")
+	fmt.Printf("  To approve and persist a new MCP, edit .mcp.json manually — this command never writes it.\n")
+
+	if docOut != "" {
+		body := renderIntegrationsDoc(cfg.Servers)
+		if err := os.MkdirAll(filepath.Dir(docOut), 0o755); err != nil {
+			return err
+		}
+		if err := atomicWrite(docOut, body); err != nil {
+			return fmt.Errorf("write %s: %w", docOut, err)
+		}
+		fmt.Printf("\n  ✓ wrote %s\n", docOut)
+	}
+	return nil
+}
+
+// renderIntegrationsDoc produces the canonical
+// docs/engineering/integrations.md content from the current
+// .mcp.json. This is what the integracoes skill writes — we're
+// just regenerating from data we can read.
+func renderIntegrationsDoc(servers map[string]mcpServer) string {
+	var b strings.Builder
+	b.WriteString("# Integrations and MCPs\n\n")
+	b.WriteString("> Auto-generated by `radiant integrations list --write-docs` from\n")
+	b.WriteString("> the project's `.mcp.json`. Per the integracoes skill, MCPs are\n")
+	b.WriteString("> only listed here AFTER explicit approval — see the skill for the\n")
+	b.WriteString("> approval flow.\n\n")
+
+	b.WriteString("## Declared MCP servers\n\n")
+	b.WriteString("| Name | Command | Args | Env vars |\n")
+	b.WriteString("|------|---------|------|----------|\n")
+
+	names := make([]string, 0, len(servers))
+	for n := range servers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		s := servers[name]
+		cmd := s.Command
+		if cmd == "" && s.URL != "" {
+			cmd = "<http>"
+		}
+		args := strings.Join(s.Args, " ")
+		if args == "" {
+			args = "—"
+		}
+		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %d |\n", name, cmd, args, len(s.Env))
+	}
+
+	b.WriteString("\n## How to connect\n\n")
+	b.WriteString("- **Project-scoped:** `.mcp.json` at repo root — shareable with team. **No secrets.**\n")
+	b.WriteString("- **Secrets:** via env var or the relevant MCP CLI (`claude mcp add`, etc.). **Never** commit tokens.\n")
+	b.WriteString("\n## Approval log\n\n")
+	b.WriteString("Add a row each time an MCP is approved (use the integracoes skill for the\n")
+	b.WriteString("full interview — never skip the account-boundary step).\n\n")
+	b.WriteString("| Date | MCP | Account/workspace | Approved by |\n")
+	b.WriteString("|------|-----|-------------------|-------------|\n")
+	b.WriteString("| _    | _   | _                 | _           |\n")
+	return b.String()
 }
 
 // renderInception produces the 6-phase Lean Inception template.
