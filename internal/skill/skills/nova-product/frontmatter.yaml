@@ -1,0 +1,115 @@
+name: nova-product
+version: 1.0.0
+description: |
+  Starts a new product through the Lean Inception: scaffolds
+  docs/product/inception.md with all 6 phase templates (Why/What/
+  Who/How/When/Where), drives the user through them one at a time,
+  and emits an actionable MVP scope at the end. Reads state.md and
+  glossary.md before any action so context carries over from any
+  prior session.
+when_to_use: |
+  The user wants to start a new product, validate a new product
+  idea, or re-scope an existing one. The output is a 6-phase
+  inception document that aligns the team before any code is
+  written. Use this BEFORE nova-feature for greenfield products.
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+
+inputs:
+  - name: vision
+    type: string
+    required: true
+    description: |
+      The product idea in 1-3 sentences. Specific enough that the
+      Why/What/Who phases make sense; vague enough that MVP
+      scope is still an open question.
+  - name: context
+    type: string
+    required: false
+    description: |
+      Optional background: existing codebase, team size, market
+      timing, constraints, stakeholders already engaged.
+  - name: mvp_weeks
+    type: number
+    required: false
+    description: |
+      Target weeks to MVP. Drives the "When" phase: how much can
+      realistically fit before MVP cut-off. Default: 8.
+
+outputs:
+  - path: docs/product/inception.md
+    type: artifact
+    description: |
+      Lean Inception document with 6 phases: Why, What, Who, How,
+      When, Where. Each phase has worked-example placeholders plus
+      an MVP cut at the end.
+  - path: docs/product/personas.md
+    type: artifact
+    description: |
+      Persona profiles derived from the Who phase. One paragraph
+      per persona: role, goal, pain, jobs-to-be-done.
+
+gates:
+  - name: vision-clear
+    description: |
+      The vision is answerable as "we help <persona> do <job>
+      better than <alternative>". A vision that can't fill this
+      template needs /clarificar.
+    on_failure: |
+      Ask the user 1-2 questions about the persona and the
+      alternative they're replacing. Do NOT default to a generic
+      "productivity" framing.
+
+  - name: scope-triaged
+    description: |
+      Every feature in the What phase is tagged MVP / Growth /
+      Vision. Nothing sits untagged — untagged features ship by
+      accident.
+    on_failure: |
+      Walk the user through each feature. Default to MVP for
+      the smallest possible cut; promote to Growth or Vision if
+      the user can't articulate how it would be the first thing
+      a new user needs.
+
+  - name: mvp-cut
+    description: |
+      The MVP section lists 3-7 features maximum. Anything more
+      is not MVP.
+    on_failure: |
+      Force-rank. Cut the bottom half. The MVP that ships is
+      better than the MVP that doesn't.
+
+context_provides:
+  - state.md
+  - glossary.md
+  - docs/architecture/context-map.md
+
+commands_available:
+  - radiant product <vision>
+
+related_skills:
+  - nova-feature
+  - clarificar
+  - kickoff
+  - roadmap
+
+anti_patterns:
+  - |
+    Starting with What before Why. You can't triage scope
+    without knowing the problem. Always start at Why.
+  - |
+    Producing a vision that fits on a t-shirt but says nothing.
+    "Make the world more productive" is not a vision. The
+    vision must name a specific persona and a specific job.
+  - |
+    Letting the MVP scope grow to 15+ features. That is not an
+    MVP — it's a release. Force-rank and cut.
+  - |
+    Skipping the personas.md output. Personas are the only
+    reason the team builds the right thing instead of the
+    spec-listed thing.
+
+author: radiant-harness contributors
+license: MIT

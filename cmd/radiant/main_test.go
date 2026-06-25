@@ -248,3 +248,46 @@ func TestRenderDiagramHasC4Directives(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderInceptionIncludesAllPhases(t *testing.T) {
+	body := renderInception("api-obs", "API observability for small dev teams", 6)
+	for _, phase := range []string{"## 1. Why", "## 2. What", "## 4. Who", "## 5. How", "## 6. When", "## 7. Where", "MVP cut"} {
+		if !strings.Contains(body, phase) {
+			t.Errorf("renderInception missing %q", phase)
+		}
+	}
+}
+
+func TestRenderInceptionIncludesVision(t *testing.T) {
+	body := renderInception("slug", "Help engineers debug latency", 8)
+	if !strings.Contains(body, "Help engineers debug latency") {
+		t.Error("renderInception should embed the supplied vision string")
+	}
+}
+
+func TestRenderInceptionRespectsMVPWeeks(t *testing.T) {
+	body := renderInception("slug", "v", 12)
+	if !strings.Contains(body, "**12 weeks**") {
+		t.Errorf("renderInception should embed the supplied mvp-weeks; got:\n%s", body)
+	}
+}
+
+func TestRenderInceptionReferencesNovaProduct(t *testing.T) {
+	body := renderInception("slug", "v", 8)
+	if !strings.Contains(body, "nova-product") {
+		t.Errorf("renderInception should reference the nova-product skill")
+	}
+}
+
+func TestRenderPersonasTemplateHasThreeSlots(t *testing.T) {
+	body := renderPersonasTemplate()
+	count := strings.Count(body, "## <Persona name>")
+	if count < 2 || count > 4 {
+		t.Errorf("personas template should have 2-4 slots (nova-product skill says so); got %d", count)
+	}
+	for _, field := range []string{"Job to be done", "Pain today", "Success looks like"} {
+		if !strings.Contains(body, field) {
+			t.Errorf("personas template missing field %q", field)
+		}
+	}
+}

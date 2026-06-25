@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-06-25
+
+Sprint 12 first batch: starts the governance phase. Adds the
+Lean Inception product discovery flow + the canonical `nova-product`
+skill that any agent can invoke.
+
+### Added
+- **`nova-product` skill** — Lean Inception top-of-line. 6 phases
+  (Why / What / Who / How / When / Where) with gates
+  (`vision-clear`, `scope-triaged`, `mvp-cut`), input
+  `mvp_weeks` (number), output `docs/product/inception.md` +
+  `docs/product/personas.md`. Powers `radiant product`.
+- **`radiant product "<vision>" [--mvp-weeks=N]`** — scaffolds
+  `docs/product/inception.md` (full 6-phase template) and
+  `docs/product/personas.md` (3 persona slots). Output is
+  template-only; the agent (or user) walks each phase one at a
+  time following the nova-product skill. Default MVP target is
+  8 weeks; override per invocation.
+- **Helpers**: `renderInception(slug, vision, mvpWeeks)` (the full
+  template body), `renderPersonasTemplate()` (the personas.md
+  starter with 3 slots). Both atomic-write-friendly.
+
+### Quality
+- 235 tests passing (+5 from Sprint 12: 4 inception, 1 personas).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+- `TestAllBundledSkillsValidateCleanly` still passes with the new
+  17th skill (nova-product). One round-trip fix: input type was
+  `int` (not in the schema's allowed set `string|number|enum|object|path`)
+  — corrected to `number`.
+
 ## [0.4.3] — 2026-06-25
 
 Sprint 11: completes the discovery phase of the methodology merge.
