@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.6.0] — 2026-06-25
 
+**Released via `radiant release v0.6.0`** — the first dogfood run
+of the release command shipped in Sprint 14.1. Pipeline ran
+end-to-end: pre-flight → version validation → tag check → quality
+gates → version bump → cross-compile (6/6 targets) → commit → tag.
+
 Sprint 14 (post-merge): four new commands + an MCP server. Closes
 the entire post-merge roadmap.
 
