@@ -363,3 +363,146 @@ func TestIntegrationsListMissingFile(t *testing.T) {
 		t.Errorf("expected os.IsNotExist, got %v", err)
 	}
 }
+
+func TestParseAcceptanceCriteriaBasic(t *testing.T) {
+	spec := `# 0001
+
+## Acceptance criteria
+
+### AC1: valid login returns a JWT
+- Given ...
+- When ...
+- Then ...
+
+### AC2: invalid login returns 401
+- Given wrong password
+- When POST /auth/login
+- Then response is 401
+`
+	acs := parseAcceptanceCriteria(spec)
+	if len(acs) != 2 {
+		t.Fatalf("expected 2 ACs, got %d", len(acs))
+	}
+	if acs[0].ID != "AC1" {
+		t.Errorf("first AC id = %q, want AC1", acs[0].ID)
+	}
+	if acs[1].ID != "AC2" {
+		t.Errorf("second AC id = %q, want AC2", acs[1].ID)
+	}
+	if !strings.Contains(acs[0].Title, "valid login") {
+		t.Errorf("first AC title missing expected text: %q", acs[0].Title)
+	}
+}
+
+func TestParseAcceptanceCriteriaEmpty(t *testing.T) {
+	acs := parseAcceptanceCriteria("# 0001\n\n## Why\n\nfoo\n")
+	if len(acs) != 0 {
+		t.Errorf("expected 0 ACs (no ### AC headers), got %d", len(acs))
+	}
+}
+
+func TestParseAcceptanceCriteriaCaseInsensitive(t *testing.T) {
+	spec := "### ac1: lowercase header\n"
+	acs := parseAcceptanceCriteria(spec)
+	if len(acs) != 1 || acs[0].ID != "AC1" {
+		t.Errorf("expected AC1 (uppercased), got id=%q len=%d", acs[0].ID, len(acs))
+	}
+}
+
+func TestParseGatesFromTasks(t *testing.T) {
+	tasks := `| # | Task | Covers | Gate |
+|---|------|--------|------|
+| 1 | Add lib | AC1 | ` + "`go build ./...`" + ` |
+| 2 | Tests | AC1, AC2 | ` + "`go test ./...`" + ` |
+| 3 | Docs | AC3 | — |
+`
+	gates := parseGatesFromTasks(tasks)
+	if len(gates) != 2 {
+		t.Fatalf("expected 2 gates, got %d: %v", len(gates), gates)
+	}
+	if gates[0] != "go build ./..." {
+		t.Errorf("gate[0] = %q, want go build ./...", gates[0])
+	}
+	if gates[1] != "go test ./..." {
+		t.Errorf("gate[1] = %q, want go test ./...", gates[1])
+	}
+}
+
+func TestParseGatesFromTasksEmpty(t *testing.T) {
+	if gates := parseGatesFromTasks("# tasks\n\nno table here\n"); len(gates) != 0 {
+		t.Errorf("expected 0 gates from no-table input, got %d", len(gates))
+	}
+}
+
+func TestCountDiffFiles(t *testing.T) {
+	diff := `diff --git a/a.go b/a.go
+--- a/a.go
++++ b/a.go
+@@ -1 +1 @@
+-old
++new
+diff --git a/b.go b/b.go
+--- a/b.go
++++ b/b.go
+@@ -1 +1 @@
+-x
++y
+`
+	if n := countDiffFiles(diff); n != 2 {
+		t.Errorf("countDiffFiles = %d, want 2", n)
+	}
+}
+
+func TestRenderPRReviewIncludesSections(t *testing.T) {
+	acs := []acceptanceCriterion{
+		{ID: "AC1", Title: "valid login"},
+		{ID: "AC2", Title: "invalid login"},
+	}
+	gates := []string{"go test ./..."}
+	body := renderPRReview("0007-jwt", acs, gates, nil, "", struct {
+		Lines int
+		Files int
+	}{})
+	for _, want := range []string{
+		"# PR review: 0007-jwt",
+		"## Summary",
+		"## Recommendation",
+		"## AC coverage",
+		"## Gate results",
+		"## SPEC_DEVIATION",
+		"AC1", "AC2",
+		"revisar-pr", // skill name appears in footer
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("renderPRReview missing %q", want)
+		}
+	}
+}
+
+func TestRenderPRReviewGatePassFail(t *testing.T) {
+	gates := []string{"true", "false"}
+	results := []gateResult{
+		{Name: "true", Passed: true},
+		{Name: "false", Passed: false, Err: "exit code 1"},
+	}
+	body := renderPRReview("0001", nil, gates, results, "", struct {
+		Lines int
+		Files int
+	}{})
+	if !strings.Contains(body, "✓ pass") {
+		t.Error("renderPRReview should mark 'true' as ✓ pass")
+	}
+	if !strings.Contains(body, "✗ fail") {
+		t.Error("renderPRReview should mark 'false' as ✗ fail")
+	}
+}
+
+func TestRenderPRReviewWithDiffStats(t *testing.T) {
+	body := renderPRReview("0001", nil, nil, nil, "changes.diff", struct {
+		Lines int
+		Files int
+	}{Lines: 42, Files: 3})
+	if !strings.Contains(body, "3 files, 42 lines") {
+		t.Errorf("renderPRReview should embed diff stats; got:\n%s", body)
+	}
+}

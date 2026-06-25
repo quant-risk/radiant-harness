@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] — 2026-06-25
+
+Sprint 13 second batch: wires the existing `revisar-pr` skill to a
+reproducible CLI scaffold. Per HARNESS-PLAN.md, this is the second
+half of the PR + multi-agent views phase.
+
+### Added
+- **`radiant review-pr <spec-path> [--diff=...] [--run-gates]
+  [-o output]`** — generates `<spec-path>/pr-review.md` from the
+  spec's ACs + tasks' gates. The MVP is template-based: it parses
+  `spec.md` for ACs (via `### AC<n>` headers), parses `tasks.md`
+  for gates (backticked commands in the Gate column), optionally
+  executes each gate (`--run-gates`), and emits a structured
+  report with:
+  - Summary table (AC count, gate count, gate pass/fail, diff stats)
+  - Recommendation checklist (Approve / Request changes / Spec revision)
+  - AC coverage table (TODOs for LLM to fill via the `revisar-pr` skill)
+  - Gate results table (✓ pass / ✗ fail with output excerpt)
+  - SPEC_DEVIATION template (for LLM to document divergences)
+  - Suggested PR comment (copy-paste ready)
+- **Helpers**: `parseAcceptanceCriteria(specMD)`, `parseGatesFromTasks
+  (tasksMD)`, `countDiffFiles(diff)`, `renderPRReview(slug, acs, gates,
+  results, diffPath, diffStats)`.
+- **Type**: `acceptanceCriterion{ID, Title, Body}` + `gateResult
+  {Name, Passed, Err}`.
+
+### Quality
+- 254 tests passing (+9 from Sprint 13.2: 3 AC parser, 2 gate
+  parser, 1 diff count, 3 renderPRReview).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
 ## [0.4.6] — 2026-06-25
 
 Sprint 13 first batch: native agent views opt-in without re-running
