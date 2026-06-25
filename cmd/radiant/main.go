@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.9"
+var version = "0.5.0"
 
 func main() {
 	root := &cobra.Command{
@@ -870,6 +870,31 @@ func main() {
 	camadaCmd.Flags().Bool("fix", false, "regenerate AGENTS.md from current bundled skills (does NOT overwrite native views)")
 	root.AddCommand(camadaCmd)
 
+	// ── evals (Sprint 13.5 — AC→test coverage metrics) ──
+	// `radiant evals [--scope=all|since-last-release|<spec-path>]
+	// [--output=...]` walks specs/, parses ACs from each spec.md,
+	// reads tasks.md coverage claims, and produces
+	// `docs/evals-report.md` with per-feature fidelity scores.
+	// The MVP computes "claimed coverage" (does tasks.md list this
+	// AC?). The LLM (via the evals skill) does the real verification
+	// (does the test actually pass + does it cover the AC's
+	// Given/When/Then?).
+	evalsCmd := &cobra.Command{
+		Use:   "evals",
+		Short: "Measure AC→test coverage (fidelity) across all specs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, _ := cmd.Flags().GetString("scope")
+			outPath, _ := cmd.Flags().GetString("output")
+			if outPath == "" {
+				outPath = "docs/evals-report.md"
+			}
+			return runEvals(scope, outPath)
+		},
+	}
+	evalsCmd.Flags().String("scope", "all", "scope: all | since-last-release | <spec-path>")
+	evalsCmd.Flags().StringP("output", "o", "", "output path (default: docs/evals-report.md)")
+	root.AddCommand(evalsCmd)
+
 	// ── update (Sprint 11 — refresh skills preserving user work) ──
 	// `radiant update` compares the bundled skill versions with the
 	// project's installed versions and updates only those that have
@@ -1408,6 +1433,205 @@ func nextADRSequence(adrDir string) (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// featureCoverage is one row in the evals-report.md table — the
+// per-feature fidelity snapshot.
+type featureCoverage struct {
+	Slug      string
+	Total     int      // total ACs
+	Covered   int      // ACs claimed in tasks.md coverage
+	Uncovered []string // AC IDs not covered
+	Score     float64  // covered / total (0..1)
+}
+
+// runEvals walks specs/ in scope, parses ACs + tasks coverage,
+// and writes a fidelity report. MVP scope = "all" only; the
+// "since-last-release" half requires git-state awareness
+// (deferred; documented as future work in the report).
+func runEvals(scope, outPath string) error {
+	specsDir := "specs"
+	entries, err := os.ReadDir(specsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no %s directory found — initialize with `radiant init` or `radiant spec`", specsDir)
+		}
+		return fmt.Errorf("read %s: %w", specsDir, err)
+	}
+
+	var coverages []featureCoverage
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "_templates" || e.Name() == "quick" {
+			continue
+		}
+		slug := e.Name()
+		feat, err := computeFeatureCoverage(filepath.Join(specsDir, slug))
+		if err != nil {
+			fmt.Printf("  [skip] %s: %v\n", slug, err)
+			continue
+		}
+		coverages = append(coverages, feat)
+	}
+
+	if len(coverages) == 0 {
+		fmt.Println("  (no features found in specs/)")
+		return nil
+	}
+
+	// Sort by score ascending so worst-covered features surface first.
+	sort.Slice(coverages, func(i, j int) bool {
+		return coverages[i].Score < coverages[j].Score
+	})
+
+	body := renderEvalsReport(scope, coverages)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if err := atomicWrite(outPath, body); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
+	}
+
+	// Stdout summary
+	totalACs := 0
+	totalCovered := 0
+	for _, c := range coverages {
+		totalACs += c.Total
+		totalCovered += c.Covered
+	}
+	overall := 0.0
+	if totalACs > 0 {
+		overall = float64(totalCovered) / float64(totalACs)
+	}
+
+	fmt.Printf("  ✓ wrote %s\n", outPath)
+	fmt.Printf("\n  Features: %d\n", len(coverages))
+	fmt.Printf("  ACs: %d total, %d claimed-covered (%.0f%%)\n",
+		totalACs, totalCovered, overall*100)
+	fmt.Printf("\n  Per-feature scores (worst first):\n")
+	for _, c := range coverages {
+		fmt.Printf("    %s — %d/%d (%.0f%%)\n",
+			c.Slug, c.Covered, c.Total, c.Score*100)
+	}
+	if overall < 0.8 {
+		fmt.Printf("\n  ⚠ fidelity below 80%% — review uncovered ACs above\n")
+	} else if overall >= 1.0 {
+		fmt.Printf("\n  ✓ 100%% fidelity — every AC claimed in tasks.md\n")
+	}
+	return nil
+}
+
+// computeFeatureCoverage parses one spec dir's spec.md + tasks.md
+// and returns the coverage snapshot. Coverage = "the AC ID appears
+// in at least one task's Coverage column" — i.e. is CLAIMED to
+// be covered. The LLM via the evals skill does the real verification.
+func computeFeatureCoverage(specDir string) (featureCoverage, error) {
+	specMD, err := os.ReadFile(filepath.Join(specDir, "spec.md"))
+	if err != nil {
+		return featureCoverage{}, err
+	}
+	tasksMD, err := os.ReadFile(filepath.Join(specDir, "tasks.md"))
+	if err != nil {
+		// tasks.md missing = 0 coverage (the spec was never decomposed).
+		tasksMD = []byte{}
+	}
+
+	acs := parseAcceptanceCriteria(string(specMD))
+	if len(acs) == 0 {
+		return featureCoverage{}, fmt.Errorf("no ACs found")
+	}
+
+	tasksBody := string(tasksMD)
+	coveredSet := map[string]bool{}
+	for _, ac := range acs {
+		// Check if AC ID appears anywhere in tasks.md (the
+		// Coverage column references ACs by ID).
+		if strings.Contains(tasksBody, ac.ID) {
+			coveredSet[ac.ID] = true
+		}
+	}
+
+	var uncovered []string
+	for _, ac := range acs {
+		if !coveredSet[ac.ID] {
+			uncovered = append(uncovered, ac.ID)
+		}
+	}
+
+	slug := filepath.Base(specDir)
+	score := float64(len(coveredSet)) / float64(len(acs))
+	return featureCoverage{
+		Slug:      slug,
+		Total:     len(acs),
+		Covered:   len(coveredSet),
+		Uncovered: uncovered,
+		Score:     score,
+	}, nil
+}
+
+// renderEvalsReport produces the docs/evals-report.md content.
+// Per the evals skill, the report MUST cite evidence per claim —
+// for the MVP we cite spec.md:line / tasks.md:line as evidence.
+// The LLM (via the skill) is responsible for filling in
+// implementation evidence (file:line of the actual code).
+func renderEvalsReport(scope string, coverages []featureCoverage) string {
+	totalACs := 0
+	totalCovered := 0
+	for _, c := range coverages {
+		totalACs += c.Total
+		totalCovered += c.Covered
+	}
+	overall := 0.0
+	if totalACs > 0 {
+		overall = float64(totalCovered) / float64(totalACs)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Evals: %s\n\n", scope)
+	fmt.Fprintf(&b, "> Generated by `radiant evals --scope=%s`. Per-AC\n", scope)
+	b.WriteString("> evidence (file:line of implementing code) is filled in\n")
+	b.WriteString("> by the LLM via the `evals` skill — the table below shows\n")
+	b.WriteString("> the **claimed** coverage from tasks.md. The skill's job\n")
+	b.WriteString("> is to verify each claim against actual code + test runs.\n\n")
+
+	// Summary
+	b.WriteString("## Summary\n\n")
+	b.WriteString("| Metric | Value |\n")
+	b.WriteString("|--------|-------|\n")
+	fmt.Fprintf(&b, "| Features in scope | %d |\n", len(coverages))
+	fmt.Fprintf(&b, "| Total ACs | %d |\n", totalACs)
+	fmt.Fprintf(&b, "| Claimed-covered ACs | %d |\n", totalCovered)
+	fmt.Fprintf(&b, "| Aggregate fidelity | **%.1f%%** |\n\n", overall*100)
+
+	// Per-feature
+	b.WriteString("## Per-feature fidelity\n\n")
+	b.WriteString("| Feature | ACs | Covered | Score | Uncovered |\n")
+	b.WriteString("|---------|-----|---------|-------|-----------|\n")
+	for _, c := range coverages {
+		uncovered := strings.Join(c.Uncovered, ", ")
+		if uncovered == "" {
+			uncovered = "—"
+		}
+		fmt.Fprintf(&b, "| %s | %d | %d | %.0f%% | %s |\n",
+			c.Slug, c.Total, c.Covered, c.Score*100, uncovered)
+	}
+	b.WriteString("\n")
+
+	// Per-AC detail (per-feature)
+	b.WriteString("## AC-level detail\n\n")
+	for _, c := range coverages {
+		fmt.Fprintf(&b, "### %s\n\n", c.Slug)
+		b.WriteString("| AC | Claimed covered | Evidence |\n")
+		b.WriteString("|----|-----------------|----------|\n")
+		b.WriteString("| _per AC_ | _TODO_ | _TODO (file:line of implementing code)_ |\n")
+		b.WriteString("\n> Each TODO above is filled in by the LLM via the\n")
+		b.WriteString("> `evals` skill: trace the AC's Given/When/Then to a test\n")
+		b.WriteString("> that asserts it, and cite the file:line.\n\n")
+	}
+
+	// Footer
+	b.WriteString("---\n\n")
+	b.WriteString("_Generated by `radiant evals`. Re-run after every release; fidelity drifts._\n")
+	return b.String()
 }
 
 // runCamadaAgentica audits the project's agentic layer:

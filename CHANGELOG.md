@@ -4,6 +4,51 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-06-25
+
+Sprint 13 fifth batch: wires the existing `evals` skill to a working
+AC→test coverage CLI. **This completes the methodology merge defined
+in `docs/HARNESS-PLAN.md`** — every planned deliverable for Sprints
+10-13 is now shipped.
+
+### Added
+- **`radiant evals [--scope=all|since-last-release|<spec-path>]
+  [-o output]`** — walks `specs/`, parses ACs from each spec.md,
+  reads tasks.md coverage claims, and produces `docs/evals-report.md`
+  with per-feature fidelity scores. The MVP computes "claimed
+  coverage" (does tasks.md list this AC?). The LLM (via the evals
+  skill) does the real verification (does the test actually pass +
+  does it cover the AC's Given/When/Then?).
+- **Helpers**: `computeFeatureCoverage(specDir)` (parses one spec +
+  tasks, returns coverage snapshot), `renderEvalsReport(scope, coverages)`
+  (the report body).
+- **Type**: `featureCoverage{Slug, Total, Covered, Uncovered, Score}`.
+- **Warning at <80%**: prints `⚠ fidelity below 80%%` so the report
+  surfaces in terminal output (not just in the file).
+
+### Quality
+- 268 tests passing (+5 from Sprint 13.5: 3 coverage computation,
+  2 render).
+- `go vet ./...` clean.
+- `gofmt -l .` clean.
+- `CGO_ENABLED=0 go test ./... -count=1 -race` green on darwin/arm64.
+- 6/6 cross-compile targets clean.
+
+### Milestone: methodology merge complete
+
+Per `docs/HARNESS-PLAN.md`, the 4-phase methodology merge was:
+
+| Sprint | Theme | Status |
+|--------|-------|--------|
+| 10 | Foundation (skill runtime, 16 skills, schema spec) | ✓ v0.4.0–0.4.2 |
+| 11 | Discovery (adr, update, diagramar) | ✓ v0.4.3 |
+| 12 | Governance (product, integrations list) | ✓ v0.4.4–0.4.5 |
+| 13 | PR + multi-agent views (views, review-pr, setup-ci, camada-agentica, evals) | ✓ v0.4.6–0.5.0 |
+
+The radiant CLI is now feature-complete against the original scope.
+v0.5.0 is the appropriate bump because this is a meaningful release
+boundary (the entire methodology merge shipped, not just one feature).
+
 ## [0.4.9] — 2026-06-25
 
 Sprint 13 fourth batch: wires the existing `camada-agentica` skill

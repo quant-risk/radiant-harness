@@ -667,3 +667,99 @@ func TestCamadaAgenticaUnknownAgent(t *testing.T) {
 		t.Errorf("runCamadaAgentica with bogus agent should not error; got %v", err)
 	}
 }
+
+func TestComputeFeatureCoverageAllCovered(t *testing.T) {
+	dir := t.TempDir()
+	specMD := "# 0001\n\n## Acceptance criteria\n\n### AC1: foo\n### AC2: bar\n"
+	tasksMD := "| 1 | task | AC1, AC2 | `true` |\n"
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tasks.md"), []byte(tasksMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := computeFeatureCoverage(dir)
+	if err != nil {
+		t.Fatalf("computeFeatureCoverage: %v", err)
+	}
+	if c.Total != 2 || c.Covered != 2 {
+		t.Errorf("expected 2/2 covered, got %d/%d", c.Covered, c.Total)
+	}
+	if c.Score != 1.0 {
+		t.Errorf("expected score 1.0, got %v", c.Score)
+	}
+	if len(c.Uncovered) != 0 {
+		t.Errorf("expected 0 uncovered, got %v", c.Uncovered)
+	}
+}
+
+func TestComputeFeatureCoveragePartial(t *testing.T) {
+	dir := t.TempDir()
+	specMD := "# 0001\n\n## Acceptance criteria\n\n### AC1: foo\n### AC2: bar\n### AC3: baz\n"
+	tasksMD := "| 1 | task | AC1, AC2 | `true` |\n" // AC3 not mentioned
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tasks.md"), []byte(tasksMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := computeFeatureCoverage(dir)
+	if err != nil {
+		t.Fatalf("computeFeatureCoverage: %v", err)
+	}
+	if c.Total != 3 || c.Covered != 2 {
+		t.Errorf("expected 2/3 covered, got %d/%d", c.Covered, c.Total)
+	}
+	if len(c.Uncovered) != 1 || c.Uncovered[0] != "AC3" {
+		t.Errorf("expected uncovered=[AC3], got %v", c.Uncovered)
+	}
+}
+
+func TestComputeFeatureCoverageNoTasksMD(t *testing.T) {
+	dir := t.TempDir()
+	specMD := "# 0001\n\n## Acceptance criteria\n\n### AC1: foo\n### AC2: bar\n"
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No tasks.md
+	c, err := computeFeatureCoverage(dir)
+	if err != nil {
+		t.Fatalf("computeFeatureCoverage: %v", err)
+	}
+	if c.Covered != 0 || c.Total != 2 {
+		t.Errorf("expected 0/2 (no tasks), got %d/%d", c.Covered, c.Total)
+	}
+}
+
+func TestRenderEvalsReportIncludesSections(t *testing.T) {
+	coverages := []featureCoverage{
+		{Slug: "0001-login", Total: 3, Covered: 3, Score: 1.0},
+		{Slug: "0002-reports", Total: 1, Covered: 0, Uncovered: []string{"AC1"}, Score: 0.0},
+	}
+	body := renderEvalsReport("all", coverages)
+	for _, want := range []string{
+		"# Evals: all",
+		"## Summary",
+		"## Per-feature fidelity",
+		"## AC-level detail",
+		"0001-login",
+		"0002-reports",
+		"Aggregate fidelity",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("renderEvalsReport missing %q", want)
+		}
+	}
+}
+
+func TestRenderEvalsReportComputesAggregate(t *testing.T) {
+	coverages := []featureCoverage{
+		{Slug: "a", Total: 4, Covered: 4, Score: 1.0},
+		{Slug: "b", Total: 0, Covered: 0, Score: 0.0}, // empty feature
+	}
+	body := renderEvalsReport("all", coverages)
+	// Aggregate should be 4 / 4 = 100% (empty feature contributes 0)
+	if !strings.Contains(body, "100.0%") {
+		t.Errorf("expected 100%% aggregate (only non-empty feature), got:\n%s", body)
+	}
+}
