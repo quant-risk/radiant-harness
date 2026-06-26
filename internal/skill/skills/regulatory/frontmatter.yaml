@@ -1,0 +1,70 @@
+name: regulatory
+version: 1.0.0
+description: |
+  Regulatory reporting and compliance guidance: BCBS standards,
+  Brazilian regulators (BACEN, CVM, SUSEP, ANS, PREVIC), US
+  regulators (Fed, OCC, SEC, FDIC), EU regulators (EBA, ESMA,
+  EIOPA), Basel III/IV, Solvency II, IFRS reporting, regulatory
+  submissions. Use when the project prepares or analyses
+  regulatory filings.
+when_to_use: |
+  Basel III/IV capital reporting (Pillar 1/2/3). Solvency II SFCR /
+  RSR. Brazilian regulatory reports (BACEN DLO/IOC, CVM ITR/DFP,
+  SUSEP, ANS). Stress testing submissions. Resolution planning.
+  Recovery and resolution. Regulatory remediation. Supervisory
+  dialogue.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: regulator
+    type: enum
+    required: true
+    description: '"bacen" | "cvm" | "susep" | "ans" | "previc" | "fed" | "occ" | "sec" | "eba" | "esma" | "eiopa" | "bcbs" | "other"'
+  - name: report_type
+    type: enum
+    required: true
+    description: '"capital" | "liquidity" | "large-exposures" | "leverage" | "resolution" | "remuneration" | "disclosure" | "stress-test"'
+
+outputs:
+  - path: docs/regulatory/submission-package.md
+    type: artifact
+    description: 'Regulatory submission package: data, methodology, sign-off.'
+  - path: docs/regulatory/reconciliation.md
+    type: artifact
+    description: Reconciliation between regulatory and accounting figures.
+
+gates:
+  - name: submission-deadline-tracked
+    description: Submission deadlines tracked; calendar adherence measured; late submissions escalated.
+  - name: data-lineage-documented
+    description: Data lineage from source systems to submission documented; auditable.
+  - name: methodology-versioned
+    description: Methodology versioned (regulatory vs internal); changes logged.
+  - name: independent-review
+    description: Independent review (2nd line / internal audit) before submission.
+
+context_provides:
+  - state.md
+  - docs/regulatory/
+
+commands_available:
+  - radiant regulatory <regulator> --report=<type>
+
+related_skills:
+  - credit-risk
+  - market-risk
+  - liquidity-risk
+  - operational-risk
+  - accounting
+  - tax
+
+anti_patterns:
+  - "Late submission: regulatory penalty + reputational"
+  - "Reconciliation gap between regulatory and accounting: unexplained"
+  - "Methodology change without regulator notification: 'discovered' at next exam"
+  - "Single source of truth not maintained: restatement risk"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,68 @@
+name: tax
+version: 1.0.0
+description: |
+  Tax guidance: corporate income tax (current + deferred),
+  transfer pricing, indirect taxes (VAT/GST/ICMS), tax
+  structuring, treaty interpretation, withholding taxes,
+  international taxation, BEPS Pillar 2. Use when the project
+  deals with corporate tax compliance, planning, or controversy.
+when_to_use: |
+  Project computes corporate income tax (current + deferred).
+  Transfer pricing documentation. Indirect tax (VAT / GST /
+  ICMS / IPI). Tax structuring for M&A or restructuring.
+  Treaty interpretation. Withholding tax optimisation.
+  International tax (PE, CFC, BEPS Pillar 2). Tax controversy
+  / audit defence. Tax provisioning under IFRS.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: tax_type
+    type: enum
+    required: true
+    description: '"corporate-income" | "transfer-pricing" | "vat" | "withholding" | "international" | "pillar-two" | "state-local"'
+  - name: jurisdiction
+    type: enum
+    required: false
+    description: '"br" | "us" | "eu" | "uk" | "oecd" | "global" | "multi-jurisdiction"'
+
+outputs:
+  - path: docs/tax/computation-memo.md
+    type: artifact
+    description: Tax computation with reconciliation from accounting profit.
+  - path: docs/tax/transfer-pricing-doc.md
+    type: artifact
+    description: 'TP documentation: functional analysis, benchmark, intercompany agreements.'
+
+gates:
+  - name: jurisdiction-applies
+    description: Jurisdiction and applicable law clearly identified. Statute + regulation cited.
+  - name: substance-over-form
+    description: Substance over form considered. Sham transactions challenged; legitimate structures respected.
+  - name: treaty-benefits-tested
+    description: Treaty benefits tested (LOB, PPT, beneficial ownership); not assumed.
+  - name: documentation-on-file
+    description: Documentation contemporaneous to transaction (TP, structuring memos).
+
+context_provides:
+  - state.md
+  - docs/tax/
+
+commands_available:
+  - radiant tax <tax_type> --jurisdiction=<...>
+
+related_skills:
+  - accounting
+  - finance
+  - transfer-pricing (via accounting)
+  - capital-markets
+
+anti_patterns:
+  - "Treaty benefit without beneficial owner test: WHT exposure"
+  - "TP documentation contemporaneous only at audit: weak defence"
+  - "Tax structure without substance: anti-avoidance rules apply"
+  - "Deferred tax on temporary differences without recoverability test"
+
+author: radiant-harness contributors
+license: MIT

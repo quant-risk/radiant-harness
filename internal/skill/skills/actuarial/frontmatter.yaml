@@ -1,0 +1,74 @@
+name: actuarial
+version: 1.0.0
+description: |
+  Actuarial science guidance: life insurance (mortality, longevity),
+  P&C (frequency, severity, reserving), reinsurance, capital
+  modelling (Solvency II, IFRS 17), pricing, valuation, embedded
+  value. Use when the project quantifies insurance risk,
+  prices insurance products, or models insurance liabilities.
+when_to_use: |
+  Project models mortality, longevity, lapse, or morbidity.
+  Non-life reserving (IBNR, RBNS, chain-ladder, Bornhuetter-Ferguson).
+  Reinsurance structuring (quota share, surplus, stop loss, XL).
+  Solvency II SCR / MCR calculation. IFRS 17 measurement (GMM,
+  PAA, VFA). Embedded value. Pricing of insurance products.
+  Catastrophe modelling.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: line_of_business
+    type: enum
+    required: true
+    description: '"life" | "health" | "motor" | "property" | "liability" | "marine" | "aviation" | "credit" | "multi-line"'
+  - name: modelling_target
+    type: enum
+    required: true
+    description: '"mortality" | "longevity" | "lapse" | "morbidity" | "frequency" | "severity" | "reserving" | "pricing" | "capital"'
+
+outputs:
+  - path: docs/actuarial/experience-analysis.md
+    type: artifact
+    description: 'Experience analysis: A/E ratios by duration, calendar year, cohort.'
+  - path: docs/actuarial/assumption-set.md
+    type: artifact
+    description: Best-estimate assumptions with confidence intervals + margins.
+  - path: docs/actuarial/model-validation.md
+    type: artifact
+    description: Backtest vs actual; stress tests; sensitivity.
+
+gates:
+  - name: data-quality
+    description: Policy / claim data has sufficient history (>=5y for non-life; >=10y for life); quality validated.
+  - name: assumption-justification
+    description: Every assumption has source (industry table, internal data, expert judgment); not "default".
+  - name: margin-and-uncertainty
+    description: Best estimate + explicit margin for prudence; uncertainty quantified.
+  - name: regulatory-mapping
+    description: Mapping to applicable regime (Solvency II, IFRS 17, local regulator).
+
+context_provides:
+  - state.md
+  - docs/actuarial/
+
+commands_available:
+  - radiant actuarial <line> --target=<mortality|severity|...>
+
+related_skills:
+  - stats
+  - bayesian
+  - econometrics
+  - credit-risk
+  - capital-markets
+  - accounting
+
+anti_patterns:
+  - "Assumptions from industry tables without fit to portfolio: applies to no one"
+  - "No backtest: can't validate model accuracy"
+  - "Mortality model without cohort / calendar year effects: misses generation risk"
+  - "Reserving on incurred without IBNER: understates ultimate"
+  - "Pricing without capital cost: underprices long-tail lines"
+
+author: radiant-harness contributors
+license: MIT

@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.6.3"
+var version = "0.7.0"
 
 func main() {
 	root := &cobra.Command{
@@ -1041,6 +1041,48 @@ func main() {
 	}
 	telemetryCmd.AddCommand(telemetryStatusCmd, telemetryEnableCmd, telemetryDisableCmd, telemetryShowCmd)
 	root.AddCommand(telemetryCmd)
+
+	// ── stats (Sprint 29b — stats test plan scaffold) ──
+	// `radiant stats <test>` produces a structured hypothesis-test
+	// plan scaffold (docs/stats/<test>-plan.md) following the
+	// radiant-stats skill. The CLI scaffolds the input contract
+	// (H0/H1, alpha, power, effect size, multiple-testing);
+	// the user fills the actual values and runs the test.
+	statsCmd := &cobra.Command{
+		Use:   "stats <test>",
+		Short: "Scaffold a hypothesis-test plan (alpha, power, effect size, multiple-testing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			test := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			alpha, _ := cmd.Flags().GetFloat64("alpha")
+			power, _ := cmd.Flags().GetFloat64("power")
+			return runStatsScaffold(test, alpha, power, out)
+		},
+	}
+	statsCmd.Flags().StringP("output", "o", "", "output path (default: docs/stats/<test>-plan.md)")
+	statsCmd.Flags().Float64("alpha", 0.05, "significance level (α)")
+	statsCmd.Flags().Float64("power", 0.80, "statistical power (1-β)")
+	root.AddCommand(statsCmd)
+
+	// ── causal-estimate (Sprint 29b — causal analysis scaffold) ──
+	// `radiant causal-estimate <design>` produces a structured
+	// causal analysis plan (docs/causal/<design>-plan.md) with a
+	// DAG template, identification assumption, sensitivity
+	// checklist, and CATE exploration template. Follows the
+	// radiant-causal + radiant-causal-ml skills.
+	causalEstCmd := &cobra.Command{
+		Use:   "causal-estimate <design>",
+		Short: "Scaffold a causal analysis (DAG, identification, sensitivity, CATE)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			design := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			return runCausalEstimateScaffold(design, out)
+		},
+	}
+	causalEstCmd.Flags().StringP("output", "o", "", "output path (default: docs/causal/<design>-plan.md)")
+	root.AddCommand(causalEstCmd)
 
 	// ── incident (Sprint 19 — incident response scaffold) ──
 	// `radiant incident <severity> <summary>` wires the `incident`
@@ -2807,6 +2849,202 @@ func nextIncidentSeq() (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// runStatsScaffold produces a hypothesis-test plan scaffold
+// following the radiant-stats skill. The user fills the
+// concrete values and runs the actual test. The CLI scaffolds
+// the input contract (H0/H1, alpha, power, effect size,
+// multiple-testing correction, assumption checks).
+func runStatsScaffold(test string, alpha, power float64, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/stats/%s-plan.md", test)
+	}
+	body := fmt.Sprintf(`# Stats test plan: %s
+
+> Scaffolded by `+"`radiant stats %s`"+` on %s.
+> Follows the radiant-stats skill workflow.
+
+## 1. Hypothesis
+
+- **H0**: <null hypothesis>
+- **H1**: <alternative hypothesis>
+- **Direction**: one-sided / two-sided
+- **Test family**: %s
+
+## 2. Design parameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Significance (α) | %.2f | Adjust for multiple comparisons |
+| Power (1-β) | %.2f | Target ≥0.80 |
+| Effect size | <small / medium / large / numeric> | Cohen's d, η², Cramér V, etc. |
+| Sample size (planned) | <n> | From power analysis |
+
+## 3. Sample + data
+
+- Source: <dataset; row count; date range>
+- Inclusion / exclusion criteria: <list>
+- Out-of-sample / out-of-time plan: <test>
+
+## 4. Assumption checks
+
+- Normality: <Shapiro-Wilk / Q-Q plot> — required for parametric
+- Homoscedasticity: <Levene / residual plot> — required for ANOVA / t-test
+- Independence: <design review / Durbin-Watson>
+- If any violated → fallback: <non-parametric alternative>
+
+## 5. Multiple-testing correction
+
+- Number of hypotheses (k): <n>
+- Correction: <Bonferroni / Holm / BH-FDR / BY>
+- Report: raw p-values AND corrected p-values
+
+## 6. Reporting
+
+- Effect size + 95%% CI (always, with p-value)
+- Assumption-check results
+- Robustness: alternative specs / subsamples
+
+## 7. Anti-patterns checklist
+
+- [ ] H0/H1 stated BEFORE looking at data (no HARKing)
+- [ ] Sample size pre-committed (no optional stopping)
+- [ ] Effect size reported alongside p-value
+- [ ] Multiple-testing correction applied
+- [ ] Assumptions checked; fallback documented
+`, test, test, time.Now().UTC().Format("2006-01-02"), test, alpha, power)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in H0/H1, sample, effect size, then run the test.\n")
+	fmt.Printf("    See radiant-stats skill for guidance.\n")
+	return nil
+}
+
+// runCausalEstimateScaffold produces a causal analysis plan
+// scaffold following the radiant-causal and radiant-causal-ml
+// skills. Includes a DAG template (mermaid), identification
+// assumption, sensitivity checklist, and CATE exploration.
+func runCausalEstimateScaffold(design string, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/causal/%s-plan.md", design)
+	}
+	body := fmt.Sprintf(`# Causal analysis plan: %s
+
+> Scaffolded by `+"`radiant causal-estimate %s`"+` on %s.
+> Follows the radiant-causal + radiant-causal-ml skills.
+
+## 1. Design
+
+Design family: **%s**
+
+Choose one:
+- RCT (randomised controlled trial)
+- Observational with treatment (selection on observables)
+- Quasi-experimental (DiD / RDD / synthetic control)
+- Instrumental variable (endogenous treatment)
+- Natural experiment
+
+## 2. DAG (mermaid)
+
+`+"```mermaid"+`
+graph LR
+  T[Treatment] --> Y[Outcome]
+  X1[Confounder 1] --> T
+  X1 --> Y
+  X2[Confounder 2] --> T
+  X2 --> Y
+  M[Mediator] --> Y
+  T --> M
+  C[Collider]
+  T --> C
+  Y --> C
+`+"```"+`
+
+Verify:
+- All confounders affecting T AND Y included
+- Mediators on causal path T → M → Y (don't condition)
+- Colliders T → C ← Y (DO NOT condition; induces bias)
+
+## 3. Identification assumption
+
+State the assumption explicitly:
+
+> "Conditional on X, treatment assignment is independent of
+> potential outcomes: Y(t) ⫫ T | X"
+
+Test (where applicable):
+- RCT: randomisation check + covariate balance
+- PS: overlap (common support); standardised mean differences < 0.1
+- DiD: parallel trends in pre-period (event-study plot)
+- RDD: continuity at cutoff; McCrary density test; placebo cutoffs
+
+## 4. Estimand
+
+| Estimand | Definition | When |
+|----------|-----------|------|
+| ATE | E[Y(1) - Y(0)] | Population average |
+| ATT | E[Y(1) - Y(0) \| T=1] | Average on treated |
+| CATE | E[Y(1) - Y(0) \| X=x] | Heterogeneous effects |
+| LATE | E[Y(1) - Y(0) \| complier] | IV: local to compliers |
+
+## 5. Estimation strategy
+
+- Method: <OLS / IPW / matching / DiD / RDD / IV / double ML / causal forest>
+- Software: <Python (dowhy / causalml / econml) / R (MatchIt / did / rdrobust)>
+- Standard errors: <robust / clustered / bootstrap>
+- Sample size: <n>; power: <≥0.80 for MDE of X>
+
+## 6. Heterogeneous effects (CATE)
+
+Explore CATE by:
+- Pre-specified subgroups (demographic, behavioural)
+- Data-driven: causal forest (honest splitting)
+- ML-based uplift: T/S/X/R-learner
+- Plot: CATE on x-axis; outcome on y-axis
+
+## 7. Sensitivity analysis
+
+How strong would an unobserved confounder need to be to change
+the conclusion?
+- **E-value** (VanderWeele): minimum strength to nullify
+- **Rosenbaum bounds**: γ sensitivity analysis
+- **Placebo tests**: fake treatment; should find zero
+
+## 8. Reporting
+
+- Point estimate + 95%% CI (ATE; ATT; CATE by subgroup)
+- Assumption tests + sensitivity
+- Robustness checks: alternative specs; out-of-sample
+- Limitations + scope of inference
+
+## 9. Anti-patterns checklist
+
+- [ ] DAG drawn BEFORE estimation
+- [ ] Identification assumption stated explicitly
+- [ ] Pre-trends tested (if DiD)
+- [ ] Common support / overlap checked (if PS)
+- [ ] Placebo tests included
+- [ ] Sensitivity analysis reported (E-value or similar)
+- [ ] CATE explored when meaningful (not just ATE)
+`, design, design, time.Now().UTC().Format("2006-01-02"), design)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in DAG, identification assumption, and estimation strategy.\n")
+	fmt.Printf("    See radiant-causal + radiant-causal-ml skills for guidance.\n")
+	return nil
 }
 
 // renderIncidentDoc produces the incident document body. The

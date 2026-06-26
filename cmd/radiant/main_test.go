@@ -923,6 +923,116 @@ func TestReleaseInteractiveDryRunSkipsPrompt(t *testing.T) {
 	}
 }
 
+func TestStatsScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runStatsScaffold("two-sample", 0.05, 0.80, ""); err != nil {
+		t.Fatalf("runStatsScaffold: %v", err)
+	}
+	// Default output path: docs/stats/two-sample-plan.md
+	body, err := os.ReadFile("docs/stats/two-sample-plan.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Stats test plan: two-sample",
+		"Significance (α)",
+		"Power (1-β)",
+		"0.05",
+		"0.80",
+		"Effect size",
+		"Multiple-testing correction",
+		"Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in scaffold", want)
+		}
+	}
+}
+
+func TestStatsScaffoldCustomOutput(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "custom-stats.md")
+	if err := runStatsScaffold("anova", 0.01, 0.90, out); err != nil {
+		t.Fatalf("runStatsScaffold: %v", err)
+	}
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("custom output file not written: %v", err)
+	}
+	if !strings.Contains(string(body), "0.01") {
+		t.Errorf("custom alpha (0.01) not in scaffold")
+	}
+	if !strings.Contains(string(body), "0.90") {
+		t.Errorf("custom power (0.90) not in scaffold")
+	}
+	if !strings.Contains(string(body), "anova") {
+		t.Errorf("test family (anova) not in scaffold")
+	}
+}
+
+func TestCausalEstimateScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCausalEstimateScaffold("diff-in-diff", ""); err != nil {
+		t.Fatalf("runCausalEstimateScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/causal/diff-in-diff-plan.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Causal analysis plan: diff-in-diff",
+		"## 2. DAG",
+		"mermaid",
+		"## 3. Identification assumption",
+		"## 4. Estimand",
+		"ATE",
+		"ATT",
+		"CATE",
+		"LATE",
+		"## 7. Sensitivity analysis",
+		"E-value",
+		"## 9. Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in causal scaffold", want)
+		}
+	}
+}
+
+func TestCausalEstimateScaffoldCustomOutput(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "custom-causal.md")
+	if err := runCausalEstimateScaffold("rct", out); err != nil {
+		t.Fatalf("runCausalEstimateScaffold: %v", err)
+	}
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("custom output file not written: %v", err)
+	}
+	if !strings.Contains(string(body), "rct") {
+		t.Errorf("design (rct) not in scaffold")
+	}
+	if !strings.Contains(string(body), "DAG") {
+		t.Errorf("DAG section not in scaffold")
+	}
+}
+
 func TestBumpVersionInSourceDryRun(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
 	if err := bumpVersionInSource("0.5.1", true); err != nil {
