@@ -14,8 +14,8 @@ const DefaultWarnThreshold = 0.70
 
 // CompressResult holds the outcome of a compression pass.
 type CompressResult struct {
-	Original   int    // original token estimate
-	Compressed int    // post-compression token estimate
+	Original   int     // original token estimate
+	Compressed int     // post-compression token estimate
 	Ratio      float64 // Compressed / Original
 	Content    string  // compressed content
 	Truncated  bool    // true if hard-truncated (couldn't fit in budget)
@@ -111,8 +111,8 @@ type BudgetStatus int
 
 const (
 	BudgetOK       BudgetStatus = iota // below warn threshold
-	BudgetWarning                       // above warn threshold, below limit
-	BudgetExceeded                      // at or above limit
+	BudgetWarning                      // above warn threshold, below limit
+	BudgetExceeded                     // at or above limit
 )
 
 // CheckBudget returns the budget status for a given token count.

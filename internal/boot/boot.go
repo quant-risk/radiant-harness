@@ -41,14 +41,14 @@ type Options struct {
 
 // Manifest is the structured representation of a boot manifest.
 type Manifest struct {
-	Version      string            `json:"version"`
-	Project      ProjectInfo       `json:"project"`
-	Skills       []string          `json:"recommended_skills"`
-	Commands     []string          `json:"available_commands"`
-	Loop         LoopInfo          `json:"loop"`
-	Budget       BudgetInfo        `json:"budget_estimate"`
-	ContextFile  string            `json:"context_file"`
-	ActiveSpec   string            `json:"active_spec,omitempty"`
+	Version     string      `json:"version"`
+	Project     ProjectInfo `json:"project"`
+	Skills      []string    `json:"recommended_skills"`
+	Commands    []string    `json:"available_commands"`
+	Loop        LoopInfo    `json:"loop"`
+	Budget      BudgetInfo  `json:"budget_estimate"`
+	ContextFile string      `json:"context_file"`
+	ActiveSpec  string      `json:"active_spec,omitempty"`
 }
 
 // ProjectInfo summarizes the project.
@@ -67,10 +67,10 @@ type LoopInfo struct {
 
 // BudgetInfo estimates token cost for common operations.
 type BudgetInfo struct {
-	Profile      string `json:"profile"`
-	ContextMin   int    `json:"context_min_tokens"`
-	ContextMax   int    `json:"context_max_tokens"`
-	LoopPerIter  int    `json:"loop_per_iteration_tokens"`
+	Profile     string `json:"profile"`
+	ContextMin  int    `json:"context_min_tokens"`
+	ContextMax  int    `json:"context_max_tokens"`
+	LoopPerIter int    `json:"loop_per_iteration_tokens"`
 }
 
 var budgetProfiles = map[string]BudgetInfo{
