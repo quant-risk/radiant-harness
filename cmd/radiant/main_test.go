@@ -1129,6 +1129,210 @@ func TestPredictScaffoldCustomLatency(t *testing.T) {
 	}
 }
 
+func TestTrainScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTrainScaffold("churn-model", ""); err != nil {
+		t.Fatalf("runTrainScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/train/churn-model-plan.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Training plan: churn-model",
+		"## 1. Inputs",
+		"## 2. Training recipe",
+		"## 3. Compute budget",
+		"## 4. Checkpointing",
+		"reproducibility",
+		"Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in train scaffold", want)
+		}
+	}
+}
+
+func TestEvaluateScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEvaluateScaffold("churn-model", ""); err != nil {
+		t.Fatalf("runEvaluateScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/eval/churn-model-eval.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Evaluation plan: churn-model",
+		"## 2. Metrics",
+		"## 3. Statistical significance",
+		"## 5. Fairness slices",
+		"Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in evaluate scaffold", want)
+		}
+	}
+}
+
+func TestDriftScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDriftScaffold("churn-model", ""); err != nil {
+		t.Fatalf("runDriftScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/drift/churn-model-monitor.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Drift monitoring: churn-model",
+		"PSI",
+		"0.25",
+		"Alert escalation",
+		"Retraining trigger",
+		"Rollback",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in drift scaffold", want)
+		}
+	}
+}
+
+func TestAutodataMissingDomain(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAutodata("test-skill", "", "", false); err == nil {
+		t.Error("expected error when --domain is empty")
+	}
+}
+
+func TestAutodataStubMode(t *testing.T) {
+	// No LLM API key set — should fall back to stub template.
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Ensure no API key in env
+	t.Setenv("RADIANT_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("RADIANT_ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	out := filepath.Join(dir, "skills")
+	if err := runAutodata("reinsurance", "reinsurance pricing for P&C", out, false); err != nil {
+		t.Fatalf("runAutodata (stub mode): %v", err)
+	}
+	for _, name := range []string{"frontmatter.yaml", "SKILL.md"} {
+		path := filepath.Join(out, name)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected %s to exist: %v", path, err)
+		}
+	}
+	body, _ := os.ReadFile(filepath.Join(out, "frontmatter.yaml"))
+	for _, want := range []string{
+		"name: reinsurance",
+		"version: 0.1.0",
+		"description:",
+		"tier_eligible:",
+		"anti_patterns:",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("stub frontmatter missing %q", want)
+		}
+	}
+	body, _ = os.ReadFile(filepath.Join(out, "SKILL.md"))
+	for _, want := range []string{
+		"# Skill: reinsurance",
+		"## Decision tree",
+		"## Workflow",
+		"## Examples",
+		"## Anti-patterns",
+		"## Failure modes",
+		"## Related skills",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("stub SKILL.md missing %q", want)
+		}
+	}
+}
+
+func TestAutodataDryRunNoFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RADIANT_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("RADIANT_ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runAutodata("dryrun-skill", "some domain", "", true)
+	w.Close()
+	os.Stdout = old
+	if err != nil {
+		t.Fatalf("runAutodata (dry-run): %v", err)
+	}
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	for _, want := range []string{"name: dryrun-skill", "# Skill: dryrun-skill"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q", want)
+		}
+	}
+	// No files should be created
+	if _, err := os.Stat(filepath.Join(dir, "internal/skill/skills/dryrun-skill/frontmatter.yaml")); err == nil {
+		t.Error("dry-run should NOT create files")
+	}
+}
+
+func TestParseAutodataResponse(t *testing.T) {
+	input := `===FRONTMATTER===
+name: test
+version: 1.0.0
+===SKILLMD===
+# Skill: test
+
+> body
+`
+	fm, md, err := parseAutodataResponse(input)
+	if err != nil {
+		t.Fatalf("parseAutodataResponse: %v", err)
+	}
+	if !strings.Contains(fm, "name: test") {
+		t.Errorf("frontmatter missing 'name: test': %s", fm)
+	}
+	if !strings.Contains(md, "# Skill: test") {
+		t.Errorf("SKILL.md missing content: %s", md)
+	}
+}
+
+func TestParseAutodataResponseMissingMarkers(t *testing.T) {
+	if _, _, err := parseAutodataResponse("no markers here"); err == nil {
+		t.Error("expected error on missing markers")
+	}
+}
+
 func TestBumpVersionInSourceDryRun(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
 	if err := bumpVersionInSource("0.5.1", true); err != nil {

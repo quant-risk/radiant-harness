@@ -1,0 +1,76 @@
+name: model-risk
+version: 1.0.0
+description: |
+  Model risk management (MRM) guidance: model lifecycle
+  (development, validation, approval, ongoing monitoring,
+  retirement), conceptual soundness, statistical validation,
+  challenger models, outcomes analysis, model inventory,
+  risk-tiering. Use when the project builds, validates, or
+  governs quantitative models in finance, insurance, or
+  regulatory contexts.
+when_to_use: |
+  Project builds / deploys quantitative models (PD / LGD / VaR /
+  pricing / actuarial / ML). Need model validation framework.
+  Challenger model design. Outcomes analysis vs predictions.
+  Model inventory + risk tiering. SR 11-7 / SS 1/2018 / SS 1/2024
+  (US Fed/OCC/FDIC) or EBA TRV (EU) compliance. Model risk
+  committee governance.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: model_class
+    type: enum
+    required: true
+    description: '"credit" | "market" | "operational" | "pricing" | "actuarial" | "ml" | "behavioral" | "regulatory"'
+  - name: tier
+    type: enum
+    required: true
+    description: '"tier-1" (high risk; full validation) | "tier-2" (moderate) | "tier-3" (low; limited)'
+
+outputs:
+  - path: docs/model-risk/model-inventory.md
+    type: artifact
+    description: 'Model inventory: name, owner, tier, status, last review, next review.'
+  - path: docs/model-risk/validation-report.md
+    type: artifact
+    description: 'Validation: conceptual soundness, statistical tests, outcomes, sensitivity.'
+  - path: docs/model-risk/outcomes-analysis.md
+    type: artifact
+    description: Outcomes vs predictions over time; backtest results.
+
+gates:
+  - name: conceptual-soundness
+    description: Theory + assumptions documented; expert review confirms plausibility.
+  - name: statistical-validation
+    description: 'Statistical tests: discrimination, calibration, stability; benchmark + challenger.'
+  - name: outcomes-analysis
+    description: Outcomes vs predictions over time; degradation detected.
+  - name: independent-validation
+    description: Validation by independent team (not developers); sign-off documented.
+  - name: governance-approval
+    description: Model risk committee approval before use; tier-appropriate depth.
+
+context_provides:
+  - state.md
+  - docs/model-risk/
+
+commands_available:
+  - radiant model-risk <model_class> --tier=<tier-1|tier-2|tier-3>
+
+related_skills:
+  - ml
+  - stats
+  - credit-risk
+  - market-risk
+  - actuarial
+
+anti_patterns:
+  - "Developer-only validation: independence compromised"
+  - "Validation as one-off: no ongoing monitoring"
+  - "No challenger model: status quo bias"
+  - "Calibration good but discrimination bad: 'predicts right' for wrong reasons"
+
+author: radiant-harness contributors
+license: MIT

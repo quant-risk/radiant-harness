@@ -1,0 +1,73 @@
+name: actuarial-solvency
+version: 1.0.0
+description: |
+  Solvency II guidance: Pillar 1 SCR calculation (modules +
+  standard formula vs internal model), MCR, ORSA / SFCR /
+  RSR reporting, technical provisions (best estimate + risk
+  margin), own funds tiering, matching adjustment, volatility
+  adjustment, transitionals. Use when the project computes or
+  audits regulatory capital for an EU (or EU-equivalent)
+  insurer.
+when_to_use: |
+  Solvency II Pillar 1 SCR / MCR calculation. Technical provisions
+  (best estimate + risk margin). Own funds tiering and eligibility.
+  SFCR / RSR drafting. ORSA. Standard formula vs internal model
+  approval. Matching adjustment, volatility adjustment,
+  transitionals. EIOPA reporting (QRTs).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: module
+    type: enum
+    required: true
+    description: '"market" | "counterparty" | "life" | "health" | "non-life" | "operational" | "intangible"'
+  - name: approach
+    type: enum
+    required: true
+    description: '"standard-formula" | "internal-model-partial" | "internal-model-full" | "hybrid"'
+
+outputs:
+  - path: docs/actuarial-solvency/scr-calc.md
+    type: artifact
+    description: 'SCR calculation: modules, correlations, aggregation, diversification benefit.'
+  - path: docs/actuarial-solvency/sfcr-draft.md
+    type: artifact
+    description: SFCR (Solvency and Financial Condition Report) draft per EIOPA template.
+  - path: docs/actuarial-solvency/orsa-report.md
+    type: artifact
+    description: 'ORSA: forward-looking solvency assessment, stress, recovery actions.'
+
+gates:
+  - name: data-quality-assessed
+    description: Data quality assessed per EIOPA guidelines; data quality score reported.
+  - name: methodology-approved
+    description: Methodology approved by Board (for internal model); supervisor notified (for material change).
+  - name: matching-adjustment-justified
+    description: Matching adjustment / volatility adjustment applied only if portfolio qualifies; documented per EIOPA.
+  - name: own-funds-eligibility
+    description: Own funds tiering + limits (Tier 1 ≤ 100% of SCR; Tier 2 ≤ 50%; Tier 3 ≤ 15%); eligibility tested.
+
+context_provides:
+  - state.md
+  - docs/actuarial-solvency/
+
+commands_available:
+  - radiant actuarial-solvency <module> --approach=<...>
+
+related_skills:
+  - actuarial
+  - regulatory
+  - market-risk
+  - credit-risk
+  - liquidity-risk
+
+anti_patterns:
+  - "Internal model without supervisor approval: not usable for capital"
+  - "Matching adjustment without EIOPA eligibility: capital relief reversed"
+  - "Tier 2 / Tier 3 over limits: not eligible for SCR coverage"
+  - "Best estimate without risk margin: understates technical provisions"
+
+author: radiant-harness contributors
+license: MIT

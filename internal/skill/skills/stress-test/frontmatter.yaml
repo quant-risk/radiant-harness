@@ -1,0 +1,74 @@
+name: stress-test
+version: 1.0.0
+description: |
+  Stress testing guidance: scenario design (historical,
+  hypothetical, reverse), sensitivity analysis, regulatory stress
+  tests (CCAR, EBA, BCBS, EIOPA), macro linkages, satellite
+  models, recovery and resolution planning. Use when the project
+  designs, runs, or interprets stress tests for risk or capital
+  purposes.
+when_to_use: |
+  Design stress scenarios (recession, rate shock, market crash).
+  Run CCAR / DFAST / EBA / BCBS stress tests. Sensitivity
+  analysis on key risk factors. Reverse stress testing
+  (find scenario that breaks capital). Satellite models
+  (macro → risk parameter). Recovery and resolution planning.
+  Pillar 2 stress (ICAAP / ORSA).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: stress_type
+    type: enum
+    required: true
+    description: '"sensitivity" | "scenario" | "reverse" | "regulatory-ccar" | "regulatory-eba" | "regulatory-bcbs" | "recovery-resolution"'
+  - name: horizon
+    type: enum
+    required: false
+    description: '"1y" | "2y" | "3y" | "5y" | "9-quarter-ccar"'
+
+outputs:
+  - path: docs/stress-test/scenario-design.md
+    type: artifact
+    description: Scenario narrative + macro path + risk-factor shocks.
+  - path: docs/stress-test/results.md
+    type: artifact
+    description: Stressed P&L, capital, RWA, leverage, liquidity over horizon.
+  - path: docs/stress-test/recovery-actions.md
+    type: artifact
+    description: Recovery actions menu; capital actions under stress.
+
+gates:
+  - name: scenario-rationale
+    description: Scenario rationale documented (historical / hypothetical / reverse); not arbitrary shock.
+  - name: satellite-models
+    description: Macro → risk parameter linkage via satellite model; not direct proportion.
+  - name: management-actions-defined
+    description: Management actions defined per scenario (capital, dividends, asset sales).
+  - name: severity-proportional
+    description: Severity proportional to risk appetite; multiple scenarios (baseline / adverse / severely adverse).
+
+context_provides:
+  - state.md
+  - docs/stress-test/
+
+commands_available:
+  - radiant stress-test <stress_type> --horizon=<...>
+
+related_skills:
+  - credit-risk
+  - market-risk
+  - liquidity-risk
+  - operational-risk
+  - actuarial-solvency
+
+anti_patterns:
+  - "Sensitivity without scenario: no narrative, no story"
+  - "Macro shock without satellite: direct 1:1 scaling unrealistic"
+  - "Severely adverse without recovery actions: just a number"
+  - "Single scenario: missing tail risk"
+  - "Using internal model in stress but not in baseline: inconsistency"
+
+author: radiant-harness contributors
+license: MIT

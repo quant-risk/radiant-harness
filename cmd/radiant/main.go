@@ -1125,6 +1125,84 @@ func main() {
 	predictCmd.Flags().Int("latency-ms", 200, "p99 latency budget in milliseconds")
 	root.AddCommand(predictCmd)
 
+	// ── train (Sprint 31b — training plan scaffold) ──
+	// `radiant train <model-id>` produces a structured training
+	// plan scaffold (docs/train/<model-id>-plan.md): data split,
+	// training recipe (optimizer / LR / epochs / regularisation),
+	// compute budget, checkpointing, reproducibility recipe.
+	// Wires the radiant-ml + radiant-deep-learning skills.
+	trainCmd := &cobra.Command{
+		Use:   "train <model-id>",
+		Short: "Scaffold a training plan (data, recipe, compute, checkpoints, reproducibility)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			modelID := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			return runTrainScaffold(modelID, out)
+		},
+	}
+	trainCmd.Flags().StringP("output", "o", "", "output path (default: docs/train/<model-id>-plan.md)")
+	root.AddCommand(trainCmd)
+
+	// ── evaluate (Sprint 31b — evaluation plan scaffold) ──
+	// `radiant evaluate <model-id>` produces an evaluation plan
+	// scaffold (docs/eval/<model-id>-eval.md): metrics, held-out
+	// test, statistical significance, robustness, fairness slices.
+	// Wires the radiant-ml + radiant-stats skills.
+	evaluateCmd := &cobra.Command{
+		Use:   "evaluate <model-id>",
+		Short: "Scaffold an evaluation plan (metrics, held-out test, stats, robustness, fairness)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			modelID := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			return runEvaluateScaffold(modelID, out)
+		},
+	}
+	evaluateCmd.Flags().StringP("output", "o", "", "output path (default: docs/eval/<model-id>-eval.md)")
+	root.AddCommand(evaluateCmd)
+
+	// ── drift (Sprint 31b — drift monitoring scaffold) ──
+	// `radiant drift <model-id>` produces a drift monitoring plan
+	// scaffold (docs/drift/<model-id>-monitor.md): PSI / CSI
+	// thresholds, alert escalation, retraining trigger, rollback
+	// plan. Wires the radiant-ml + radiant-ml-ops skills.
+	driftCmd := &cobra.Command{
+		Use:   "drift <model-id>",
+		Short: "Scaffold drift monitoring (PSI/CSI thresholds, alerts, retraining, rollback)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			modelID := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			return runDriftScaffold(modelID, out)
+		},
+	}
+	driftCmd.Flags().StringP("output", "o", "", "output path (default: docs/drift/<model-id>-monitor.md)")
+	root.AddCommand(driftCmd)
+
+	// ── autodata (Sprint 31c — LLM-driven skill authoring) ──
+	// `radiant autodata <skill-name>` uses an LLM (when configured)
+	// to draft a new skill from a domain prompt. The user reviews
+	// the generated skill before promotion. Implementation of
+	// Kulikov et al. (2026) "Autodata" pattern: agentic data
+	// scientist for skill authoring.
+	autodataCmd := &cobra.Command{
+		Use:   "autodata <skill-name>",
+		Short: "Auto-author a skill from a domain prompt via LLM (review before install)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			skillName := args[0]
+			domain, _ := cmd.Flags().GetString("domain")
+			out, _ := cmd.Flags().GetString("output")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			return runAutodata(skillName, domain, out, dryRun)
+		},
+	}
+	autodataCmd.Flags().String("domain", "", "domain prompt describing what the skill should cover")
+	autodataCmd.Flags().StringP("output", "o", "", "output dir (default: internal/skill/skills/<skill-name>/)")
+	autodataCmd.Flags().Bool("dry-run", false, "print generated skill to stdout instead of writing files")
+	root.AddCommand(autodataCmd)
+
 	// ── incident (Sprint 19 — incident response scaffold) ──
 	// `radiant incident <severity> <summary>` wires the `incident`
 	// skill to a CLI. Generates docs/incidents/<NNNN>-<slug>.md
@@ -3282,6 +3360,258 @@ When model fails or is unavailable:
 	return nil
 }
 
+// runTrainScaffold produces a training plan scaffold following
+// the radiant-ml + radiant-deep-learning skill workflow. Captures
+// data split, training recipe, compute budget, checkpointing,
+// reproducibility.
+func runTrainScaffold(modelID, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/train/%s-plan.md", modelID)
+	}
+	body := fmt.Sprintf(`# Training plan: %s
+
+> Scaffolded by `+"`radiant train %s`"+` on %s.
+> Follows the radiant-ml + radiant-deep-learning skill workflow.
+
+## 1. Inputs
+
+- Model spec: <docs/model/%s-spec.md>
+- Data: <path; row count; date range>
+- Features: <list>
+- Target: <what>
+- Train / val / test split: <criteria; lock test IDs>
+
+## 2. Training recipe
+
+| Component | Choice | Notes |
+|-----------|--------|-------|
+| Algorithm | <algorithm> | <why> |
+| Optimizer | <AdamW / SGD / etc.> | LR / momentum / weight decay |
+| LR schedule | <warmup + cosine / linear> | initial, peak, decay |
+| Batch size | <n> | effective = batch × grad_accum |
+| Epochs / steps | <n> | + early-stopping criteria |
+| Regularization | <dropout / weight decay / data aug> | |
+| Mixed precision | <bf16 / fp16> | speedup vs stability |
+| Gradient clipping | <max_norm 1.0> | RNNs + unstable loss |
+
+## 3. Compute budget
+
+| Resource | Quantity | Cost |
+|----------|----------|------|
+| GPU/CPU | <type × count> | <USD or hours> |
+| Wall-clock | <target hours> | <max budget> |
+| Storage | <data + checkpoints> | <GB> |
+| Memory | <RAM/VRAM per node> | |
+
+## 4. Checkpointing + reproducibility
+
+- Save checkpoint every N steps; keep last 3 + best (by val metric)
+- Save: model weights, optimizer state, RNG state, step, metric
+- Random seeds: numpy, python, torch/cuda; version-controlled
+- Lockfile: requirements.txt / pyproject.lock / conda env
+- Docker image: <digest> for full reproducibility
+- WandB / TensorBoard run ID: <link>
+
+## 5. Monitoring during training
+
+- Loss curve (per step)
+- Validation metric (per epoch)
+- Gradient norm (alert if explodes)
+- GPU utilisation (efficiency)
+- Throughput (samples/sec)
+
+## 6. Anti-patterns checklist
+
+- [ ] Test IDs locked before training
+- [ ] Random seeds set + version-controlled
+- [ ] Mixed precision enabled (where supported)
+- [ ] Gradient clipping on (RNN / unstable)
+- [ ] Eval during training (don't train blind)
+- [ ] Checkpoint every N steps; rotate last 3 + best
+- [ ] Lockfile + Docker image captured
+`, modelID, modelID, time.Now().UTC().Format("2006-01-02"), modelID)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in algorithm, recipe, compute, reproducibility.\n")
+	return nil
+}
+
+// runEvaluateScaffold produces an evaluation plan scaffold
+// following the radiant-ml + radiant-stats skill workflow.
+// Captures metrics, held-out test, statistical significance,
+// robustness, fairness slices.
+func runEvaluateScaffold(modelID, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/eval/%s-eval.md", modelID)
+	}
+	body := fmt.Sprintf(`# Evaluation plan: %s
+
+> Scaffolded by `+"`radiant evaluate %s`"+` on %s.
+> Follows the radiant-ml + radiant-stats skill workflow.
+
+## 1. Inputs
+
+- Model: %s (trained per docs/train/%s-plan.md)
+- Held-out test: <IDs locked BEFORE training; not touched since>
+- Baselines: trivial (majority / mean / last) + simple (LR / GBDT)
+
+## 2. Metrics
+
+| Metric | Definition | Why |
+|--------|-----------|-----|
+| **Primary** | <business-aligned> | <decision-driven> |
+| Discrimination | <AUC / Gini / KS> | <separates classes> |
+| Calibration | <Brier / H-L / calibration plot> | <probability correctness> |
+| Stability | <PSI / CSI> | <input drift> |
+| Latency | <p50 / p95 / p99> | <serving SLO> |
+
+## 3. Statistical significance
+
+- Number of runs: <N >= 5>
+- Different random seeds; report mean ± std
+- Confidence interval: <95%% CI on primary metric>
+- Statistical test: <paired bootstrap; p-value with effect size>
+
+## 4. Robustness checks
+
+| Variation | Expected impact |
+|-----------|-----------------|
+| Subsample (e.g. last 20%% of test) | <report> |
+| Out-of-distribution inputs | <report> |
+| Adversarial inputs (if applicable) | <report> |
+| Different random seeds | <std around mean> |
+
+## 5. Fairness slices
+
+| Protected attribute | Group | Performance gap |
+|--------------------|-------|------------------|
+| <attribute> | <group A vs B> | <delta> |
+| Calibration parity | <across groups> | <delta> |
+| Demographic parity | <across groups> | <delta> |
+
+## 6. Failure modes
+
+| Failure | Detection | Recovery |
+|---------|-----------|----------|
+| Worst-case subset fails | per-slice metrics | Refine; investigate bias |
+| Calibration drift | H-L / Brier over time | Re-fit |
+| Distribution shift | PSI/CSI | Retraining trigger |
+
+## 7. Anti-patterns checklist
+
+- [ ] Held-out test untouched during development
+- [ ] Primary metric is business-aligned
+- [ ] >=5 random seeds; report mean ± std
+- [ ] 95%% CI on primary metric
+- [ ] Robustness checks (subsample, OOD, seeds)
+- [ ] Fairness slices reported
+- [ ] Failure modes documented
+`, modelID, modelID, time.Now().UTC().Format("2006-01-02"), modelID, modelID)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in metrics, statistical tests, fairness, robustness.\n")
+	return nil
+}
+
+// runDriftScaffold produces a drift monitoring plan scaffold
+// following the radiant-ml skill workflow. Captures PSI / CSI
+// thresholds, alert escalation, retraining trigger, rollback.
+func runDriftScaffold(modelID, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/drift/%s-monitor.md", modelID)
+	}
+	body := fmt.Sprintf(`# Drift monitoring: %s
+
+> Scaffolded by `+"`radiant drift %s`"+` on %s.
+> Follows the radiant-ml skill workflow.
+
+## 1. Inputs
+
+- Model: %s
+- Training distribution: <baseline period>
+- Production distribution: <incoming data>
+
+## 2. Population Stability Index (PSI)
+
+- Computed weekly on production features
+- Compare to training distribution
+- Thresholds:
+  - < 0.10: stable (green)
+  - 0.10 - 0.25: moderate (amber) - investigate
+  - > 0.25: significant (red) - retrain or fall back
+
+## 3. Characteristic Stability Index (CSI)
+
+- Per-feature drift (not just population)
+- Same thresholds as PSI
+- Alert if top-N features drift
+
+## 4. Prediction distribution
+
+- Mean, percentiles over time
+- Alert if mean shifts >2 sigma
+- Alert if distribution shape changes (KS test vs baseline)
+
+## 5. Outcome monitoring
+
+- If outcome feedback available: A/E over time
+- Bias drift: should stay near 1.0
+- Alert if persistent bias in any direction
+
+## 6. Alert escalation
+
+| Severity | Trigger | Action | SLA |
+|----------|---------|--------|-----|
+| Info | PSI 0.05-0.10 | Dashboard | — |
+| Warning | PSI 0.10-0.25 | Investigation | 5 business days |
+| Critical | PSI > 0.25 | Retraining or fallback | 24 hours |
+
+## 7. Retraining trigger
+
+- Auto-trigger: PSI > 0.25 for 2 consecutive weeks
+- Manual trigger: any warning escalated
+- Champion / challenger: challenger overtakes on metric
+
+## 8. Rollback plan
+
+- Fall-back to previous model version
+- Fall-back to simpler model (LR / GBDT)
+- Fall-back to "no prediction" (label as low-confidence)
+- Rollback tested quarterly
+
+## 9. Anti-patterns checklist
+
+- [ ] PSI computed on production features (weekly)
+- [ ] Thresholds set per feature importance
+- [ ] Outcome monitoring (if feedback available)
+- [ ] Alert escalation documented; tested
+- [ ] Retraining trigger defined
+- [ ] Rollback plan tested
+`, modelID, modelID, time.Now().UTC().Format("2006-01-02"), modelID)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in thresholds, alerts, retraining, rollback.\n")
+	return nil
+}
+
 // renderIncidentDoc produces the incident document body. The
 // user fills in the timeline + RCA + action items following
 // the structure. MVP: template only; LLM via the `incident` skill
@@ -5047,6 +5377,239 @@ func writeTraceToFile(e *engine.Engine, path string) error {
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
+}
+
+// runAutodata implements the "Autodata" pattern (Kulikov et al.,
+// 2026) for skill authoring: prompt an LLM with a domain
+// description + the schema contract; the LLM generates a
+// candidate frontmatter.yaml + SKILL.md. We write to a draft
+// location and surface a review prompt before installation.
+//
+// The LLM call is gated on API key presence (RADIANT_OPENAI_API_KEY
+// or RADIANT_ANTHROPIC_API_KEY). Without a key, we emit a clear
+// error with a stub template the user can fill manually.
+func runAutodata(skillName, domain, out string, dryRun bool) error {
+	if skillName == "" {
+		return fmt.Errorf("skill name required")
+	}
+	if domain == "" {
+		return fmt.Errorf("--domain prompt required (e.g. --domain='reinsurance pricing for P&C carriers')")
+	}
+
+	if out == "" {
+		out = filepath.Join("internal", "skill", "skills", skillName)
+	}
+
+	// Check LLM availability
+	apiKey := os.Getenv("RADIANT_OPENAI_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	provider := "openai"
+	if apiKey == "" {
+		apiKey = os.Getenv("RADIANT_ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+		}
+		provider = "anthropic"
+	}
+
+	if apiKey == "" {
+		// No key — emit stub + clear instructions
+		return emitAutodataStub(skillName, domain, out, dryRun)
+	}
+
+	// Resolve model
+	modelName := os.Getenv("RADIANT_MODEL")
+	if modelName == "" {
+		if provider == "anthropic" {
+			modelName = "claude-sonnet-4-5"
+		} else {
+			modelName = "gpt-4o"
+		}
+	}
+	model, ok := resolveModelSilent(modelName, provider, apiKey)
+	if !ok {
+		return fmt.Errorf("could not resolve model %s (provider %s)", modelName, provider)
+	}
+
+	client := llm.NewClient(model)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*1_000_000_000) // 120s
+	defer cancel()
+
+	systemPrompt := autodataSystemPrompt(skillName)
+	userPrompt := autodataUserPrompt(skillName, domain)
+
+	fmt.Printf("  → Generating skill %q via %s ...\n", skillName, modelName)
+	resp, err := client.SimpleChat(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Parse response into frontmatter + SKILL.md
+	frontmatter, skillMD, err := parseAutodataResponse(resp)
+	if err != nil {
+		return fmt.Errorf("parse LLM response: %w\n\n--- raw response ---\n%s", err, resp)
+	}
+
+	if dryRun {
+		fmt.Println("--- frontmatter.yaml ---")
+		fmt.Println(frontmatter)
+		fmt.Println("--- SKILL.md ---")
+		fmt.Println(skillMD)
+		return nil
+	}
+
+	// Write files
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", out, err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "frontmatter.yaml"), []byte(frontmatter), 0o644); err != nil {
+		return fmt.Errorf("write frontmatter: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
+		return fmt.Errorf("write SKILL.md: %w", err)
+	}
+	fmt.Printf("  ✓ Generated %s/{frontmatter.yaml, SKILL.md}\n", out)
+	fmt.Println("  ⚠ REVIEW before installing:")
+	fmt.Println("    1. Edit frontmatter.yaml + SKILL.md")
+	fmt.Println("    2. Validate: radiant skills validate")
+	fmt.Println("    3. Install: copy to internal/skill/skills/ and rebuild")
+	return nil
+}
+
+// emitAutodataStub writes a manual-fill template when no LLM
+// API key is configured. Better than failing silently.
+func emitAutodataStub(skillName, domain, out string, dryRun bool) error {
+	frontmatter := fmt.Sprintf(`name: %s
+version: 0.1.0
+description: |
+  <TODO: describe what this skill covers>
+when_to_use: |
+  <TODO: when should this skill be used?>
+tier_eligible:
+  - feature
+
+inputs:
+  - name: example_input
+    type: string
+    required: true
+    description: <TODO: describe this input>
+
+outputs:
+  - path: docs/%s/example.md
+    type: artifact
+    description: <TODO: describe this output>
+
+gates:
+  - name: example-gate
+    description: <TODO: describe a release-blocking gate>
+
+context_provides:
+  - state.md
+
+commands_available: []
+
+related_skills: []
+
+anti_patterns:
+  - <TODO: list common anti-patterns>
+
+author: <TODO>
+license: MIT
+`, skillName, skillName)
+
+	skillMD := fmt.Sprintf(`# Skill: %s
+
+> Auto-generated stub (no LLM API key configured).
+> Domain prompt: %s
+
+## Decision tree
+
+<TODO: ASCII flowchart>
+
+## Workflow
+
+### Step 1: <TODO>
+
+<TODO>
+
+## Examples
+
+<TODO>
+
+## Anti-patterns
+
+<TODO>
+
+## Failure modes
+
+| Failure | Recovery |
+|---------|----------|
+| <TODO> | <TODO> |
+
+## Related skills
+
+<TODO>
+`, skillName, domain)
+
+	if dryRun {
+		fmt.Println("--- frontmatter.yaml ---")
+		fmt.Println(frontmatter)
+		fmt.Println("--- SKILL.md ---")
+		fmt.Println(skillMD)
+		fmt.Println("\n(no LLM API key; set RADIANT_OPENAI_API_KEY or RADIANT_ANTHROPIC_API_KEY to generate via LLM)")
+		return nil
+	}
+
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", out, err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "frontmatter.yaml"), []byte(frontmatter), 0o644); err != nil {
+		return fmt.Errorf("write frontmatter: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
+		return fmt.Errorf("write SKILL.md: %w", err)
+	}
+	fmt.Printf("  ✓ Stub written to %s (no LLM API key; set RADIANT_OPENAI_API_KEY or RADIANT_ANTHROPIC_API_KEY to use LLM)\n", out)
+	return nil
+}
+
+func autodataSystemPrompt(skillName string) string {
+	return fmt.Sprintf(`You are an expert skill author for the radiant-harness CLI.
+Generate a skill named %q following the open MIT schema (docs/SKILL-SCHEMA.md).
+
+OUTPUT FORMAT (strict):
+1. First emit "===FRONTMATTER===" on its own line.
+2. Then emit valid YAML frontmatter with: name, version, description (multi-line, |), when_to_use (multi-line), tier_eligible (list of: trivial, feature, architecture), inputs (list with name/type/required/description; type must be: string, number, enum, object, path), outputs (list with path/type/description), gates (list with name/description), context_provides (list), commands_available (list), related_skills (list), anti_patterns (list of quoted strings).
+3. Then emit "===SKILLMD===" on its own line.
+4. Then emit SKILL.md content with sections: Decision tree, Workflow (numbered steps), Examples (2-3 concrete examples), Anti-patterns (table or list), Failure modes, Related skills.
+
+CRITICAL RULES:
+- frontmatter types MUST be: string, number, enum, object, path (NOT list, NOT integer).
+- descriptions in YAML must NOT contain unquoted colons.
+- SKILL.md must include "## Decision tree", "## Workflow", "## Examples", "## Anti-patterns", "## Failure modes", "## Related skills".
+- Be specific; cite real methodologies, real metrics, real failure modes.
+`, skillName)
+}
+
+func autodataUserPrompt(skillName, domain string) string {
+	return fmt.Sprintf("Generate the skill %q for the domain: %s\n\nRemember the output format: ===FRONTMATTER=== then YAML, then ===SKILLMD=== then Markdown.", skillName, domain)
+}
+
+// parseAutodataResponse splits the LLM response on the
+// ===FRONTMATTER=== / ===SKILLMD=== markers.
+func parseAutodataResponse(resp string) (frontmatter, skillMD string, err error) {
+	const fmMarker = "===FRONTMATTER==="
+	const mdMarker = "===SKILLMD==="
+	fmIdx := strings.Index(resp, fmMarker)
+	mdIdx := strings.Index(resp, mdMarker)
+	if fmIdx < 0 || mdIdx < 0 || mdIdx <= fmIdx {
+		return "", "", fmt.Errorf("missing markers; expected %q and %q", fmMarker, mdMarker)
+	}
+	frontmatter = strings.TrimSpace(resp[fmIdx+len(fmMarker) : mdIdx])
+	skillMD = strings.TrimSpace(resp[mdIdx+len(mdMarker):])
+	return frontmatter, skillMD, nil
 }
 
 func resolveModelSilent(modelName, provider, apiKey string) (llm.Model, bool) {
