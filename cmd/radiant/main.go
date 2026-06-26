@@ -22,6 +22,7 @@ import (
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/quant-risk/radiant-harness/internal/skill"
@@ -1689,6 +1690,149 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd)
 	root.AddCommand(contextCmd)
+
+	// ── loop (Sprint 35) ─────────────────────────────────────────────────────
+	loopCmd := &cobra.Command{
+		Use:   "loop",
+		Short: "Manage the autonomous feedback loop (start, status, resume)",
+	}
+
+	loopStartCmd := &cobra.Command{
+		Use:   "start <goal>",
+		Short: "Start an autonomous Discover→Plan→Execute→Verify→Persist loop",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			goal := args[0]
+			budget, _ := cmd.Flags().GetInt("budget")
+			maxIter, _ := cmd.Flags().GetInt("max-iter")
+			profile, _ := cmd.Flags().GetString("profile")
+
+			runID := fmt.Sprintf("run-%d", time.Now().Unix())
+
+			cfg := loop.BudgetConfig{
+				MaxTokens: budget,
+				MaxIter:   maxIter,
+				Profile:   loop.BudgetProfile(profile),
+			}
+			b := loop.NewBudget(cfg)
+			c := loop.NewCycle(cwd, runID, goal, b)
+
+			_, err := loop.NewTracer(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("init tracer: %w", err)
+			}
+
+			if err := c.Transition(loop.PhaseDiscover, "loop started"); err != nil {
+				return err
+			}
+
+			fmt.Printf("✓ Loop started\n")
+			fmt.Printf("  Run ID: %s\n", runID)
+			fmt.Printf("  Goal:   %s\n", goal)
+			fmt.Printf("  Budget: %s\n", b.Summary())
+			fmt.Printf("\nNext: `radiant loop status` to check progress\n")
+			fmt.Printf("      `radiant trace show %s` to view reasoning trace\n", runID)
+			return nil
+		},
+	}
+	loopStartCmd.Flags().Int("budget", 0, "Token budget (0 = use profile default)")
+	loopStartCmd.Flags().Int("max-iter", 0, "Max iterations (0 = use default 20)")
+	loopStartCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
+
+	loopStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show the current loop state",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			c, err := loop.LoadCycle(cwd)
+			if err != nil {
+				fmt.Println("No active loop. Start one with: radiant loop start \"<goal>\"")
+				return nil
+			}
+			fmt.Print(loop.FormatStatus(c.State()))
+			return nil
+		},
+	}
+
+	loopResumeCmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Resume an interrupted loop from its last persisted state",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			c, err := loop.LoadCycle(cwd)
+			if err != nil {
+				return fmt.Errorf("no loop state found (run `radiant loop start` first): %w", err)
+			}
+			state := c.State()
+			fmt.Printf("✓ Resuming loop %s\n", state.RunID)
+			fmt.Printf("  Phase:  %s\n", state.Phase)
+			fmt.Printf("  Goal:   %s\n", state.Goal)
+			fmt.Printf("  Iter:   %d / %d\n", state.Iteration, state.MaxIter)
+			fmt.Printf("\nThe loop is ready to continue from phase: %s\n", state.Phase)
+			return nil
+		},
+	}
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd)
+	root.AddCommand(loopCmd)
+
+	// ── trace (Sprint 35) ────────────────────────────────────────────────────
+	traceCmd := &cobra.Command{
+		Use:   "trace",
+		Short: "Inspect reasoning traces from loop runs",
+	}
+
+	traceShowCmd := &cobra.Command{
+		Use:   "show <run-id>",
+		Short: "Display the reasoning trace for a run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			jsonMode, _ := cmd.Flags().GetBool("json")
+
+			tracePath := filepath.Join(cwd, ".radiant-harness", "traces", runID+".jsonl")
+			events, err := loop.ReadTrace(tracePath)
+			if err != nil {
+				return fmt.Errorf("run %q not found: %w", runID, err)
+			}
+
+			if jsonMode {
+				b, _ := json.MarshalIndent(events, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+
+			fmt.Printf("Trace: %s (%d events)\n\n", runID, len(events))
+			fmt.Print(loop.FormatTrace(events))
+			return nil
+		},
+	}
+	traceShowCmd.Flags().Bool("json", false, "Output raw JSON")
+
+	traceListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all trace run IDs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			ids, err := loop.ListTraces(cwd)
+			if err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				fmt.Println("No traces found. Start a loop with: radiant loop start \"<goal>\"")
+				return nil
+			}
+			for _, id := range ids {
+				fmt.Println(id)
+			}
+			return nil
+		},
+	}
+
+	traceCmd.AddCommand(traceShowCmd, traceListCmd)
+	root.AddCommand(traceCmd)
 
 	// ── version ──
 	root.SetVersionTemplate("{{.Version}}\n")
