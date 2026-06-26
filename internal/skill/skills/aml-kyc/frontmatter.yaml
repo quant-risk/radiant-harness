@@ -1,0 +1,74 @@
+name: aml-kyc
+version: 1.0.0
+description: |
+  AML (Anti-Money Laundering) and KYC (Know Your Customer)
+  guidance: customer identification, beneficial ownership,
+  sanctions screening (OFAC, EU, UN), PEP (politically exposed
+  persons) screening, transaction monitoring, suspicious
+  activity reporting (SAR/STR), FATF recommendations, country
+  risk, EDD (enhanced due diligence), correspondent banking.
+  Use when the project designs or audits AML / KYC / sanctions
+  compliance programs.
+when_to_use: |
+  Project designs KYC onboarding flows. Sanctions screening
+  (OFAC SDN, EU consolidated, UN). PEP screening. Beneficial
+  ownership (FATF Rec 24). Transaction monitoring rules.
+  Suspicious Activity Report (SAR) workflows. Country risk
+  rating. EDD for high-risk customers. Correspondent banking
+  due diligence (FATF Rec 13).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: program_scope
+    type: enum
+    required: true
+    description: '"onboarding" | "transaction-monitoring" | "sanctions" | "pep" | "sar" | "correspondent-banking"'
+  - name: jurisdiction
+    type: enum
+    required: false
+    description: '"us" | "eu" | "uk" | "br" | "global" | "fatf"'
+
+outputs:
+  - path: docs/aml-kyc/risk-assessment.md
+    type: artifact
+    description: Customer / counterparty AML risk assessment.
+  - path: docs/aml-kyc/screening-config.md
+    type: artifact
+    description: 'Sanctions / PEP screening configuration: lists, thresholds, fuzzy match.'
+
+gates:
+  - name: sanctions-real-time
+    description: Sanctions screening in real-time at onboarding + before payment. OFAC SDN minimum.
+  - name: beneficial-ownership-identified
+    description: Beneficial ownership identified to 25% threshold (FATF Rec 24; lower if higher risk).
+  - name: pep-screened
+    description: PEP screening at onboarding + ongoing monitoring; 1y refresh for PEPs.
+  - name: transaction-monitoring-rules
+    description: TM rules calibrated to customer risk profile; false-positive ratio monitored.
+  - name: sar-workflow-documented
+    description: SAR/STR workflow documented with escalation + decision log + filing.
+
+context_provides:
+  - state.md
+  - docs/aml-kyc/
+
+commands_available:
+  - radiant aml-kyc <scope> --jurisdiction=<...>
+
+related_skills:
+  - security
+  - compliance
+  - data
+  - regulatory
+  - operational-risk
+
+anti_patterns:
+  - "Sanctions screening batch-only: payments processed before screening"
+  - "Beneficial ownership < 25% threshold: misses shell companies"
+  - "PEP screening at onboarding only: doesn't catch later-promoted PEPs"
+  - "TM rules with high false-positive rate: alert fatigue + missed true positives"
+
+author: radiant-harness contributors
+license: MIT

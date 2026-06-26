@@ -1203,6 +1203,40 @@ func main() {
 	autodataCmd.Flags().Bool("dry-run", false, "print generated skill to stdout instead of writing files")
 	root.AddCommand(autodataCmd)
 
+	// ── validate (Sprint 32c — validate a scaffolded plan / spec) ──
+	// `radiant validate <path>` runs basic sanity checks on a
+	// scaffolded artifact (stats-plan, causal-plan, model-spec,
+	// train-plan, etc.): file exists, has expected sections, no
+	// obvious placeholders left. Returns non-zero on failure.
+	validateFileCmd := &cobra.Command{
+		Use:   "validate-file <path>",
+		Short: "Validate a scaffolded plan or spec (sections, placeholders, syntax)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+			return runValidate(path)
+		},
+	}
+	root.AddCommand(validateFileCmd)
+
+	// ── profile (Sprint 32c — data / model profile scaffold) ──
+	// `radiant profile <dataset>` produces a data-profile scaffold
+	// (docs/profile/<dataset>-profile.md): schema, row count,
+	// null rates, distribution checks, drift metrics, monitoring
+	// plan. Wires the radiant-data + radiant-drift skills.
+	profileCmd := &cobra.Command{
+		Use:   "profile <dataset>",
+		Short: "Scaffold a data profile (schema, distributions, drift, monitoring)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dataset := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			return runProfileScaffold(dataset, out)
+		},
+	}
+	profileCmd.Flags().StringP("output", "o", "", "output path (default: docs/profile/<dataset>-profile.md)")
+	root.AddCommand(profileCmd)
+
 	// ── incident (Sprint 19 — incident response scaffold) ──
 	// `radiant incident <severity> <summary>` wires the `incident`
 	// skill to a CLI. Generates docs/incidents/<NNNN>-<slug>.md
@@ -3612,6 +3646,155 @@ func runDriftScaffold(modelID, out string) error {
 	return nil
 }
 
+// runValidate performs basic sanity checks on a scaffolded
+// plan or spec: file exists, has expected sections (heuristic:
+// markdown headings or scaffold-specific anchors), and no
+// obvious TODOs or placeholders left. Returns non-zero on
+// failure so callers (CI / pre-commit) can gate on it.
+func runValidate(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	body := string(data)
+	issues := []string{}
+
+	// Heuristic 1: must not be empty
+	if len(body) < 100 {
+		issues = append(issues, "file is suspiciously short (<100 bytes)")
+	}
+
+	// Heuristic 2: must have a top-level heading
+	if !strings.HasPrefix(strings.TrimSpace(body), "#") {
+		issues = append(issues, "no top-level markdown heading found")
+	}
+
+	// Heuristic 3: must not contain unfilled placeholders
+	// (heuristic: <TODO or <fill in or `<...>` placeholder)
+	placeholderPatterns := []string{
+		"<TODO",
+		"<fill in",
+		"<FILL",
+		"<your ",
+		"<path/to/",
+		"<n>",
+	}
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		for _, p := range placeholderPatterns {
+			if strings.Contains(line, p) {
+				issues = append(issues, fmt.Sprintf("line %d has placeholder '%s': %s", i+1, p, strings.TrimSpace(line)))
+				break
+			}
+		}
+	}
+
+	// Heuristic 4: scaffold-specific section expectations
+	if strings.HasSuffix(path, "-plan.md") || strings.HasSuffix(path, "-spec.md") || strings.HasSuffix(path, "-eval.md") || strings.HasSuffix(path, "-monitor.md") || strings.HasSuffix(path, "-request.md") {
+		for _, sec := range []string{"## Decision tree", "## Workflow", "## Examples", "## Anti-patterns"} {
+			if !strings.Contains(body, sec) {
+				issues = append(issues, fmt.Sprintf("missing section: %s", sec))
+			}
+		}
+	}
+
+	if len(issues) == 0 {
+		fmt.Printf("  ✓ %s: validated (%d lines, 0 issues)\n", path, len(lines))
+		return nil
+	}
+	fmt.Printf("  ✗ %s: %d issue(s)\n", path, len(issues))
+	for _, issue := range issues {
+		fmt.Printf("    - %s\n", issue)
+	}
+	return fmt.Errorf("%s failed validation", path)
+}
+
+// runProfileScaffold produces a data profile scaffold following
+// the radiant-data + radiant-drift skills. Captures schema, row
+// counts, null rates, distributions, drift metrics, monitoring
+// plan.
+func runProfileScaffold(dataset, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/profile/%s-profile.md", dataset)
+	}
+	body := fmt.Sprintf(`# Data profile: %s
+
+> Scaffolded by `+"`radiant profile %s`"+` on %s.
+> Follows the radiant-data + radiant-drift skills.
+
+## 1. Source
+
+- Path: <path or URL>
+- Format: <CSV / Parquet / Delta / SQL / API>
+- Owner: <team>
+- Refresh: <frequency>
+
+## 2. Schema
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| <col_1> | <type> | yes / no | <description> |
+| <col_2> | <type> | yes / no | <description> |
+| ... | ... | ... | ... |
+
+## 3. Volume
+
+| Metric | Value | Trend |
+|--------|-------|-------|
+| Row count | <n> | <growing / stable> |
+| Daily insert rate | <n> | |
+| Storage size | <GB> | |
+| Cardinality (key columns) | <n> | |
+
+## 4. Quality
+
+| Metric | Threshold | Current |
+|--------|-----------|---------|
+| Null rate (per column) | <5%% | <report> |
+| Duplicate rate (key) | 0%% | <report> |
+| Referential integrity | 100%% | <report> |
+| Schema drift events / month | <1 | <report> |
+
+## 5. Distributions
+
+For key columns:
+- Numeric: mean, std, min, max, quantiles
+- Categorical: top-K categories, distribution
+- Date: range, gaps
+- Free text: length distribution, top tokens
+
+## 6. Drift monitoring
+
+| Column | PSI threshold | KS p-value | Alert |
+|--------|---------------|-----------|-------|
+| <col> | <0.2> | <0.05> | <action> |
+
+## 7. Monitoring plan
+
+- Daily: row count, null rate, schema drift
+- Weekly: PSI per top-10 columns
+- Monthly: distribution summary + outlier report
+
+## 8. Anti-patterns checklist
+
+- [ ] Schema documented; lineage tracked
+- [ ] Quality thresholds set; alerts configured
+- [ ] Drift monitoring on top-K columns
+- [ ] PII identified; access controls enforced
+- [ ] Retention policy defined
+`, dataset, dataset, time.Now().UTC().Format("2006-01-02"))
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in source, schema, distributions, drift metrics.\n")
+	return nil
+}
+
 // renderIncidentDoc produces the incident document body. The
 // user fills in the timeline + RCA + action items following
 // the structure. MVP: template only; LLM via the `incident` skill
@@ -5400,17 +5583,27 @@ func runAutodata(skillName, domain, out string, dryRun bool) error {
 		out = filepath.Join("internal", "skill", "skills", skillName)
 	}
 
-	// Check LLM availability
-	apiKey := os.Getenv("RADIANT_OPENAI_API_KEY")
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	provider := "openai"
-	if apiKey == "" {
-		apiKey = os.Getenv("RADIANT_ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			apiKey = os.Getenv("ANTHROPIC_API_KEY")
-		}
+	// Check LLM availability (vendor-neutral: OpenRouter first,
+	// then OpenAI, then Anthropic — never bias toward one).
+	apiKey := ""
+	provider := ""
+	if v := os.Getenv("RADIANT_OPENROUTER_API_KEY"); v != "" {
+		apiKey = v
+		provider = "openrouter"
+	} else if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+		apiKey = v
+		provider = "openrouter"
+	} else if v := os.Getenv("RADIANT_OPENAI_API_KEY"); v != "" {
+		apiKey = v
+		provider = "openai"
+	} else if v := os.Getenv("OPENAI_API_KEY"); v != "" {
+		apiKey = v
+		provider = "openai"
+	} else if v := os.Getenv("RADIANT_ANTHROPIC_API_KEY"); v != "" {
+		apiKey = v
+		provider = "anthropic"
+	} else if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
+		apiKey = v
 		provider = "anthropic"
 	}
 
@@ -5419,12 +5612,16 @@ func runAutodata(skillName, domain, out string, dryRun bool) error {
 		return emitAutodataStub(skillName, domain, out, dryRun)
 	}
 
-	// Resolve model
+	// Resolve model. OpenRouter requires `provider/model` format
+	// (e.g. "deepseek/deepseek-chat"); other providers use bare names.
 	modelName := os.Getenv("RADIANT_MODEL")
 	if modelName == "" {
-		if provider == "anthropic" {
+		switch provider {
+		case "openrouter":
+			modelName = "deepseek/deepseek-chat"
+		case "anthropic":
 			modelName = "claude-sonnet-4-5"
-		} else {
+		default:
 			modelName = "gpt-4o"
 		}
 	}
@@ -5558,7 +5755,7 @@ license: MIT
 		fmt.Println(frontmatter)
 		fmt.Println("--- SKILL.md ---")
 		fmt.Println(skillMD)
-		fmt.Println("\n(no LLM API key; set RADIANT_OPENAI_API_KEY or RADIANT_ANTHROPIC_API_KEY to generate via LLM)")
+		fmt.Println("\n(no LLM API key; set RADIANT_OPENROUTER_API_KEY (recommended; vendor-neutral), RADIANT_OPENAI_API_KEY, or RADIANT_ANTHROPIC_API_KEY to generate via LLM)")
 		return nil
 	}
 
@@ -5571,7 +5768,7 @@ license: MIT
 	if err := os.WriteFile(filepath.Join(out, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
 		return fmt.Errorf("write SKILL.md: %w", err)
 	}
-	fmt.Printf("  ✓ Stub written to %s (no LLM API key; set RADIANT_OPENAI_API_KEY or RADIANT_ANTHROPIC_API_KEY to use LLM)\n", out)
+	fmt.Printf("  ✓ Stub written to %s (no LLM API key; set RADIANT_OPENROUTER_API_KEY (recommended; vendor-neutral), RADIANT_OPENAI_API_KEY, or RADIANT_ANTHROPIC_API_KEY to use LLM)\n", out)
 	return nil
 }
 
@@ -5581,14 +5778,15 @@ Generate a skill named %q following the open MIT schema (docs/SKILL-SCHEMA.md).
 
 OUTPUT FORMAT (strict):
 1. First emit "===FRONTMATTER===" on its own line.
-2. Then emit valid YAML frontmatter with: name, version, description (multi-line, |), when_to_use (multi-line), tier_eligible (list of: trivial, feature, architecture), inputs (list with name/type/required/description; type must be: string, number, enum, object, path), outputs (list with path/type/description), gates (list with name/description), context_provides (list), commands_available (list), related_skills (list), anti_patterns (list of quoted strings).
+2. Then emit valid YAML frontmatter with: name, version, description (multi-line, |), when_to_use (multi-line), tier_eligible (list of: trivial, feature, architecture), inputs (list with name/type/required/description; type must be: string, number, enum, object, path), outputs (list with path/type/description; output type must be: artifact, report, commit, pr, decision — NOT object/path/string), gates (list with name/description), context_provides (list), commands_available (list), related_skills (list), anti_patterns (list of quoted strings).
 3. Then emit "===SKILLMD===" on its own line.
-4. Then emit SKILL.md content with sections: Decision tree, Workflow (numbered steps), Examples (2-3 concrete examples), Anti-patterns (table or list), Failure modes, Related skills.
+4. Then emit SKILL.md content with sections: "# Skill: <name>" (title), "## Decision tree", "## Workflow" (numbered steps), "## Examples" (2-3 concrete examples), "## Anti-patterns" (table or list), "## Failure modes" (table), "## Related skills".
 
 CRITICAL RULES:
-- frontmatter types MUST be: string, number, enum, object, path (NOT list, NOT integer).
+- inputs.*.type MUST be one of: string, number, enum, object, path (NOT list, NOT integer).
+- outputs.*.type MUST be one of: artifact, report, commit, pr, decision (NOT object, NOT string).
 - descriptions in YAML must NOT contain unquoted colons.
-- SKILL.md must include "## Decision tree", "## Workflow", "## Examples", "## Anti-patterns", "## Failure modes", "## Related skills".
+- SKILL.md must include "# Skill: <name>", "## Decision tree", "## Workflow", "## Examples", "## Anti-patterns", "## Failure modes", "## Related skills".
 - Be specific; cite real methodologies, real metrics, real failure modes.
 `, skillName)
 }

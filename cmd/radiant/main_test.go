@@ -1333,6 +1333,110 @@ func TestParseAutodataResponseMissingMarkers(t *testing.T) {
 	}
 }
 
+func TestValidateFilePasses(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "good.md")
+	// Realistic-length content (>=100 bytes) with all sections
+	body := `# Good file
+
+This is a comprehensive scaffold that has been filled in.
+
+## Decision tree
+
+Step 1 -> Step 2.
+
+## Workflow
+
+Step 1, 2, 3 documented.
+
+## Examples
+
+Example 1, 2, 3.
+
+## Anti-patterns
+
+Anti-pattern 1: avoided.
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runValidate(path); err != nil {
+		t.Errorf("validate should pass on complete file; got %v", err)
+	}
+}
+
+func TestValidateFileFailsOnPlaceholders(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "scaffold.md")
+	body := "# Scaffold\n\n## Decision tree\n\n## Workflow\n\n## Examples\n\n## Anti-patterns\n\n- <TODO: fix this>\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runValidate(path); err == nil {
+		t.Error("validate should fail on placeholder content")
+	}
+}
+
+func TestValidateFileFailsOnMissingSections(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "plan.md")
+	body := "# Plan\n\n## Decision tree\n\n## Workflow\n\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runValidate(path); err == nil {
+		t.Error("validate should fail on missing sections (plan/scaffold/eval/monitor/request)")
+	}
+}
+
+func TestValidateFileMissing(t *testing.T) {
+	if err := runValidate("/nonexistent/path/file.md"); err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestProfileScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runProfileScaffold("customers", ""); err != nil {
+		t.Fatalf("runProfileScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/profile/customers-profile.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Data profile: customers",
+		"## 1. Source",
+		"## 2. Schema",
+		"## 3. Volume",
+		"## 4. Quality",
+		"## 5. Distributions",
+		"## 6. Drift monitoring",
+		"## 7. Monitoring plan",
+		"Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in profile scaffold", want)
+		}
+	}
+}
+
 func TestBumpVersionInSourceDryRun(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
 	if err := bumpVersionInSource("0.5.1", true); err != nil {

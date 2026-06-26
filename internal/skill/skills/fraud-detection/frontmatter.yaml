@@ -1,0 +1,72 @@
+name: fraud-detection
+version: 1.0.0
+description: |
+  Fraud detection guidance: identity fraud, payment fraud,
+  application fraud, account takeover, first-party fraud,
+  friendly fraud, money laundering (link to aml-kyc), fraud
+  analytics (rules + ML + graph), alert triage, investigation,
+  chargebacks, recovery. Use when the project designs or
+  operates a fraud detection programme in financial services,
+  e-commerce, or insurance.
+when_to_use: |
+  Project designs fraud rules (transaction, behavioural, device).
+  ML fraud models (supervised, anomaly, graph). Alert triage +
+  investigation workflow. Identity verification (KYC integration).
+  Application fraud (synthetic identity, stolen credentials).
+  Payment fraud (card-not-present, account takeover). First-party
+  fraud (chargeback abuse). Insurance fraud (claims). Friendly
+  fraud. Chargeback management. Recovery.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: fraud_type
+    type: enum
+    required: true
+    description: '"identity" | "application" | "payment" | "account-takeover" | "first-party" | "friendly" | "insurance-claims" | "money-laundering"'
+  - name: detection_method
+    type: enum
+    required: false
+    description: '"rules" | "ml-supervised" | "ml-anomaly" | "graph" | "hybrid"'
+
+outputs:
+  - path: docs/fraud-detection/rules-config.md
+    type: artifact
+    description: 'Fraud rules configuration: triggers, thresholds, escalation.'
+  - path: docs/fraud-detection/model-spec.md
+    type: artifact
+    description: 'ML fraud model spec: features, target, evaluation metrics.'
+
+gates:
+  - name: precision-target
+    description: ML model precision >= target (e.g. 95%); false-positive rate monitored.
+  - name: recall-target
+    description: Recall >= target; high-value fraud caught.
+  - name: review-sla
+    description: Alert review SLA defined (e.g. <1h for high-risk); investigator capacity sized.
+  - name: customer-impact
+    description: Customer impact assessed (false positives harm UX); soft-block vs hard-block.
+
+context_provides:
+  - state.md
+  - docs/fraud-detection/
+
+commands_available:
+  - radiant fraud-detection <type> --method=<rules|ml|...>
+
+related_skills:
+  - aml-kyc
+  - ml
+  - stats
+  - data
+  - security
+
+anti_patterns:
+  - "High false-positive rate: alert fatigue + customer friction"
+  - "ML model without chargeback feedback: target leakage / concept drift"
+  - "Single rule layer: bypassed by sophisticated fraud"
+  - "No investigator capacity: alerts queue but never reviewed"
+
+author: radiant-harness contributors
+license: MIT

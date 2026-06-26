@@ -1,0 +1,71 @@
+name: credit-portfolio
+version: 1.0.0
+description: |
+  Credit portfolio guidance: portfolio-level credit risk
+  (concentration, sector, geographic), credit migration
+  matrices, portfolio PD / LGD / EAD aggregation, RWA
+  calculation, portfolio stress testing, vintage analysis,
+  limit management, single-name and portfolio limits. Use when
+  the project manages or analyses credit risk at the portfolio
+  level (not single-name).
+when_to_use: |
+  Project computes portfolio PD / LGD / EAD aggregation.
+  Concentration analysis (single-name, sector, geo). Credit
+  migration matrices. Portfolio stress testing. RWA calculation
+  for regulatory capital. Vintage / cohort analysis. Limit
+  management framework. Securitisation / portfolio sales.
+  Credit VaR.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: portfolio_type
+    type: enum
+    required: true
+    description: '"retail" | "sme" | "corporate" | "sovereign" | "bank" | "mixed"'
+  - name: analysis_type
+    type: enum
+    required: true
+    description: '"concentration" | "migration" | "rwa" | "stress" | "var" | "vintage" | "limit-management"'
+
+outputs:
+  - path: docs/credit-portfolio/concentration-report.md
+    type: artifact
+    description: 'Concentration metrics: HHI, top-N share, sector / geo breakdown.'
+  - path: docs/credit-portfolio/migration-matrix.md
+    type: artifact
+    description: Credit rating migration matrix; PD by rating; LGD by seniority.
+
+gates:
+  - name: data-quality
+    description: 'Data quality: exposure IDs unique; ratings current; sector codes standardised.'
+  - name: concentration-limits
+    description: Concentration limits defined per single-name, sector, geo; breach alerting.
+  - name: stress-results-validated
+    description: Stress test results validated against benchmarks; methodology approved.
+  - name: rwa-reconciliation
+    description: RWA reconciled to accounting; variance explained.
+
+context_provides:
+  - state.md
+  - docs/credit-portfolio/
+
+commands_available:
+  - radiant credit-portfolio <type> --analysis=<...>
+
+related_skills:
+  - credit-risk
+  - market-risk
+  - stress-test
+  - model-risk
+  - actuarial
+
+anti_patterns:
+  - "Single-name concentration > 10% capital: no early warning"
+  - "Migration matrix without seasoning: biased estimates"
+  - "Stress test without correlation: assumes independence"
+  - "RWA from PD without LGD/EAD modelling: underestimates loss"
+
+author: radiant-harness contributors
+license: MIT
