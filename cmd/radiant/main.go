@@ -1701,8 +1701,116 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	}
 	contextCompressCmd.Flags().Int("budget", 0, "Target token budget (required)")
 
-	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd)
+	contextSummarizeCmd := &cobra.Command{
+		Use:   "summarize --phase=<phase>",
+		Short: "Compress a completed phase's context to ≤20% of original tokens",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			phase, _ := cmd.Flags().GetString("phase")
+			if phase == "" {
+				return fmt.Errorf("--phase is required (e.g. --phase=execute)")
+			}
+
+			// Read CONTEXT.md as the content to summarize
+			path := filepath.Join(cwd, ".radiant-harness", "CONTEXT.md")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read CONTEXT.md: %w (run `radiant context assemble` first)", err)
+			}
+
+			result := radctx.SummarizePhase(phase, string(data))
+
+			// Write summarized content back
+			if err := os.WriteFile(path, []byte(result.Content), 0o644); err != nil {
+				return fmt.Errorf("write CONTEXT.md: %w", err)
+			}
+
+			fmt.Printf("✓ Phase %q summarized: %d → %d tokens (%.0f%% of original)\n",
+				phase, result.Original, result.Summarized, result.Ratio*100)
+			if len(result.KeyFacts) > 0 {
+				fmt.Printf("  Preserved %d key facts\n", len(result.KeyFacts))
+			}
+			return nil
+		},
+	}
+	contextSummarizeCmd.Flags().String("phase", "", "Phase whose context to summarize (discover|plan|execute|verify|persist)")
+
+	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd, contextSummarizeCmd)
 	root.AddCommand(contextCmd)
+
+	// ── budget (Sprint 37) ───────────────────────────────────────────────────
+	budgetCmd := &cobra.Command{
+		Use:   "budget",
+		Short: "Token budget estimation and reporting",
+	}
+
+	budgetEstimateCmd := &cobra.Command{
+		Use:   "estimate [spec-dir-or-file]",
+		Short: "Estimate token consumption per phase before running",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profile, _ := cmd.Flags().GetString("profile")
+			prof := radctx.GetProfile(profile)
+
+			var content string
+			if len(args) > 0 {
+				data, err := os.ReadFile(args[0])
+				if err != nil {
+					return fmt.Errorf("read %s: %w", args[0], err)
+				}
+				content = string(data)
+			}
+
+			estimates := radctx.EstimateSpec(content, prof)
+			fmt.Print(radctx.FormatEstimate(estimates, prof))
+			return nil
+		},
+	}
+	budgetEstimateCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
+
+	budgetReportCmd := &cobra.Command{
+		Use:   "report <run-id>",
+		Short: "Show post-run token usage report from trace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			tracePath := filepath.Join(cwd, ".radiant-harness", "traces", runID+".jsonl")
+
+			events, err := loop.ReadTrace(tracePath)
+			if err != nil {
+				return fmt.Errorf("trace %q not found: %w", runID, err)
+			}
+
+			// Aggregate tokens per phase
+			phaseIn := map[string]int{}
+			phaseOut := map[string]int{}
+			for _, e := range events {
+				phaseIn[string(e.Phase)] += e.TokensIn
+				phaseOut[string(e.Phase)] += e.TokensOut
+			}
+
+			fmt.Printf("Token report — run: %s (%d events)\n\n", runID, len(events))
+			fmt.Printf("%-12s %10s %10s %10s\n", "Phase", "Tokens In", "Tokens Out", "Total")
+			fmt.Println("------------ ---------- ---------- ----------")
+			totalIn, totalOut := 0, 0
+			for _, phase := range []string{"discover", "plan", "execute", "verify", "persist", "unknown"} {
+				in, out := phaseIn[phase], phaseOut[phase]
+				if in+out == 0 {
+					continue
+				}
+				fmt.Printf("%-12s %10d %10d %10d\n", phase, in, out, in+out)
+				totalIn += in
+				totalOut += out
+			}
+			fmt.Println("------------ ---------- ---------- ----------")
+			fmt.Printf("%-12s %10d %10d %10d\n", "TOTAL", totalIn, totalOut, totalIn+totalOut)
+			return nil
+		},
+	}
+
+	budgetCmd.AddCommand(budgetEstimateCmd, budgetReportCmd)
+	root.AddCommand(budgetCmd)
 
 	// ── loop (Sprint 35) ─────────────────────────────────────────────────────
 	loopCmd := &cobra.Command{
