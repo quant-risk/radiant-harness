@@ -201,20 +201,34 @@ radiant evals
 | `audit` | 0.6.0 | Project layout audit |
 | `mcp serve` | 0.6.0 | MCP server (stdio) |
 
-## Skills (17 bundled)
+## Skills (60 bundled)
 
-The CLI ships these vendor-neutral skills in `.radiant-harness/skills/`:
+The CLI ships 60 vendor-neutral skills in `.radiant-harness/skills/`.
+In v2.0, skills are lazy-loaded: only 3–10 relevant to your project
+are included in context (see [docs/CONTEXT-ENGINE.md](docs/CONTEXT-ENGINE.md)).
 
-**Core methodology:** `nova-feature`, `nova-product`, `kickoff`, `clarificar`
+**Core methodology (always loaded):** `nova-feature`, `nova-product`, `kickoff`, `clarificar`
 
 **Quality:** `validar`, `auditar`, `metricas`, `evals`, `revisar-pr`
 
-**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`
+**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`, `handoff`, `roadmap`
 
-**Operations:** `integracoes`, `setup-ci`, `update`, `handoff`, `roadmap`
+**Finance & Risk:** `finance`, `credit-risk`, `credit-portfolio`, `market-risk`,
+`liquidity-risk`, `operational-risk`, `model-risk`, `stress-test`, `regulatory`,
+`actuarial`, `actuarial-solvency`, `accounting`, `controlling`, `tax`, `valuation`,
+`aml-kyc`, `fraud-detection`, `capital-markets`
+
+**ML & Data:** `ml`, `deep-learning`, `reinforcement-learning`, `causal`, `causal-ml`,
+`bayesian`, `stats`, `econometrics`, `synthetic-data`, `evals`, `data`
+
+**Engineering:** `api`, `cli`, `security`, `setup-ci`, `integracoes`, `update`, `incident`
+
+**Domain:** `frontend`, `mobile`, `iot`, `game`, `blockchain`, `marketing`
+
+**Science:** `biology`, `chemistry`, `physics`, `quantum-physics`, `quantum-ml`
 
 Each skill is plain Markdown + YAML frontmatter — any LLM can
-consume them. The open spec is at `docs/SKILL-SCHEMA.md`.
+consume them. The open spec is at [docs/SKILL-SCHEMA.md](docs/SKILL-SCHEMA.md).
 
 ## Architecture
 

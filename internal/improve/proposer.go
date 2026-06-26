@@ -114,9 +114,7 @@ func buildProposal(p FailurePattern, skillName, projectDir string) *Proposal {
 	if projectDir != "" {
 		skillPath := filepath.Join(projectDir, ".radiant-harness", "skills", skillName, "SKILL.md")
 		if data, err := os.ReadFile(skillPath); err == nil {
-			if strings.Contains(string(data), prop.Before) {
-				prop.Before = prop.Before // confirmed it exists
-			} else {
+			if !strings.Contains(string(data), prop.Before) {
 				// The skill file doesn't have the exact before-text; use generic description
 				prop.Before = ""
 			}
