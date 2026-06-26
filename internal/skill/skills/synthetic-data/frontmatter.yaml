@@ -1,0 +1,78 @@
+name: synthetic-data
+version: 1.0.0
+description: |
+  Synthetic data generation guidance: agentic data generation
+  (Autodata-style), self-instruct, self-play, distribution
+  matching, privacy preservation (differential privacy),
+  evaluation of synthetic data quality, when to use vs when
+  not to. Use when the project generates synthetic training
+  data, eval data, or test data — especially with LLMs or
+  classical models.
+when_to_use: |
+  Project generates synthetic training data for ML / LLM
+  fine-tuning. Need eval data when real data is sensitive
+  (PII / PHI / financial). Synthetic test data for pipelines
+  or demos. Data augmentation. Distribution matching between
+  source and target. Privacy-preserving data sharing.
+  Reference: Autodata (Kulikov et al., 2026).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: data_purpose
+    type: enum
+    required: true
+    description: '"training" | "evaluation" | "augmentation" | "testing" | "demo" | "privacy-preserving-share"'
+  - name: modality
+    type: enum
+    required: true
+    description: '"text" | "tabular" | "image" | "code" | "multimodal" | "time-series" | "graph"'
+  - name: generation_method
+    type: enum
+    required: false
+    description: '"llm-self-instruct" | "llm-self-play" | "agentic-data-scientist" | "statistical" | "gan" | "vae" | "noise-based"'
+
+outputs:
+  - path: docs/synthetic-data/data-card.md
+    type: artifact
+    description: 'Synthetic data card: generation method, source, sample, quality metrics, limitations.'
+  - path: docs/synthetic-data/quality-report.md
+    type: artifact
+    description: 'Quality evaluation: fidelity, diversity, downstream utility, privacy leakage.'
+
+gates:
+  - name: data-card-documented
+    description: 'Synthetic data card: method, source, sample size, schema, known limitations.'
+  - name: downstream-utility-tested
+    description: 'Downstream task tested: model trained on real beats synthetic by significant margin. Otherwise synthetic is useless.'
+  - name: privacy-leakage-assessed
+    description: 'Privacy leakage assessed: membership inference; nearest-neighbour distance to real.'
+  - name: distribution-fidelity-measured
+    description: 'Distribution fidelity measured: marginal / joint / correlation match between real and synthetic.'
+  - name: bias-propagation-checked
+    description: Bias in source data NOT propagated / amplified. Synthetic bias measured vs source bias.
+
+context_provides:
+  - state.md
+  - docs/synthetic-data/
+
+commands_available:
+  - radiant synthetic-data <purpose> --modality=<...>
+
+related_skills:
+  - ml
+  - data
+  - causal
+  - stats
+  - security
+
+anti_patterns:
+  - "Synthetic without downstream test: looks good, fails in practice"
+  - "Training on synthetic to predict real: utility gap usually large"
+  - "No privacy assessment: leakage of real data via nearest-neighbour"
+  - "Bias amplification: synthetic amplifies source bias"
+  - "Self-instruct without diversity control: mode collapse"
+
+author: radiant-harness contributors
+license: MIT

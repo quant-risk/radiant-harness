@@ -1084,6 +1084,47 @@ func main() {
 	causalEstCmd.Flags().StringP("output", "o", "", "output path (default: docs/causal/<design>-plan.md)")
 	root.AddCommand(causalEstCmd)
 
+	// ── model (Sprint 30c — model spec scaffold) ──
+	// `radiant model <type>` produces a structured model spec
+	// scaffold (docs/model/<type>-spec.md) following the
+	// radiant-ml skill. Captures: target, features, train/eval
+	// split, baseline, primary metric, ethics + monitoring plan.
+	modelCmd := &cobra.Command{
+		Use:   "model <type>",
+		Short: "Scaffold a model spec (target, features, baseline, metric, monitoring)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			typ := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			successMetric, _ := cmd.Flags().GetString("success-metric")
+			return runModelScaffold(typ, successMetric, out)
+		},
+	}
+	modelCmd.Flags().StringP("output", "o", "", "output path (default: docs/model/<type>-spec.md)")
+	modelCmd.Flags().String("success-metric", "", "business-aligned success metric (e.g. '5% reduction in churn false negatives')")
+	root.AddCommand(modelCmd)
+
+	// ── predict (Sprint 30c — prediction request scaffold) ──
+	// `radiant predict <model-id>` produces a structured prediction
+	// request scaffold (docs/predict/<model-id>-request.md):
+	// input contract, latency SLO, error semantics, monitoring
+	// hook, fall-back policy. Wires the radiant-ml skill to a
+	// concrete serving spec.
+	predictCmd := &cobra.Command{
+		Use:   "predict <model-id>",
+		Short: "Scaffold a model serving request (inputs, latency, errors, monitoring)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			modelID := args[0]
+			out, _ := cmd.Flags().GetString("output")
+			latencyMs, _ := cmd.Flags().GetInt("latency-ms")
+			return runPredictScaffold(modelID, latencyMs, out)
+		},
+	}
+	predictCmd.Flags().StringP("output", "o", "", "output path (default: docs/predict/<model-id>-request.md)")
+	predictCmd.Flags().Int("latency-ms", 200, "p99 latency budget in milliseconds")
+	root.AddCommand(predictCmd)
+
 	// ── incident (Sprint 19 — incident response scaffold) ──
 	// `radiant incident <severity> <summary>` wires the `incident`
 	// skill to a CLI. Generates docs/incidents/<NNNN>-<slug>.md
@@ -3044,6 +3085,200 @@ the conclusion?
 	fmt.Printf("  ✓ Scaffolded %s\n", out)
 	fmt.Printf("    Fill in DAG, identification assumption, and estimation strategy.\n")
 	fmt.Printf("    See radiant-causal + radiant-causal-ml skills for guidance.\n")
+	return nil
+}
+
+// runModelScaffold produces a structured model spec scaffold
+// following the radiant-ml skill workflow. Captures: target,
+// features, baseline, primary metric, training recipe,
+// monitoring, and ethics review.
+func runModelScaffold(typ, successMetric, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/model/%s-spec.md", typ)
+	}
+	metricLine := "<fill in business-aligned success metric>"
+	if successMetric != "" {
+		metricLine = fmt.Sprintf("\"%s\"", successMetric)
+	}
+	body := fmt.Sprintf(`# Model spec: %s
+
+> Scaffolded by `+"`radiant model %s`"+` on %s.
+> Follows the radiant-ml skill workflow.
+
+## 1. Problem framing
+
+- **Task**: <classification / regression / ranking / generation / embedding>
+- **Target variable**: <what we're predicting>
+- **Population**: <who / what>
+- **Decision-maker**: <who uses the prediction>
+- **Success metric**: %s
+- **Cost matrix**: Type I vs Type II errors; explicit quantification
+
+## 2. Data
+
+- **Source**: <dataset; row count; date range>
+- **Label provenance**: <who labelled, with what rubric, when>
+- **Train / val / test split**: <criteria; lock test IDs BEFORE any feature work>
+- **Known biases**: <where the data is NOT representative of production>
+- **Leakage audit**: <fields not available at inference time>
+
+## 3. Baseline
+
+Trivial baseline (must be beaten meaningfully):
+- Predict majority class / mean / last value
+- Compute metric on baseline
+- Target: ML model beats baseline by >=10-30%% relative
+
+## 4. Features
+
+- Top features by importance
+- Engineered features (volume × price × mix, etc.)
+- Forbidden features (PII, leakage, regulatory)
+- Time-alignment with target
+
+## 5. Method
+
+- Algorithm: <logistic / GBDT / neural net / etc.>
+- Justification: <why this class>
+- Training recipe: <optimizer, LR schedule, batch size, regularization>
+- Compute budget: <training time, GPU/CPU hours>
+
+## 6. Evaluation
+
+- **Primary metric**: %s
+- **Diagnostic metrics**: <AUC, calibration, fairness slices>
+- **Held-out test**: <once; not touched during development>
+- **Statistical significance**: <>=5 seeds; report CI>
+
+## 7. Monitoring (post-deployment)
+
+- **Data drift**: PSI per top feature; alert >0.2
+- **Prediction distribution**: weekly mean + CI
+- **Outcome**: <feedback loop if available; business metric>
+- **Rollback path**: <fallback model / heuristic / no-prediction>
+
+## 8. Ethics + fairness
+
+- Demographic slices: <break down by protected attributes>
+- Calibration parity: <do predictions reflect true probability across groups>
+- Out-of-scope uses: <documented in model card>
+
+## 9. Anti-patterns checklist
+
+- [ ] Target + success metric stated BEFORE data exploration
+- [ ] Test IDs locked BEFORE feature engineering
+- [ ] Trivial baseline computed + beaten meaningfully
+- [ ] Primary metric is business-aligned (not just accuracy)
+- [ ] Held-out test set untouched during development
+- [ ] >=5 random seeds; report CI
+- [ ] Monitoring + rollback path defined BEFORE deployment
+- [ ] Fairness audit completed
+`, typ, typ, time.Now().UTC().Format("2006-01-02"), metricLine, metricLine)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in target, baseline, metric, training recipe, monitoring plan.\n")
+	fmt.Printf("    See radiant-ml skill for guidance.\n")
+	return nil
+}
+
+// runPredictScaffold produces a structured prediction request
+// scaffold for serving a model. Captures: input contract,
+// latency SLO, error semantics, monitoring hook, fall-back
+// policy. Complements the model spec with the serving layer.
+func runPredictScaffold(modelID string, latencyMs int, out string) error {
+	if out == "" {
+		out = fmt.Sprintf("docs/predict/%s-request.md", modelID)
+	}
+	body := fmt.Sprintf(`# Prediction request: %s
+
+> Scaffolded by `+"`radiant predict %s`"+` on %s.
+
+## 1. Model
+
+- Model ID: %s
+- Version: <semver>
+- Owner: <team / on-call>
+- Model card: <link to docs/model/%s-spec.md>
+
+## 2. Inputs (request contract)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| <feature_1> | <type> | yes / no | <description> |
+| <feature_2> | <type> | yes / no | <description> |
+| ... | ... | ... | ... |
+
+Validation: JSON Schema at API gateway; reject malformed inputs.
+
+## 3. Latency budget
+
+- p99 target: %d ms
+- Timeout: %d * 1.5 = %d ms (cut losses)
+- Cold-start: <warm-up plan>
+
+## 4. Outputs (response contract)
+
+`+"```json"+`
+{
+  "prediction": "<type>",
+  "probability": "<float, 0-1>",
+  "model_version": "%s",
+  "request_id": "<uuid>",
+  "served_at": "<ISO 8601>"
+}
+`+"```"+`
+
+## 5. Error semantics
+
+| Error | HTTP code | Meaning |
+|-------|-----------|---------|
+| Malformed input | 400 | Client error; do not retry |
+| Auth failure | 401 / 403 | Re-authenticate |
+| Model unavailable | 503 | Retry with backoff |
+| Timeout | 504 | Retry; alert if persistent |
+
+## 6. Fall-back policy
+
+When model fails or is unavailable:
+- Fallback to: <simpler model / heuristic / no-prediction>
+- Log fallback rate; alert if >X%%
+
+## 7. Monitoring
+
+- Request rate, error rate, p50/p95/p99 latency
+- Prediction distribution (drift alert)
+- Fall-back rate
+- User-reported anomalies
+
+## 8. Testing
+
+- Contract test: <golden requests + expected outputs>
+- Load test: <target RPS at p99 latency>
+- Chaos test: <kill instance mid-traffic>
+
+## 9. Anti-patterns checklist
+
+- [ ] Input contract validated at edge (not deep in code)
+- [ ] Timeout < caller timeout; cut losses
+- [ ] Error semantics documented; clients can branch
+- [ ] Fall-back policy defined; tested
+- [ ] Monitoring + alerting in place BEFORE first production request
+`, modelID, modelID, time.Now().UTC().Format("2006-01-02"), modelID, modelID, latencyMs, latencyMs, latencyMs*3/2, modelID)
+
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	fmt.Printf("  ✓ Scaffolded %s\n", out)
+	fmt.Printf("    Fill in input contract, latency tuning, error semantics, monitoring.\n")
 	return nil
 }
 

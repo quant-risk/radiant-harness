@@ -1033,6 +1033,102 @@ func TestCausalEstimateScaffoldCustomOutput(t *testing.T) {
 	}
 }
 
+func TestModelScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runModelScaffold("churn-classifier", "", ""); err != nil {
+		t.Fatalf("runModelScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/model/churn-classifier-spec.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Model spec: churn-classifier",
+		"## 1. Problem framing",
+		"## 2. Data",
+		"## 3. Baseline",
+		"## 7. Monitoring",
+		"Anti-patterns checklist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in model scaffold", want)
+		}
+	}
+}
+
+func TestModelScaffoldCustomMetric(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runModelScaffold("fraud", "5% reduction in fraud FN", ""); err != nil {
+		t.Fatalf("runModelScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/model/fraud-spec.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	if !strings.Contains(string(body), "5% reduction in fraud FN") {
+		t.Errorf("custom success metric not in scaffold")
+	}
+}
+
+func TestPredictScaffoldDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPredictScaffold("my-model", 200, ""); err != nil {
+		t.Fatalf("runPredictScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/predict/my-model-request.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	for _, want := range []string{
+		"# Prediction request: my-model",
+		"## 2. Inputs",
+		"## 3. Latency budget",
+		"200 ms",
+		"## 4. Outputs",
+		"json",
+		"## 5. Error semantics",
+		"## 7. Monitoring",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("missing %q in predict scaffold", want)
+		}
+	}
+}
+
+func TestPredictScaffoldCustomLatency(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { os.Chdir(getOrigWD(t)) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPredictScaffold("realtime-model", 50, ""); err != nil {
+		t.Fatalf("runPredictScaffold: %v", err)
+	}
+	body, err := os.ReadFile("docs/predict/realtime-model-request.md")
+	if err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	if !strings.Contains(string(body), "50 ms") {
+		t.Errorf("custom latency (50 ms) not in scaffold")
+	}
+	// Timeout = latency * 1.5
+	if !strings.Contains(string(body), "75") {
+		t.Errorf("timeout (75ms = 50*1.5) not in scaffold")
+	}
+}
+
 func TestBumpVersionInSourceDryRun(t *testing.T) {
 	chdirToTemp(t, `var version = "0.5.0"`)
 	if err := bumpVersionInSource("0.5.1", true); err != nil {
