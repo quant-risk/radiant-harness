@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 )
 
@@ -556,7 +557,7 @@ func TestRunShellGateRespectsCap(t *testing.T) {
 	dir := t.TempDir()
 	// dd produces 64KB of zeros; cap at 1024 bytes.
 	const cap = 1024
-	out, err := runShellGate(context.Background(), dir,
+	out, err := gaterun.RunShellGate(context.Background(), dir,
 		"dd if=/dev/zero bs=1024 count=64 2>/dev/null",
 		cap)
 	if err != nil {
@@ -584,9 +585,9 @@ func TestRunShellGateRespectsCap(t *testing.T) {
 // inside the cap returns its full output untouched, no marker.
 func TestRunShellGateUnderCap(t *testing.T) {
 	dir := t.TempDir()
-	out, err := runShellGate(context.Background(), dir, `printf "hello world"`, 1024)
+	out, err := gaterun.RunShellGate(context.Background(), dir, `printf "hello world"`, 1024)
 	if err != nil {
-		t.Fatalf("runShellGate: %v", err)
+		t.Fatalf("gaterun.RunShellGate: %v", err)
 	}
 	if out != "hello world" {
 		t.Errorf("output = %q, want %q", out, "hello world")
@@ -603,9 +604,9 @@ func TestRunShellGateUnderCap(t *testing.T) {
 // unchanged with maxOutput=0.
 func TestRunShellGateDefaultCap(t *testing.T) {
 	dir := t.TempDir()
-	out, err := runShellGate(context.Background(), dir, `printf "ok"`, 0)
+	out, err := gaterun.RunShellGate(context.Background(), dir, `printf "ok"`, 0)
 	if err != nil {
-		t.Fatalf("runShellGate: %v", err)
+		t.Fatalf("gaterun.RunShellGate: %v", err)
 	}
 	if out != "ok" {
 		t.Errorf("output = %q, want %q", out, "ok")
@@ -619,7 +620,7 @@ func TestRunShellGateDefaultCap(t *testing.T) {
 // make sure non-zero exits still surface.
 func TestRunShellGateReportsFailure(t *testing.T) {
 	dir := t.TempDir()
-	out, err := runShellGate(context.Background(), dir,
+	out, err := gaterun.RunShellGate(context.Background(), dir,
 		`echo "boom" && exit 7`, 1024)
 	if err == nil {
 		t.Fatalf("expected error from non-zero exit; got nil")

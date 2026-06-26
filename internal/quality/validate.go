@@ -10,10 +10,9 @@ import (
 	"strings"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/policy"
 )
-
-// gateTimeout is defined in gate_unix.go / gate_windows.go.
 
 // allowedGateBinaries is re-exported from internal/policy so existing
 // package-local references in validate.go and tests keep working
@@ -127,8 +126,8 @@ func RunGates(projectDir, specDir string) []GateResult {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), gateTimeout)
-		out, runErr := runShellGate(ctx, projectDir, gate, 0) // 0 = package default (10 MiB)
+		ctx, cancel := context.WithTimeout(context.Background(), gaterun.Timeout)
+		out, runErr := gaterun.RunShellGate(ctx, projectDir, gate, 0) // 0 = gaterun.DefaultMaxOutput
 		cancel()
 
 		if runErr != nil {
@@ -144,9 +143,6 @@ func RunGates(projectDir, specDir string) []GateResult {
 	return results
 }
 
-// runShellGate is implemented in gate_unix.go / gate_windows.go so the
-// shell binary matches the host OS. This wrapper just unifies the
-// signature.
 var _ = errors.New // keep import in case future variants need it
 
 // gateRowRe matches a single markdown table row from tasks.md with a

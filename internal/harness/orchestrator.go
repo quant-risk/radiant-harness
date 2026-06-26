@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/spec"
 )
@@ -285,7 +286,7 @@ func (o *Orchestrator) runGate(ctx context.Context, gate string) error {
 	gateCtx, cancel := context.WithTimeout(ctx, DefaultGateTimeout)
 	defer cancel()
 
-	out, err := runGateShell(gateCtx, o.ProjectDir, gate, 0) // 0 = package default
+	out, err := gaterun.RunShellGate(gateCtx, o.ProjectDir, gate, 0) // 0 = gaterun.DefaultMaxOutput
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("gate timeout after %s\n%s", DefaultGateTimeout, out)

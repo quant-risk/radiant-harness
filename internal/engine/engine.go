@@ -16,6 +16,7 @@ import (
 	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/policy"
 	"github.com/quant-risk/radiant-harness/internal/quality"
@@ -773,14 +774,14 @@ func (e *Engine) runGate(ctx context.Context, gate string) error {
 	if err := validateGateCommand(gate); err != nil {
 		return fmt.Errorf("gate refused by allowlist: %w", err)
 	}
-	gateCtx, cancel := context.WithTimeout(ctx, GateTimeout)
+	gateCtx, cancel := context.WithTimeout(ctx, gaterun.Timeout)
 	defer cancel()
 
 	e.log("  Gate: %s", gate)
-	out, err := runShellGate(gateCtx, e.projectDir, gate, e.gateMaxOutput)
+	out, err := gaterun.RunShellGate(gateCtx, e.projectDir, gate, e.gateMaxOutput)
 	if err != nil {
 		if errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("gate timeout after %s\n%s", GateTimeout, out)
+			return fmt.Errorf("gate timeout after %s\n%s", gaterun.Timeout, out)
 		}
 		return fmt.Errorf("gate failed: %w\n%s", err, out)
 	}
