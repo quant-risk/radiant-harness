@@ -22,6 +22,7 @@ import (
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/fleet"
 	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/quality"
@@ -1738,6 +1739,80 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd, contextSummarizeCmd)
 	root.AddCommand(contextCmd)
+
+	// ── fleet (Sprint 39) ────────────────────────────────────────────────────
+	fleetCmd := &cobra.Command{
+		Use:   "fleet",
+		Short: "Multi-agent coordination (Planner + Implementer + Verifier + Summarizer)",
+	}
+
+	fleetStartCmd := &cobra.Command{
+		Use:   "start <goal>",
+		Short: "Start a multi-agent fleet run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			goal := args[0]
+			agentCount, _ := cmd.Flags().GetInt("agents")
+
+			runID := fmt.Sprintf("fleet-%d", time.Now().Unix())
+			store, err := fleet.NewStore(cwd, runID, goal)
+			if err != nil {
+				return fmt.Errorf("init store: %w", err)
+			}
+
+			coord := fleet.NewCoordinator(store, agentCount)
+
+			// Register agents by role
+			roles := []fleet.AgentRole{fleet.RolePlanner}
+			for i := 0; i < agentCount-1; i++ {
+				roles = append(roles, fleet.RoleImplementer)
+			}
+			roles = append(roles, fleet.RoleVerifier, fleet.RoleSummarizer)
+
+			for i, role := range roles {
+				coord.RegisterAgent(fmt.Sprintf("agent-%02d", i+1), role)
+			}
+
+			fmt.Printf("✓ Fleet started\n")
+			fmt.Printf("  Run ID:  %s\n", runID)
+			fmt.Printf("  Goal:    %s\n", goal)
+			fmt.Printf("  Agents:  %d\n\n", len(roles))
+
+			roles2 := fleet.DefaultRoleConfigs()
+			for role, cfg := range roles2 {
+				fmt.Printf("  %s\n", fleet.FormatRoleConfig(fleet.RoleConfig{
+					Role:          role,
+					TokenBudget:   cfg.TokenBudget,
+					MaxIterations: cfg.MaxIterations,
+				}))
+			}
+			fmt.Printf("\n  Store:   .radiant-harness/fleet/%s.json\n", runID)
+			fmt.Printf("\nNext: `radiant fleet status %s`\n", runID)
+			return nil
+		},
+	}
+	fleetStartCmd.Flags().Int("agents", 3, "Number of implementer agents to run in parallel")
+
+	fleetStatusCmd := &cobra.Command{
+		Use:   "status <run-id>",
+		Short: "Show multi-agent fleet status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+			coord := fleet.NewCoordinator(store, 0)
+			fmt.Print(fleet.FormatStatus(coord.Status()))
+			return nil
+		},
+	}
+
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd)
+	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────
 	improveCmd := &cobra.Command{
