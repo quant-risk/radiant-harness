@@ -1,0 +1,86 @@
+name: credit-risk
+version: 1.0.0
+description: |
+  Credit risk modeling guidance: PD (Probability of Default),
+  LGD (Loss Given Default), EAD (Exposure At Default), IFRS 9
+  staging (Stage 1/2/3), Basileia capital, scorecards, behavioral
+  models, stress testing, vintage analysis, low-default portfolios.
+  Use when the project quantifies borrower default risk for
+  regulatory capital, provisioning, or lending decisions.
+when_to_use: |
+  Project models PD, LGD, or EAD. IFRS 9 staging / SICR (Significant
+  Increase in Credit Risk) required. Basileia regulatory capital
+  calculation. Credit scoring / scorecard development. Vintage /
+  cohort analysis. Low-default portfolio modelling. Stress testing
+  credit exposures.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: modelling_target
+    type: enum
+    required: true
+    description: '"pd" | "lgd" | "ead" | "ccf" | "ifrs9-staging" | "scorecard" | "capital"'
+  - name: data_segment
+    type: enum
+    required: false
+    description: '"retail" | "sme" | "corporate" | "sovereign" | "bank" | "low-default-portfolio"'
+  - name: regulatory_framework
+    type: enum
+    required: false
+    description: '"ifrs9" | "basileia" | "cec" | "internal-rating-based" | "standardised"'
+  - name: model_method
+    type: enum
+    required: false
+    description: '"scorecard-logistic" | "survival" | "machine-learning" | "structural" | "hybrid"'
+
+outputs:
+  - path: docs/credit-risk/model-development.md
+    type: artifact
+    description: 'Model design: target, sample, features, method, validation.'
+  - path: docs/credit-risk/model-validation.md
+    type: artifact
+    description: 'Validation report: discrimination (AUC/Gini), calibration (Brier, Hosmer-Lemeshow), stability (PSI, CSI).'
+  - path: docs/credit-risk/regulatory-mapping.md
+    type: artifact
+    description: IFRS 9 staging / Basileia capital mapping; tier-1 evidence.
+
+gates:
+  - name: definition-of-default-documented
+    description: Definition of default (90+ DPD, unlikely-to-pay indicators) explicitly documented before modelling.
+  - name: sample-representative
+    description: Development sample representative of current portfolio; vintage analysis done; out-of-time + out-of-sample validation.
+  - name: discrimination-meets-threshold
+    description: Gini >= 30 (retail), >= 40 (corporate) for scorecards; AUC reported for ML models.
+  - name: calibration-meets-threshold
+    description: Brier score + Hosmer-Lemeshow + binomial test; predicted vs observed default rates within tolerance.
+  - name: stability-monitored
+    description: PSI / CSI on score distribution + features; alert threshold.
+  - name: overrides-and-exceptions
+    description: Manual override process documented; override rate monitored; governance sign-off.
+
+context_provides:
+  - state.md
+  - docs/credit-risk/
+
+commands_available:
+  - radiant credit-risk <target> --segment=<retail|sme|corporate|...>
+
+related_skills:
+  - stats
+  - bayesian
+  - causal
+  - ml
+  - market-risk
+
+anti_patterns:
+  - "Training on non-representative sample: no vintage analysis; only cross-sectional"
+  - "Gini > 40 but bad calibration: model 'discriminates' but probabilities wrong"
+  - "Single train/test split for time series: leakage; use out-of-time validation"
+  - "Macroeconomic overlays without rationale: post-hoc rationalisation"
+  - "Ignoring low-default portfolios: LDPs need specialised methods (long-term averages, Bayesian)"
+  - "SICR without backtest: IFRS 9 staging errors compound over years"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,69 @@
+name: quantum-ml
+version: 1.0.0
+description: |
+  Quantum machine learning guidance: variational quantum
+  eigensolvers (VQE), QAOA, quantum kernels, variational
+  circuits, hybrid quantum-classical models, near-term
+  intermediate-scale quantum (NISQ) constraints, error
+  mitigation. Use when the project uses quantum computers
+  (real or simulated) for ML tasks.
+when_to_use: |
+  Project uses quantum computing hardware or simulators for
+  ML / optimisation. Variational quantum algorithms (VQE,
+  QAOA, VQC). Quantum kernels for classification. Hybrid
+  quantum-classical pipelines. NISQ-era constraints (shallow
+  circuits, noise, limited qubits). Error mitigation
+  strategies.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: algorithm
+    type: enum
+    required: true
+    description: '"vqe" | "qaoa" | "vqc" | "quantum-kernel" | "qgan" | "qml-classifier"'
+  - name: backend
+    type: enum
+    required: false
+    description: '"simulator" | "ibm-q" | "google-sycamore" | "ionq" | "rigetti" | "atos" | "xanadu"'
+
+outputs:
+  - path: docs/quantum-ml/circuit-spec.md
+    type: artifact
+    description: 'Variational circuit spec: ansatz, parameters, depth.'
+  - path: docs/quantum-ml/noise-model.md
+    type: artifact
+    description: Noise model + error mitigation strategy.
+
+gates:
+  - name: quantum-advantage-justified
+    description: Why quantum? Classical baseline compared. Quantum advantage not assumed.
+  - name: circuit-depth-bounded
+    description: Circuit depth within NISQ limits (typically <100). Otherwise fault-tolerant required.
+  - name: error-mitigation-applied
+    description: Error mitigation (zero-noise extrapolation, probabilistic error cancellation) applied.
+  - name: classical-quantum-hybrid
+    description: 'Hybrid pipeline: classical pre/post-processing + quantum kernel.'
+
+context_provides:
+  - state.md
+  - docs/quantum-ml/
+
+commands_available:
+  - radiant quantum-ml <algorithm> --backend=<...>
+
+related_skills:
+  - quantum-physics
+  - ml
+  - physics
+  - chemistry
+
+anti_patterns:
+  - "Quantum without classical baseline: no advantage shown"
+  - "Deep circuits on NISQ: decoherence destroys signal"
+  - "No error mitigation: noise dominates result"
+  - "Pretending quantum solves NP-hard: it doesn't (Grover gives sqrt, not polynomial)"
+
+author: radiant-harness contributors
+license: MIT

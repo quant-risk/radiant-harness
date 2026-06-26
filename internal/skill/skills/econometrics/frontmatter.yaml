@@ -1,0 +1,75 @@
+name: econometrics
+version: 1.0.0
+description: |
+  Econometrics guidance: time series, panel data, instrumental
+  variables, structural models, cointegração. Use when the
+  project analyses economic or financial data with cross-sectional
+  + temporal structure, or when endogeneity is a concern.
+when_to_use: |
+  Data is time series (stationarity, autocorrelation, structural
+  breaks). Data is panel (cross-section × time). Endogeneity is
+  suspected (omitted variables, simultaneity, measurement error).
+  Project requires identification strategy (IV, DiD, RDD).
+  Classic examples: macro forecasting, demand estimation,
+  policy evaluation, asset pricing.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: data_structure
+    type: enum
+    required: true
+    description: '"cross-section" | "time-series" | "panel" | "repeated-cross-section"'
+  - name: endogeneity
+    type: enum
+    required: false
+    description: '"none" | "suspected" | "definite" — drives IV / GMM requirement'
+  - name: stationarity
+    type: enum
+    required: false
+    description: '"stationary" | "unit-root" | "cointegrated" | "structural-break"'
+
+outputs:
+  - path: docs/econometrics/specification.md
+    type: artifact
+    description: Model choice, identification strategy, diagnostics, robustness checks.
+  - path: docs/econometrics/results.md
+    type: artifact
+    description: Estimates with HAC SEs, diagnostics, IRFs, robustness table.
+
+gates:
+  - name: identification-strategy-explicit
+    description: Identification (exogeneity assumption, IV validity) written down before estimation. "Just run OLS" is not identification.
+  - name: stationarity-tested
+    description: ADF / KPSS / PP tests on time series. Differencing / cointegração if unit-root.
+  - name: standard-errors-correct
+    description: HAC (Newey-West) SEs for autocorrelation + heteroscedasticity; clustered SEs for panel.
+  - name: diagnostics-reported
+    description: Residual autocorrelation, normality, heteroscedasticity, stability tests reported.
+  - name: robustness-checks
+    description: Alternative specifications; subsamples; placebo tests; out-of-sample.
+
+context_provides:
+  - state.md
+  - docs/econometrics/
+
+commands_available:
+  - radiant econometrics <data_structure> --endogeneity=<none|suspected|definite>
+
+related_skills:
+  - stats
+  - causal
+  - bayesian
+  - ml
+  - credit-risk
+
+anti_patterns:
+  - "Spurious regression on non-stationary series: high R² but no real relationship"
+  - "OLS with endogenous regressor: biased estimates; use IV / GMM"
+  - "Ignoring autocorrelation: invalid SEs and t-stats"
+  - "Unit-root treated as stationary: misleading inference"
+  - "Comparing models on in-sample fit only: no out-of-sample validation"
+
+author: radiant-harness contributors
+license: MIT

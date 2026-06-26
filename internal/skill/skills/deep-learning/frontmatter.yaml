@@ -1,0 +1,78 @@
+name: deep-learning
+version: 1.0.0
+description: |
+  Deep learning guidance: architectures (CNN/RNN/Transformer/ViT
+  /diffusion), training (optimizers, LR schedules, regularization,
+  mixed precision), distributed (DDP/FSDP/DeepSpeed), fine-tuning
+  (LoRA/QLoRA/full), preference learning (RLHF/DPO/PPO). Use
+  when the project's model is a deep neural network — image, text,
+  audio, or multimodal.
+when_to_use: |
+  Model is a deep neural network (CNN, RNN, Transformer, ViT,
+  diffusion). Need distributed training (DDP, FSDP, DeepSpeed).
+  Fine-tuning a pretrained model (LoRA, QLoRA). Preference
+  learning (RLHF, DPO). Custom architecture beyond off-the-shelf.
+  Note: `radiant-ml` covers the project-level ML workflow;
+  this skill covers DL-specific depth.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: architecture
+    type: enum
+    required: true
+    description: '"cnn" | "rnn" | "transformer" | "vit" | "diffusion" | "gan" | "graph" | "custom"'
+  - name: scale
+    type: enum
+    required: true
+    description: '"small" (1 GPU) | "medium" (multi-GPU node) | "large" (multi-node) | "hyperscale" (100s of GPUs)'
+  - name: training_mode
+    type: enum
+    required: false
+    description: '"from-scratch" | "fine-tune" | "lora" | "qlora" | "preference" (RLHF/DPO)'
+
+outputs:
+  - path: docs/dl/architecture.md
+    type: artifact
+    description: Model architecture, parameter count, FLOPs, training compute estimate.
+  - path: docs/dl/training-recipe.md
+    type: artifact
+    description: Optimizer, LR schedule, batch size, regularization, mixed precision, distributed strategy.
+
+gates:
+  - name: pretrained-when-possible
+    description: Use pretrained weights when available; only train from scratch with sufficient data + compute.
+  - name: lr-schedule-defined
+    description: LR schedule (warmup + cosine, or linear) defined before training. Constant LR is rarely optimal.
+  - name: mixed-precision
+    description: Mixed precision (fp16 / bf16) on supported hardware. Throughput 2-3x.
+  - name: gradient-clipping
+    description: Gradient clipping (max norm 1.0) to prevent explosion. Especially for RNNs / unstable training.
+  - name: eval-during-training
+    description: Eval on held-out set during training (every N steps). Don't train blind.
+  - name: checkpoint-every-k-steps
+    description: Checkpoint every N steps; rotate last 3; keep best by eval metric.
+
+context_provides:
+  - state.md
+  - docs/dl/
+
+commands_available:
+  - radiant dl <architecture> --scale=<small|medium|large>
+
+related_skills:
+  - ml
+  - reinforcement-learning
+  - bayesian
+  - quantum-ml
+
+anti_patterns:
+  - "Training from scratch when pretrained exists"
+  - "No LR schedule: constant LR or wrong schedule"
+  - "fp32 everywhere: wastes 2-3x throughput"
+  - "Distributed without profiling: DDP overhead can exceed gain for small models"
+  - "Checkpointing nowhere: losing hours of training to a crash"
+
+author: radiant-harness contributors
+license: MIT

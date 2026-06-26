@@ -1,0 +1,77 @@
+name: liquidity-risk
+version: 1.0.0
+description: |
+  Liquidity risk guidance: LCR (Liquidity Coverage Ratio),
+  NSFR (Net Stable Funding Ratio), ALM (Asset-Liability
+  Management), cash flow forecasting, intraday liquidity,
+  contingency funding plan, deposit behaviour. Use when
+  the project manages funding liquidity or regulatory
+  liquidity ratios.
+when_to_use: |
+  Project computes LCR or NSFR. Cash flow forecasting under
+  stress. ALM (asset-liability mismatch management). Intraday
+  liquidity monitoring. Contingency funding plans. Deposit
+  behaviour modelling. Funding concentration analysis.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: regulatory_ratio
+    type: enum
+    required: false
+    description: '"lcr" | "nsfr" | "both" | "internal"'
+  - name: cash_flow_horizon
+    type: enum
+    required: false
+    description: '"intraday" | "1w" | "1m" | "3m" | "1y" | "behavioral"'
+  - name: stress_scenario
+    type: enum
+    required: false
+    description: '"idiosyncratic" | "market-wide" | "combined" | "reverse"'
+
+outputs:
+  - path: docs/liquidity-risk/lcr-nsfr-report.md
+    type: artifact
+    description: LCR and/or NSFR calculation; HQLA composition; outflow assumptions.
+  - path: docs/liquidity-risk/cash-flow-forecast.md
+    type: artifact
+    description: Behavioural cash flow forecast under base + stress scenarios.
+  - path: docs/liquidity-risk/contingency-plan.md
+    type: artifact
+    description: 'Contingency funding plan: triggers, actions, communication.'
+
+gates:
+  - name: hqla-classification-documented
+    description: HQLA classification (Level 1, 2A, 2B) per Basel; haircut applied; operational requirements met.
+  - name: behavioral-assumptions-justified
+    description: Deposit stability, prepayment, drawdown assumptions backed by data + backtest.
+  - name: stress-scenarios-defined
+    description: At least 3 stress scenarios (idiosyncratic, market, combined) per BCBS.
+  - name: intraday-monitoring
+    description: Intraday liquidity positions monitored; threshold breaches escalated.
+  - name: contingency-plan-tested
+    description: Contingency funding plan tested (tabletop or actual); triggers actionable.
+
+context_provides:
+  - state.md
+  - docs/liquidity-risk/
+
+commands_available:
+  - radiant liquidity-risk <ratio> --stress=<scenario>
+
+related_skills:
+  - market-risk
+  - credit-risk
+  - operational-risk
+  - econometrics
+
+anti_patterns:
+  - "LCR with no behavioral haircut on stable deposits"
+  - "NSFR ignoring encumbered assets"
+  - "Cash flow forecast assuming contractual maturity only (no behavioral)"
+  - "Contingency plan never tested: triggers not actionable"
+  - "Intraday liquidity not monitored: settlement failure risk"
+
+author: radiant-harness contributors
+license: MIT

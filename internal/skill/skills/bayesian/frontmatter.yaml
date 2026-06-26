@@ -1,0 +1,74 @@
+name: bayesian
+version: 1.0.0
+description: |
+  Bayesian inference guidance: priors, posteriors, MCMC (HMC/NUTS),
+  posterior predictive checks, model comparison, calibration.
+  Use when prior information is valuable, when sample size is
+  small, or when you need full uncertainty quantification
+  (not just point estimates).
+when_to_use: |
+  Project has informative priors (industry knowledge, expert
+  opinion, previous studies). Sample size is small (frequentist
+  asymptotics unreliable). Need full posterior, not just point
+  estimate. Hierarchical / multi-level structure. Decision theory:
+  expected utility under uncertainty.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: inference_engine
+    type: enum
+    required: true
+    description: '"pymc" | "stan" | "numpyro" | "bambi" | "pymc-bart" | "emcee"'
+  - name: model_class
+    type: enum
+    required: true
+    description: '"linear-regression" | "hierarchical" | "time-series" | "gaussian-process" | "mixture" | "custom"'
+  - name: prior_strength
+    type: enum
+    required: false
+    description: '"weakly-informative" | "informative" | "strong" — drives prior elicitation effort'
+
+outputs:
+  - path: docs/bayesian/prior-elicitation.md
+    type: artifact
+    description: Prior choice + justification; sensitivity to alternatives.
+  - path: docs/bayesian/posterior-diagnostics.md
+    type: artifact
+    description: Trace plots, R-hat, ESS, divergences, posterior predictive checks.
+
+gates:
+  - name: prior-justified
+    description: Every prior has a justification (literature, expert, weak default). No "let's try N(0,100)" without reason.
+  - name: mcmc-converged
+    description: R-hat < 1.01; ESS > 400; no divergences; chains mixed. If not, reparameterise.
+  - name: posterior-predictive-check
+    description: Posterior predictive distribution checked against observed data. If model can't reproduce data, it's wrong.
+  - name: sensitivity-to-priors
+    description: Alternative priors run; conclusions robust? Document sensitivity.
+  - name: calibration-reported
+    description: Coverage of credible intervals reported; expected vs observed.
+
+context_provides:
+  - state.md
+  - docs/bayesian/
+
+commands_available:
+  - radiant bayesian <model_class> --engine=<pymc|stan|numpyro>
+
+related_skills:
+  - stats
+  - causal
+  - ml
+  - econometrics
+
+anti_patterns:
+  - "Unjustified flat priors: 'let the data speak' but data can't speak without a model"
+  - "Ignoring divergences in NUTS: indicates degenerate geometry"
+  - "Reporting point estimates from posterior without credible intervals"
+  - "No posterior predictive check: model fits the data by accident"
+  - "Comparing models by MAP only: ignores model uncertainty"
+
+author: radiant-harness contributors
+license: MIT

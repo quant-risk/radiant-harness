@@ -1,0 +1,69 @@
+name: causal-ml
+version: 1.0.0
+description: |
+  Causal machine learning guidance: uplift modeling (T-learner,
+  S-learner, X-learner, R-learner), heterogeneous treatment
+  effects, double machine learning (DML), causal forests,
+  instrumental variables with ML, sensitivity analysis. Use
+  when combining ML prediction with causal inference for
+  treatment effect estimation, especially for personalization.
+when_to_use: |
+  Project estimates heterogeneous treatment effects (who responds
+  to treatment). Uplift modeling for marketing / product
+  personalisation. Double ML for high-dimensional confounders.
+  Causal forests for subgroup discovery. ML-based instrumental
+  variables. Combines causal inference rigor with ML flexibility.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: method
+    type: enum
+    required: true
+    description: '"uplift" | "dml" | "causal-forest" | "causal-tree" | "ml-iv" | "sensitivity"'
+  - name: treatment_type
+    type: enum
+    required: true
+    description: '"binary" | "continuous" | "multiple-treatments" | "optimal-policy"'
+
+outputs:
+  - path: docs/causal-ml/method-spec.md
+    type: artifact
+    description: Method choice + identification assumption + estimation strategy.
+  - path: docs/causal-ml/results.md
+    type: artifact
+    description: CATE estimates by subgroup; uplift curves; sensitivity.
+
+gates:
+  - name: identification-stated
+    description: Identification assumption (conditional ignorability, unconfoundedness, IV validity) explicit.
+  - name: honest-split
+    description: Causal forests use honest splitting (train one half, estimate effect on other). Reduces overfitting.
+  - name: placebo-test
+    description: Placebo tests (random / fake treatment) pass; estimated effect not spurious.
+  - name: sensitivity-reported
+    description: E-value or other sensitivity measure reported; conclusion robust to hidden confounder.
+
+context_provides:
+  - state.md
+  - docs/causal-ml/
+
+commands_available:
+  - radiant causal-ml <method> --treatment=<binary|continuous|...>
+
+related_skills:
+  - causal
+  - ml
+  - bayesian
+  - marketing
+  - stats
+
+anti_patterns:
+  - "T-learner with extreme propensity: high variance in treated / control"
+  - "Causal forest without honest splitting: overfits subgroups"
+  - "Uplift model without qini curve: hard to assess business value"
+  - "DML without sample splitting: first-stage overfitting leaks to second stage"
+
+author: radiant-harness contributors
+license: MIT

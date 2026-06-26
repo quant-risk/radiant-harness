@@ -1,0 +1,77 @@
+name: market-risk
+version: 1.0.0
+description: |
+  Market risk guidance: Value-at-Risk (VaR), Expected Shortfall
+  (ES), stress testing, backtesting (Kupiec, Christoffersen),
+  FRTB IMA/SA, market risk factors (interest rate, FX, equity,
+  commodity). Use when the project quantifies trading book
+  P&L volatility or capital requirements for market risk.
+when_to_use: |
+  Project computes VaR or ES. Trading book P&L attribution.
+  Regulatory capital for market risk (FRTB, Basileia). Stress
+  testing market exposures. Risk factor modelling (rates,
+  FX, equity, vol, credit spreads, commodities).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: var_method
+    type: enum
+    required: true
+    description: '"historical" | "parametric-variance-covariance" | "monte-carlo" | "filtered-historical"'
+  - name: risk_factors
+    type: enum
+    required: true
+    description: '"ir" | "fx" | "equity" | "commodity" | "credit-spread" | "multi-asset"'
+  - name: regulatory_framework
+    type: enum
+    required: false
+    description: '"frtb-ima" | "frtb-sa" | "basileia-1996" | "internal-model"'
+
+outputs:
+  - path: docs/market-risk/var-spec.md
+    type: artifact
+    description: 'VaR model spec: method, holding period, confidence, decay factor.'
+  - path: docs/market-risk/backtest-results.md
+    type: artifact
+    description: 'Backtest report: Kupiec POF, Christoffersen, traffic light.'
+  - path: docs/market-risk/stress-scenarios.md
+    type: artifact
+    description: Stress scenarios with shocked P&L.
+
+gates:
+  - name: backtest-passes
+    description: VaR model passes Kupiec POF test (95% VaR, 1y) AND Christoffersen independence. Otherwise add capital multiplier (FRTB).
+  - name: stress-scenarios-defined
+    description: At least 3 stress scenarios per asset class; reverse stress test performed.
+  - name: model-validation-independent
+    description: Model validated independently of development team. Sign-off documented.
+  - name: data-quality
+    description: Risk factor data quality controlled (missing data, stale prices, outliers); backfill policy documented.
+  - name: prr-and-stress-coverage
+    description: All material risk factors covered (IR, FX, EQ, CO, CS); pricing models validated.
+
+context_provides:
+  - state.md
+  - docs/market-risk/
+
+commands_available:
+  - radiant market-risk <var_method> --factors=<list>
+
+related_skills:
+  - econometrics
+  - stats
+  - bayesian
+  - credit-risk
+  - liquidity-risk
+
+anti_patterns:
+  - "VaR without backtest: no validation of model accuracy"
+  - "Same-day VaR only: overnight + intraday gaps not captured"
+  - "Parametric VaR with fat tails: understates tail risk"
+  - "Historical VaR with too-short window: misses regime changes"
+  - "Stress scenarios without rationale: arbitrary shocks"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,78 @@
+name: causal
+version: 1.0.0
+description: |
+  Causal inference guidance: DAGs, potential outcomes, A/B
+  testing, propensity scores, difference-in-differences, RDD,
+  synthetic control, mediation, heterogeneous treatment effects.
+  Use when the project needs to estimate the effect of an
+  intervention, not just predict an outcome.
+when_to_use: |
+  Project estimates "the effect of X on Y". Need identification
+  strategy (not just correlation). Policy or product intervention
+  with measurable outcome. Heterogeneous effects across subgroups.
+  Regulators or stakeholders require causal language (not just
+  predictive).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: design
+    type: enum
+    required: true
+    description: '"rct" | "observational-with-treatment" | "natural-experiment" | "quasi-experimental" | "instrumental-variable"'
+  - name: treatment_assignment
+    type: enum
+    required: true
+    description: '"randomized" | "selection-on-observables" | "selection-on-unobservables" | "regression-discontinuity" | "time-varying"'
+  - name: outcome_type
+    type: enum
+    required: true
+    description: '"binary" | "continuous" | "count" | "time-to-event" | "panel"'
+
+outputs:
+  - path: docs/causal/dag.md
+    type: artifact
+    description: Causal DAG (graphviz / mermaid). Treatment, outcome, confounders, mediators, colliders.
+  - path: docs/causal/identification.md
+    type: artifact
+    description: Identification strategy + assumptions + sensitivity analysis.
+  - path: docs/causal/results.md
+    type: artifact
+    description: ATE / ATT / CATE estimates with CIs; robustness; sensitivity.
+
+gates:
+  - name: dag-drawn
+    description: DAG drawn BEFORE estimation. Treatment, outcome, confounders explicit.
+  - name: identification-assumption-stated
+    description: Explicit assumption (conditional ignorability, parallel trends, no spillover) written down.
+  - name: pre-trends-tested
+    description: 'For DiD: pre-trends tested. If violated, model invalid.'
+  - name: sensitivity-analysis
+    description: How strong would an unobserved confounder need to be to change the conclusion? Report.
+  - name: heterogeneous-effects-explored
+    description: CATE by subgroup (when meaningful). Not just ATE.
+
+context_provides:
+  - state.md
+  - docs/causal/
+
+commands_available:
+  - radiant causal <design> --outcome=<binary|continuous|count|...>
+
+related_skills:
+  - stats
+  - bayesian
+  - causal-ml
+  - econometrics
+  - evals
+
+anti_patterns:
+  - "Correlation as causation: no DAG, no identification, just correlation"
+  - "ATE without CATE: average hides heterogeneous effects"
+  - "DiD without pre-trend test: parallel trends is an assumption"
+  - "PSM without overlap check: bad matches create bias"
+  - "RDD with too few observations near cutoff: noisy estimate"
+
+author: radiant-harness contributors
+license: MIT

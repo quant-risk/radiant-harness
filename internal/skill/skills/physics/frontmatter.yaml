@@ -1,0 +1,66 @@
+name: physics
+version: 1.0.0
+description: |
+  Classical physics guidance: mechanics, electromagnetism,
+  thermodynamics, statistical mechanics, optics, waves, fluid
+  dynamics. Use when the project models physical systems,
+  solves physics problems, or works with physical units and
+  measurements.
+when_to_use: |
+  Project involves physical systems (forces, motion, fields,
+  fluids, waves, heat). Need dimensional analysis or unit
+  consistency. Modelling a real-world physics scenario
+  (mechanical, electrical, thermal). Conservation laws,
+  limiting cases, order-of-magnitude estimates.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: subfield
+    type: enum
+    required: true
+    description: '"mechanics" | "electromagnetism" | "thermodynamics" | "statistical-mechanics" | "optics" | "waves" | "fluid-dynamics"'
+  - name: scale
+    type: enum
+    required: false
+    description: '"macroscopic" | "mesoscopic" | "microscopic"'
+
+outputs:
+  - path: docs/physics/problem-formulation.md
+    type: artifact
+    description: Coordinate system, variables, conservation laws, governing equations.
+  - path: docs/physics/solution.md
+    type: artifact
+    description: Analytical or numerical solution; dimensional check; limiting cases.
+
+gates:
+  - name: dimensional-consistency
+    description: Every equation dimensionally consistent. Units explicit.
+  - name: limiting-cases-checked
+    description: Limiting cases verified (e.g. low velocity, large mass, ideal gas).
+  - name: order-of-magnitude-estimate
+    description: Order-of-magnitude estimate before computation. Sanity check.
+  - name: conservation-laws-respected
+    description: Energy, momentum, mass, charge conservation verified.
+
+context_provides:
+  - state.md
+  - docs/physics/
+
+commands_available:
+  - radiant physics <subfield> --scale=<...>
+
+related_skills:
+  - quantum-physics
+  - chemistry
+  - biology
+  - engineering
+
+anti_patterns:
+  - "Wrong units: SI vs CGS vs imperial confusion"
+  - "No limiting case check: model fails at edge"
+  - "Failing to estimate: compute without order-of-magnitude check"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,67 @@
+name: biology
+version: 1.0.0
+description: |
+  Biology guidance: genomics (NGS, variant calling), proteomics,
+  systems biology, molecular biology (CRISPR, sequencing),
+  bioinformatics pipelines, drug-target interaction. Use when
+  the project analyses biological data — sequencing, structure,
+  systems, or drug discovery.
+when_to_use: |
+  Next-generation sequencing (NGS) analysis; variant calling.
+  RNA-seq; ChIP-seq; ATAC-seq. Proteomics (mass spec).
+  Protein structure prediction. Systems biology (networks,
+  dynamics). CRISPR / gene editing design. Drug-target
+  interaction. Phylogenetics. Single-cell analysis.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: omics
+    type: enum
+    required: true
+    description: '"genomics" | "transcriptomics" | "proteomics" | "epigenomics" | "metabolomics" | "single-cell" | "systems-biology"'
+  - name: organism
+    type: enum
+    required: false
+    description: '"human" | "mouse" | "ecoli" | "yeast" | "plant" | "viral" | "custom" | "mixed"'
+
+outputs:
+  - path: docs/biology/sample-prep.md
+    type: artifact
+    description: 'Sample preparation: tissue, extraction, library prep.'
+  - path: docs/biology/analysis-pipeline.md
+    type: artifact
+    description: 'Bioinformatics pipeline: QC, alignment, variant calling, annotation.'
+
+gates:
+  - name: qc-thresholds
+    description: QC thresholds set (Q30, coverage, duplication rate); samples failing QC excluded with justification.
+  - name: pipeline-versioned
+    description: Pipeline versioned (container / conda env); reproducible across runs.
+  - name: validation-samples
+    description: Validation samples included (positive controls, NA12878 for human variants).
+  - name: batch-effect-assessed
+    description: Batch effects assessed (PCA, ComBat); corrected or documented as confounder.
+
+context_provides:
+  - state.md
+  - docs/biology/
+
+commands_available:
+  - radiant biology <omics> --organism=<...>
+
+related_skills:
+  - chemistry
+  - stats
+  - ml
+  - quantum-ml
+
+anti_patterns:
+  - "No QC before analysis: garbage in, garbage out"
+  - "Non-reproducible pipeline: results can't be replicated"
+  - "No validation samples: variant calls might be wrong"
+  - "Ignoring batch effects: confounders masquerading as biology"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,79 @@
+name: stats
+version: 1.0.0
+description: |
+  Statistical modeling guidance: hypothesis testing, confidence
+  intervals, regression diagnostics, ANOVA, sampling, power
+  analysis, multiple testing correction, bootstrap, permutation
+  tests. Use when the project's deliverable is statistical
+  inference from data, not just descriptive summaries or
+  predictive ML.
+when_to_use: |
+  Project reports p-values, CIs, or statistical significance.
+  Project runs A/B tests or RCTs. Project does regression
+  diagnostics, power analysis, or multiple-testing correction.
+  Use this BEFORE regression for ML: ML without statistical
+  literacy is overfitting.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: hypothesis_type
+    type: enum
+    required: true
+    description: '"one-sample" | "two-sample" | "paired" | "anova" | "regression" | "non-parametric" | "categorical"'
+  - name: alpha
+    type: number
+    required: false
+    description: Significance level (default 0.05). Adjust for multiple comparisons.
+  - name: sample_size
+    type: number
+    required: false
+    description: Observations per group. Drives power analysis.
+  - name: effect_size
+    type: string
+    required: false
+    description: '"small" | "medium" | "large" (Cohen d) or numeric (e.g. "0.3")'
+
+outputs:
+  - path: docs/stats/test-plan.md
+    type: artifact
+    description: Hypothesis, alpha, power, sample size, effect size, multiple-testing strategy.
+  - path: docs/stats/analysis-report.md
+    type: artifact
+    description: Test results with CIs, p-values, effect sizes, assumption checks.
+
+gates:
+  - name: hypothesis-stated-before-data
+    description: H0/H1 written down BEFORE looking at the data. Prevents HARKing.
+  - name: power-justified
+    description: Power analysis done BEFORE collecting data; sample size meets target power (>=0.80).
+  - name: assumptions-checked
+    description: Normality, homoscedasticity, independence checked per test. Non-parametric fallback if violated.
+  - name: multiple-testing-corrected
+    description: When >=2 hypotheses, correction applied (Bonferroni, BH-FDR, Holm). Uncorrected p-values reported alongside corrected.
+  - name: effect-size-reported
+    description: Effect size (Cohen d, eta-squared, Cramér V) reported alongside p-value. p-value alone hides magnitude.
+
+context_provides:
+  - state.md
+  - docs/stats/
+
+commands_available:
+  - radiant stats <hypothesis_type> --alpha=0.05
+
+related_skills:
+  - bayesian
+  - causal
+  - evals
+  - ml
+
+anti_patterns:
+  - "p-value as truth: reporting p<0.05 without effect size, CI, or assumption check"
+  - "Multiple testing without correction: 20 hypotheses × alpha 0.05 = 1 false positive expected"
+  - "HARKing (Hypothesizing After Results Known): stating H1 after seeing the data"
+  - "Stopping rules hidden: collecting data until p<0.05 inflates Type I error"
+  - "Parametric test on non-normal data without check"
+
+author: radiant-harness contributors
+license: MIT

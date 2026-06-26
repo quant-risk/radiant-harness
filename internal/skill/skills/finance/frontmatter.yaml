@@ -1,0 +1,65 @@
+name: finance
+version: 1.0.0
+description: |
+  Corporate finance guidance: capital structure (Modigliani-Miller,
+  trade-off, pecking order), WACC, CAPM, dividend policy, working
+  capital management, M&A process. Use when the project makes
+  capital allocation, financing, or payout decisions for a
+  corporation.
+when_to_use: |
+  Capital structure decisions (debt vs equity). Dividend / buyback
+  policy. Working capital optimisation. M&A deal structuring.
+  Treasury management. Cost of capital. Capital budgeting.
+  Corporate financial strategy.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: topic
+    type: enum
+    required: true
+    description: '"capital-structure" | "dividend-policy" | "working-capital" | "ma-process" | "cost-of-capital" | "capital-budgeting"'
+  - name: company_stage
+    type: enum
+    required: false
+    description: '"startup" | "growth" | "mature" | "turnaround" | "distressed"'
+
+outputs:
+  - path: docs/finance/capital-structure-decision.md
+    type: artifact
+    description: Optimal capital structure analysis + recommendation.
+  - path: docs/finance/wacc-buildup.md
+    type: artifact
+    description: 'WACC components: Rf, ERP, beta, size premium, cost of debt.'
+
+gates:
+  - name: cost-of-capital-justified
+    description: Every WACC component sourced (Rf from govt bond, ERP from historical, beta from regression).
+  - name: alternatives-considered
+    description: Alternative capital structures / dividend policies considered with trade-offs.
+  - name: risk-impact-assessed
+    description: Impact on credit rating, leverage ratios, financial flexibility assessed.
+
+context_provides:
+  - state.md
+  - docs/finance/
+
+commands_available:
+  - radiant finance <topic> --stage=<startup|growth|mature|...>
+
+related_skills:
+  - valuation
+  - capital-markets
+  - accounting
+  - controlling
+  - credit-risk
+
+anti_patterns:
+  - "WACC from unadjusted CAPM: missing size / industry premium"
+  - "Optimal capital structure without trade-offs: just debt or just equity"
+  - "Dividend policy without cash flow analysis"
+  - "Working capital optimisation without considering supplier / customer relationships"
+
+author: radiant-harness contributors
+license: MIT

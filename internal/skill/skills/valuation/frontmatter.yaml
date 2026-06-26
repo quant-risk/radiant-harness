@@ -1,0 +1,79 @@
+name: valuation
+version: 1.0.0
+description: |
+  Valuation guidance: DCF (Discounted Cash Flow), comparable
+  companies, precedent transactions, sum-of-the-parts (SOTP),
+  leveraged buyout (LBO), real options, impairment testing
+  (IAS 36). Use when the project values a business, asset,
+  or project — for M&A, financial reporting, internal
+  decisions, or strategic planning.
+when_to_use: |
+  Project values a business or asset for M&A, divestiture, or
+  internal decision. DCF model building. Trading multiples
+  analysis. Precedent transaction analysis. LBO modelling.
+  Goodwill impairment test (IAS 36). Real options (defer,
+  expand, abandon). Strategic alternatives.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: methodology
+    type: enum
+    required: true
+    description: '"dcf" | "comps" | "precedents" | "sotp" | "lbo" | "real-options" | "sum-of-the-parts"'
+  - name: purpose
+    type: enum
+    required: true
+    description: '"ma-bid" | "ma-target" | "impairment-test" | "internal-decision" | "ipo" | "litigation"'
+  - name: horizon
+    type: number
+    required: false
+    description: Explicit forecast period in years (DCF). 5-10 typical.
+
+outputs:
+  - path: docs/valuation/dcf-model.md
+    type: artifact
+    description: 'DCF model: forecast cash flows, WACC, terminal value, equity bridge.'
+  - path: docs/valuation/multiples-analysis.md
+    type: artifact
+    description: 'Comparable companies + precedent transactions: multiples table.'
+  - path: docs/valuation/sensitivity.md
+    type: artifact
+    description: Sensitivity tables on WACC, growth, terminal multiple.
+
+gates:
+  - name: methodology-appropriate
+    description: Methodology chosen fits the situation. DCF for control; multiples for relative value; precedents for transactions.
+  - name: assumptions-documented
+    description: Every assumption documented with source (management, market data, comparable).
+  - name: sensitivity-reported
+    description: Sensitivity analysis on key inputs (WACC, growth, margin). Range of values disclosed.
+  - name: cross-check
+    description: Triangulation across at least 2 methodologies. Implied multiples from DCF vs observed.
+  - name: impairment-test-dcf
+    description: 'For IAS 36 impairment: pre-tax, entity-specific discount rate; recoverable amount > carrying.'
+
+context_provides:
+  - state.md
+  - docs/valuation/
+
+commands_available:
+  - radiant valuation <methodology> --purpose=<ma|impairment|internal>
+
+related_skills:
+  - finance
+  - capital-markets
+  - accounting
+  - controlling
+  - capital-markets
+
+anti_patterns:
+  - "Single point estimate: no sensitivity range; not robust"
+  - "DCF with hockey-stick forecast: unsustainable growth; discount properly"
+  - "WACC from unadjusted CAPM: industry-specific premium required"
+  - "Comps without adjustment for size / growth / margin: apples to oranges"
+  - "Impairment test using post-tax WACC and pre-tax cash flows: mismatch"
+
+author: radiant-harness contributors
+license: MIT

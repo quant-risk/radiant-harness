@@ -1,0 +1,70 @@
+name: capital-markets
+version: 1.0.0
+description: |
+  Capital markets guidance: derivatives pricing (Black-Scholes,
+  binomial, Monte Carlo, Heston, SABR), fixed income (duration,
+  convexity, key rate, OAS), credit markets (CDS, CDO, CLO),
+  structured products, equity (factor models, CAPM). Use when
+  the project prices or analyses financial instruments traded
+  in capital markets.
+when_to_use: |
+  Project prices derivatives (options, futures, swaps). Fixed
+  income analytics (yield curves, spreads, OAS). Credit markets
+  analysis (CDS, ABS, CDO). Structured products pricing.
+  Equity factor models (Fama-French, Barra). Portfolio
+  construction (mean-variance, risk parity).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: asset_class
+    type: enum
+    required: true
+    description: '"equity" | "rates" | "fx" | "credit" | "commodity" | "multi-asset"'
+  - name: instrument
+    type: enum
+    required: true
+    description: '"vanilla-option" | "exotic-option" | "swap" | "future" | "bond" | "structured-product" | "credit-derivative"'
+
+outputs:
+  - path: docs/capital-markets/pricing-model.md
+    type: artifact
+    description: 'Pricing model spec: instrument, model, market data, output.'
+  - path: docs/capital-markets/risk-report.md
+    type: artifact
+    description: Greeks, P&L attribution, scenario analysis.
+
+gates:
+  - name: model-calibrated
+    description: Model calibrated to market data; parameters documented; calibration error reported.
+  - name: market-data-sourced
+    description: Market data source documented; staleness checked; stale data flagged.
+  - name: model-validation
+    description: Model validated against liquid benchmark prices; back-tested on historical.
+  - name: model-risk-disclosed
+    description: Model risk documented; alternative models tested; range disclosed.
+
+context_provides:
+  - state.md
+  - docs/capital-markets/
+
+commands_available:
+  - radiant capital-markets <asset_class> --instrument=<...>
+
+related_skills:
+  - finance
+  - market-risk
+  - credit-risk
+  - valuation
+  - bayesian
+
+anti_patterns:
+  - "Pricing without model validation: no benchmark check"
+  - "Black-Scholes for everything: wrong for many underlyings"
+  - "Using stale market data: pricing on outdated vol surface"
+  - "Ignoring model risk: single-model output; no range"
+  - "Vol surface from single point: smile / skew matters"
+
+author: radiant-harness contributors
+license: MIT

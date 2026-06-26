@@ -1,0 +1,75 @@
+name: controlling
+version: 1.0.0
+description: |
+  Controlling / FP&A guidance: budgeting, forecasting, variance
+  analysis, cost allocation, KPI trees, driver-based planning,
+  rolling forecast, management reporting. Use when the project
+  builds or runs the planning and performance management
+  function of an organisation.
+when_to_use: |
+  Annual budgeting process. Monthly / quarterly forecasting.
+  Variance analysis (actual vs plan; actual vs forecast).
+  Cost allocation (overhead, shared services). KPI definition
+  + tracking. Driver-based planning. Rolling forecast. Management
+  reporting (board pack, monthly business review).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: planning_cycle
+    type: enum
+    required: true
+    description: '"annual-budget" | "rolling-forecast" | "monthly-forecast" | "scenario"'
+  - name: methodology
+    type: enum
+    required: false
+    description: '"top-down" | "bottom-up" | "driver-based" | "zero-based" | "beyond-budgeting"'
+  - name: scope
+    type: enum
+    required: false
+    description: '"group" | "business-unit" | "department" | "product-line" | "project"'
+
+outputs:
+  - path: docs/controlling/annual-budget.md
+    type: artifact
+    description: 'Annual budget: P&L, BS, CF, by entity / segment.'
+  - path: docs/controlling/forecast-model.md
+    type: artifact
+    description: 'Forecast model: drivers, formulas, scenarios.'
+  - path: docs/controlling/variance-analysis.md
+    type: artifact
+    description: 'Variance analysis: actual vs plan, by driver, with explanations.'
+
+gates:
+  - name: drivers-identified
+    description: Key business drivers identified (volume × price × mix; headcount × salary; etc.).
+  - name: assumptions-documented
+    description: Macro and micro assumptions documented (FX, inflation, market growth).
+  - name: variance-explained
+    description: Significant variances explained (not just "the number").
+  - name: cycle-time-defined
+    description: Planning cycle time defined (close + reporting calendar); calendar adherence measured.
+
+context_provides:
+  - state.md
+  - docs/controlling/
+
+commands_available:
+  - radiant controlling <cycle> --methodology=<driver-based|zero-based|...>
+
+related_skills:
+  - accounting
+  - finance
+  - valuation
+  - marketing
+
+anti_patterns:
+  - "Budget as fixed target: gaming; not adjusted when assumptions change"
+  - "Variance without driver analysis: 'we missed by 5%' is not analysis"
+  - "Cost allocation as percentage of revenue: arbitrary; distorts decisions"
+  - "No rolling forecast: stuck on stale plan for 12 months"
+  - "Driver-based planning without driver validation: model is fiction"
+
+author: radiant-harness contributors
+license: MIT

@@ -1,0 +1,66 @@
+name: quantum-physics
+version: 1.0.0
+description: |
+  Quantum physics guidance: Schrödinger equation, Hilbert space
+  formalism, entanglement, quantum gates, density matrices,
+  quantum measurement, decoherence, Bell inequalities. Use when
+  the project models quantum systems, designs quantum circuits,
+  or works with quantum information.
+when_to_use: |
+  Modelling quantum systems (atomic, subatomic, condensed matter).
+  Quantum computing / circuit design. Quantum information theory.
+  Quantum optics. Quantum chemistry. Quantum sensing. Project
+  needs density matrices, Bell inequalities, or entanglement
+  quantification.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: subfield
+    type: enum
+    required: true
+    description: '"quantum-mechanics" | "quantum-information" | "quantum-computing" | "quantum-chemistry" | "quantum-optics" | "condensed-matter"'
+  - name: system_size
+    type: enum
+    required: false
+    description: '"single-particle" | "few-body" | "many-body" | "field-theory"'
+
+outputs:
+  - path: docs/quantum-physics/state-prep.md
+    type: artifact
+    description: 'State preparation: Hilbert space, basis, initial state.'
+  - path: docs/quantum-physics/measurement.md
+    type: artifact
+    description: 'Measurement protocol: observables, expectation values, POVM.'
+
+gates:
+  - name: unitarity-checked
+    description: Time evolution unitary; closed-system dynamics preserve norm.
+  - name: measurement-postulates
+    description: Measurement postulate applied; Born rule for probabilities.
+  - name: decoherence-accounted
+    description: Open-system dynamics; Lindblad master equation; decoherence timescales.
+  - name: entanglement-quantified
+    description: Entanglement measured (entropy, negativity, concurrence).
+
+context_provides:
+  - state.md
+  - docs/quantum-physics/
+
+commands_available:
+  - radiant quantum-physics <subfield> --size=<...>
+
+related_skills:
+  - physics
+  - quantum-ml
+  - chemistry
+  - bayesian
+
+anti_patterns:
+  - "Classical intuition in quantum regime: position + momentum simultaneously"
+  - "Ignoring decoherence: superposition lost in real systems"
+  - "No measurement protocol: 'observation' ambiguous"
+
+author: radiant-harness contributors
+license: MIT

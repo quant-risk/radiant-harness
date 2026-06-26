@@ -1,0 +1,75 @@
+name: reinforcement-learning
+version: 1.0.0
+description: |
+  Reinforcement learning guidance: MDPs, value/policy iteration,
+  model-free (DQN, REINFORCE), policy gradient (PPO/SAC/A3C),
+  exploration, off-policy (CQL, BCQ), multi-agent, sim-to-real.
+  Use when the project learns a policy from interaction with
+  an environment — robotics, games, sequential decisions,
+  recommendation with long-term reward.
+when_to_use: |
+  Sequential decision-making with state, action, reward.
+  Environment is interactive (simulator or real). Long-term
+  reward optimisation (not just immediate). Need for exploration.
+  When supervised learning can't formulate the problem
+  (no offline labelled dataset).
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: env_type
+    type: enum
+    required: true
+    description: '"discrete-action" | "continuous-action" | "multi-agent" | "sim-to-real" | "offline-only"'
+  - name: obs_space
+    type: enum
+    required: true
+    description: '"low-dim-vector" | "image" | "graph" | "language" | "multi-modal"'
+  - name: reward_signal
+    type: enum
+    required: true
+    description: '"dense" | "sparse" | "shaped" | "preference-based"'
+
+outputs:
+  - path: docs/rl/env-spec.md
+    type: artifact
+    description: 'MDP definition: state, action, reward, transition, episode termination.'
+  - path: docs/rl/training-recipe.md
+    type: artifact
+    description: Algorithm choice, network arch, exploration strategy, training config.
+
+gates:
+  - name: env-defined
+    description: Environment (state/action/reward/transition) specified; ideally a gymnasium / PettingZoo interface.
+  - name: reward-engineered-or-shaping
+    description: 'Reward function analysed: sparse reward with no shaping often fails; credit assignment is hard.'
+  - name: baseline-comparison
+    description: Compared against a non-RL baseline (heuristic, supervised learning on logged data). RL must beat it.
+  - name: seeds-multi
+    description: Multiple random seeds (>=3) reported. RL has high variance.
+  - name: safety-constraints
+    description: Safety constraints in env (state bounds, action limits, reward penalties). RL explores aggressively.
+
+context_provides:
+  - state.md
+  - docs/rl/
+
+commands_available:
+  - radiant rl <env_type> --obs=<low-dim-vector|image|graph|...>
+
+related_skills:
+  - ml
+  - deep-learning
+  - bayesian
+  - game
+
+anti_patterns:
+  - "RL when supervised learning works: don't use RL if you have offline data + good features"
+  - "Sparse reward with no shaping: agent never finds reward signal"
+  - "Single seed: RL has high variance; report multiple"
+  - "Reward hacking: agent exploits reward function in unintended way"
+  - "Sim-to-real without domain randomisation: brittle transfer"
+
+author: radiant-harness contributors
+license: MIT

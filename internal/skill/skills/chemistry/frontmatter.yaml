@@ -1,0 +1,67 @@
+name: chemistry
+version: 1.0.0
+description: |
+  Chemistry guidance: molecular modelling (DFT, MD, force fields),
+  reaction mechanisms, kinetics, thermodynamics, organic /
+  inorganic / physical chemistry, spectroscopy, drug discovery
+  workflows. Use when the project models molecules, reactions,
+  or materials at the atomic scale.
+when_to_use: |
+  Molecular modelling (DFT, ab initio, MD, force fields).
+  Reaction mechanism elucidation. Kinetics / thermodynamics
+  calculations. Spectroscopy interpretation. Drug-target
+  interaction. Materials design. Organic synthesis planning.
+  Catalysis. Computational chemistry workflows.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: method
+    type: enum
+    required: true
+    description: '"dft" | "ab-initio" | "molecular-dynamics" | "force-field" | "kinetics" | "spectroscopy" | "docking"'
+  - name: system
+    type: enum
+    required: false
+    description: '"small-molecule" | "protein" | "material" | "catalyst" | "organic-reaction" | "inorganic"'
+
+outputs:
+  - path: docs/chemistry/molecule-spec.md
+    type: artifact
+    description: 'Structure: SMILES / PDB / CIF; properties; conformation.'
+  - path: docs/chemistry/computation-spec.md
+    type: artifact
+    description: 'Method spec: level of theory, basis set, software.'
+
+gates:
+  - name: method-appropriate
+    description: Method appropriate to system size + accuracy need. DFT for medium; ab initio for small; force field for large.
+  - name: basis-set-justified
+    description: Basis set chosen (e.g. 6-31G*, cc-pVTZ); justified by accuracy/cost.
+  - name: validation-against-experiment
+    description: Computed properties validated against experimental data where available.
+  - name: convergence-checked
+    description: Energy / property convergence checked with respect to basis set / box size / time step.
+
+context_provides:
+  - state.md
+  - docs/chemistry/
+
+commands_available:
+  - radiant chemistry <method> --system=<...>
+
+related_skills:
+  - quantum-physics
+  - biology
+  - quantum-ml
+  - physics
+
+anti_patterns:
+  - "Wrong method for system size: ab initio for protein = intractable"
+  - "No basis set convergence check: results depend on basis"
+  - "MD without equilibration: averaging pre-equilibrium data"
+  - "Docking without validation: known ligands as controls"
+
+author: radiant-harness contributors
+license: MIT

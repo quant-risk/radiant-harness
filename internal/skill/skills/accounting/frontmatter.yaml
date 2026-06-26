@@ -1,0 +1,68 @@
+name: accounting
+version: 1.0.0
+description: |
+  Accounting guidance: IFRS (Brazil CPC), financial statements,
+  consolidation, fair value, hedge accounting, lease (IFRS 16),
+  revenue recognition (IFRS 15), impairment (IFRS 9 / IAS 36),
+  tax (current + deferred), regulatory reporting.
+when_to_use: |
+  Project prepares financial statements under IFRS / US GAAP /
+  BR GAAP. Consolidation (subsidiaries, associates, joint
+  arrangements). Fair value measurement (Level 1/2/3).
+  Revenue recognition complex (multi-element, variable
+  consideration). Hedge accounting (fair value, cash flow,
+  net investment). Lease accounting. Goodwill / asset impairment.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: framework
+    type: enum
+    required: true
+    description: '"ifrs" | "us-gaap" | "br-gaap-cpc" | "regulatory" | "tax"'
+  - name: area
+    type: enum
+    required: true
+    description: '"consolidation" | "revenue-recognition" | "lease" | "hedge-accounting" | "fair-value" | "impairment" | "tax"'
+
+outputs:
+  - path: docs/accounting/accounting-policy.md
+    type: artifact
+    description: Accounting policy memo with IFRS reference + judgment.
+  - path: docs/accounting/journal-entries.md
+    type: artifact
+    description: Sample journal entries; impact on financial statements.
+
+gates:
+  - name: standard-cited
+    description: Every policy cites specific IFRS / CPC / FASB paragraph. No "based on accounting principles" handwaves.
+  - name: judgment-documented
+    description: Accounting judgments documented (assumptions, estimates, alternatives considered).
+  - name: audit-trail
+    description: Audit trail for material estimates; review + approval logged.
+  - name: regulatory-deadline-tracked
+    description: Regulatory deadlines (quarterly, annual, FERC, BACEN, CVM) tracked and met.
+
+context_provides:
+  - state.md
+  - docs/accounting/
+
+commands_available:
+  - radiant accounting <framework> --area=<consolidation|revenue|lease|...>
+
+related_skills:
+  - valuation
+  - controlling
+  - capital-markets
+  - finance
+
+anti_patterns:
+  - "Handwave 'based on accounting principles': no IFRS citation"
+  - "Judgment without documentation: estimates undocumented; no audit trail"
+  - "Manual consolidation without controls: spreadsheet-only consolidation"
+  - "Revenue recognised on contract signature (not delivery): premature recognition"
+  - "Hedge accounting without documentation: ineffective by default"
+
+author: radiant-harness contributors
+license: MIT

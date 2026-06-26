@@ -1,0 +1,74 @@
+name: operational-risk
+version: 1.0.0
+description: |
+  Operational risk guidance: ORM framework, KRIs (Key Risk
+  Indicators), scenario analysis, loss data collection, RCSA
+  (Risk and Control Self-Assessment), business continuity,
+  Basel III OR capital. Use when the project quantifies or
+  manages operational risk — fraud, cyber, process failure,
+  people risk, system failure, external events.
+when_to_use: |
+  Project models or manages operational risk. RCSA process.
+  Loss data collection + analysis. Scenario analysis for OR
+  capital. KRIs monitored. Business continuity / disaster
+  recovery. Cyber risk quantification. Operational resilience.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: framework
+    type: enum
+    required: true
+    description: '"basel-iii-sma" | "basel-iii-bia" | "basel-iii-ima" | "internal-framework"'
+  - name: risk_category
+    type: enum
+    required: false
+    description: '"internal-fraud" | "external-fraud" | "employment" | "clients" | "business-disruption" | "technology" | "physical-assets" | "execution"'
+
+outputs:
+  - path: docs/operational-risk/rcsa-report.md
+    type: artifact
+    description: 'RCSA results: inherent risk, controls, residual risk, action plans.'
+  - path: docs/operational-risk/scenario-analysis.md
+    type: artifact
+    description: 'Scenario analysis output: severity, frequency, capital impact.'
+  - path: docs/operational-risk/loss-data-report.md
+    type: artifact
+    description: 'Loss data analysis: trends, concentrations, recovery rates.'
+
+gates:
+  - name: loss-data-thresholds-defined
+    description: Loss data collection thresholds (gross/net, threshold dollar) documented; collection mandatory above threshold.
+  - name: rcsa-completed
+    description: RCSA cycle complete for all material units; inherent + residual risk captured.
+  - name: kris-defined
+    description: KRIs defined per risk category; thresholds + escalation paths.
+  - name: scenario-analysis-credible
+    description: Scenarios plausible (not worst-case fantasy); outputs reviewed by business; documented assumptions.
+  - name: business-continuity-tested
+    description: BCP tested (annual); RTO/RPO documented; failover validated.
+
+context_provides:
+  - state.md
+  - docs/operational-risk/
+
+commands_available:
+  - radiant operational-risk <framework> --category=<risk_category>
+
+related_skills:
+  - security
+  - credit-risk
+  - market-risk
+  - incident
+  - data
+
+anti_patterns:
+  - "OR capital without scenario analysis: SMA overstates; BIA understates"
+  - "RCSA as checkbox exercise: no real assessment"
+  - "Loss data only collected above threshold: tail under-reported"
+  - "KRIs without action: alerts no one reads"
+  - "BCP never tested: fails on the day"
+
+author: radiant-harness contributors
+license: MIT

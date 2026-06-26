@@ -1,0 +1,76 @@
+name: marketing
+version: 1.0.0
+description: |
+  Marketing analytics guidance: marketing mix modeling (MMM),
+  multi-touch attribution (MTA), incrementality testing, customer
+  LTV / churn, brand tracking, media planning, customer
+  segmentation. Use when the project measures, optimises, or
+  plans marketing spend and customer lifetime value.
+when_to_use: |
+  Marketing mix modeling (MMM). Multi-touch attribution (MTA).
+  Incrementality / A/B testing of campaigns. Customer lifetime
+  value (LTV) modelling. Churn prediction + prevention.
+  Segmentation + targeting. Media planning + budget allocation.
+  Brand health tracking.
+tier_eligible:
+  - feature
+  - architecture
+
+inputs:
+  - name: methodology
+    type: enum
+    required: true
+    description: '"mmm" | "mta" | "incrementality" | "ltv" | "churn" | "segmentation" | "brand-tracking"'
+  - name: channel_mix
+    type: enum
+    required: false
+    description: '"paid-search" | "paid-social" | "display" | "tv" | "ooh" | "email" | "mixed"'
+  - name: business_model
+    type: enum
+    required: false
+    description: '"b2c-subscription" | "b2c-ecommerce" | "b2b" | "lead-gen" | "marketplace"'
+
+outputs:
+  - path: docs/marketing/mmm-spec.md
+    type: artifact
+    description: 'MMM specification: dependent variable, regressors, adstock, saturation, model fit.'
+  - path: docs/marketing/attribution-model.md
+    type: artifact
+    description: Attribution model spec + channel contribution table.
+  - path: docs/marketing/incrementality-test.md
+    type: artifact
+    description: Geo / audience test design + result.
+
+gates:
+  - name: incrementality-tested
+    description: MMM results validated by at least one incrementality test (geo test, holdout). Correlation != causation.
+  - name: adstock-modelled
+    description: Adstock (carry-over effect) modelled; not just same-week correlation.
+  - name: saturation-considered
+    description: Diminishing returns modelled (saturation curve); budget allocation respects.
+  - name: cross-channel-effect
+    description: Cross-channel interaction modelled (TV drives search; search drives direct).
+
+context_provides:
+  - state.md
+  - docs/marketing/
+
+commands_available:
+  - radiant marketing <methodology> --channels=<list>
+
+related_skills:
+  - causal
+  - causal-ml
+  - bayesian
+  - stats
+  - controlling
+
+anti_patterns:
+  - "Correlation without incrementality test: spend correlates with sales, no causal evidence"
+  - "MMM without adstock: ignores carry-over; underestimates long-tail channels"
+  - "MMM without saturation: assumes linear returns; misallocates budget"
+  - "Last-click attribution: ignores upper-funnel; undervalues brand"
+  - "LTV without churn modelling: optimistic if churn rising"
+
+author: radiant-harness contributors
+license: MIT
