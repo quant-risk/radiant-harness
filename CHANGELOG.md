@@ -4,6 +4,68 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-06-26 — v2.0 Roadmap Complete (Sprints 33–40)
+
+### Added — Context Engine (Sprint 33, v0.8.0)
+- `internal/context/detector.go` — domain detection from filesystem signals (8 domains, 4 tiers)
+- `internal/context/registry.go` — skill registry with domain→skill mapping (3–10 skills)
+- `internal/context/assembler.go` — 4-pass token-aware CONTEXT.md assembler (≤2KB default)
+- `internal/context/compressor.go` — phase compression to ≤20% of original tokens
+- `radiant context detect`, `context assemble`, `context compress`, `context summarize`
+
+### Added — Bootstrap Protocol (Sprint 34, v0.8.1)
+- `internal/boot/manifest.go` — ≤500-token bootstrap manifest for any LLM/IDE
+- `radiant boot` — emit project manifest; `radiant boot --json`
+
+### Added — Loop Engine (Sprint 35, v0.9.0)
+- `internal/loop/budget.go` — thread-safe token budget (lean/standard/thorough profiles)
+- `internal/loop/cycle.go` — state machine: idle→discover→plan→execute→verify→persist
+- `internal/loop/trace.go` — append-only JSONL trace per run
+- `internal/loop/verifier.go` — adversarial verifier (separate agent; defaults to REJECTED)
+- `radiant loop start/status/resume`, `radiant trace show/list`
+
+### Added — Enhanced Hooks + IDE Adapters (Sprint 36, v0.9.1)
+- `hooks/load-context.mjs` — SessionStart: loads CONTEXT.md (≤2KB) with legacy fallback
+- `hooks/pre-tool.mjs` — PreToolUse: blocks when budget < 10% remaining
+- `hooks/post-tool.mjs` — PostToolUse: appends event to trace JSONL
+- `scaffold.DiffViews`, `scaffold.EnrichContent` — IDE-specific enrichment (Copilot/Cursor/Gemini)
+- `radiant views --diff` flag
+
+### Added — Token Budget & Compression (Sprint 37, v0.9.2)
+- `internal/context/summarizer.go` — phase summarizer (key facts + condensed body)
+- `internal/context/budget_profiles.go` — lean(10K)/standard(50K)/thorough(200K) profiles
+- `radiant budget estimate [spec] [--profile]`, `radiant budget report <run-id>`
+
+### Added — Self-Improvement Engine (Sprint 38, v1.0.0-beta)
+- `internal/improve/analyzer.go` — failure trace analyzer (5 categories)
+- `internal/improve/proposer.go` — SKILL.md patch proposal generator
+- `internal/improve/validator.go` — +5pp threshold validation, apply with backup, JSONL history
+- `radiant improve --from-traces [--apply] [--dry-run]`, `radiant improve history`
+
+### Added — Multi-Agent Coordination (Sprint 39, v1.0.0)
+- `internal/fleet/roles.go` — 4 roles: Planner, Implementer, Verifier, Summarizer
+- `internal/fleet/store.go` — mutex-protected shared context store (atomic persistence)
+- `internal/fleet/resolver.go` — file-level conflict detection and resolution
+- `internal/fleet/coordinator.go` — fleet orchestrator with per-role prompt injection
+- `radiant fleet start "<goal>" [--agents=N]`, `radiant fleet status <run-id>`
+
+### Added — Hardening + Documentation (Sprint 40, v1.0.0-final)
+- `docs/SKILL-SCHEMA.md` updated to v2.0: `token_budget`, `context_tier`, `lazy_load` fields
+- `docs/MIGRATION-V2.md` — complete v0.7 → v1.0 migration guide
+- `docs/CONTEXT-ENGINE.md` — domain detection, compression, CLI reference
+- `docs/LOOP-ENGINE.md` — state machine diagram, components, exit conditions
+
+### Test Coverage
+- 144 tests across 6 new packages: all passing
+- `internal/context` (39), `internal/boot` (7), `internal/loop` (37),
+  `internal/scaffold` (20), `internal/improve` (18), `internal/fleet` (23)
+
+### Performance
+- Context assembly: from ~55K tokens (v0.7) to ~300 tokens (v1.0) — **99% reduction**
+- Bootstrap manifest: ≤500 tokens for any LLM/IDE entry point
+
+---
+
 ## [0.6.3] — 2026-06-25
 
 Sprints 20-22: telemetry wired + summary + 3 domain skills.

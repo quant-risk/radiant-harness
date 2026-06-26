@@ -1,363 +1,191 @@
-# Skill Schema — Open Specification
+# Skill Schema v2.0
 
-**Version**: 1.0.0
-**Status**: Draft (proposed for Sprint 10)
-**License**: MIT (open spec; free to implement)
+**Version**: 2.0.0
+**Status**: Current (v1.0.0-final)
 
-This document defines the canonical format for a **skill** in the radiant-harness workflow. The format is intentionally **vendor-neutral**: any LLM, IDE, or agent runtime can implement a parser without depending on a proprietary runtime, hook system, or namespace convention.
+This document describes the SKILL.md frontmatter format used by radiant-harness v1.0.0.
 
-A reference implementation lives in `internal/scaffold/skills/` and is embedded in the `radiant` CLI binary.
+## Backwards Compatibility
 
----
-
-## 1. Goals
-
-1. **Universal**: any agent can consume a skill by reading the directory + YAML.
-2. **Machine-readable contract**: inputs, outputs, gates, version are explicit (not implicit).
-3. **Self-describing**: a skill carries enough metadata that an agent can decide in 5 seconds whether to use it.
-4. **Versioned**: skills evolve; old projects can stay on old skills via `radiant update`.
-5. **Embeddable**: the CLI bundles skills so `init` works offline, no network.
-6. **Composable**: skills reference other skills explicitly (no implicit dependencies).
+v2.0 is backwards-compatible with v1.0 skills. New fields are optional.
+A v1 skill with no `token_budget`, `context_tier`, or `lazy_load` will:
+- Use `token_budget: auto` (estimated from content length)
+- Be included in `context_tier: domain` (loaded when domain matches)
+- Default `lazy_load: true`
 
 ---
 
-## 2. Directory layout
+## Schema
 
+```yaml
+# SKILL.md frontmatter (delimited by --- ... ---)
+---
+id: <kebab-case unique identifier>
+version: "2.0"                       # v2.0 marker; omit for v1 compat
+name: <display name>
+description: <one-sentence description used in CONTEXT.md>
+domain:
+  - <domain>                         # one or more: backend, frontend, ml, finance,
+                                     #   blockchain, ops, systems, science, general
+tier:
+  - <tier>                           # one or more: trivial, feature, architecture, product
+tags:
+  - <tag>                            # arbitrary; used for --skills=<tag> filter
+
+# v2.0 additions (all optional):
+token_budget: <N>                    # max tokens this skill may consume in context.
+                                     #   "auto" = estimate from content length.
+                                     #   Enforced by the assembler when over-budget.
+context_tier: <tier_name>           # which context assembly tier includes this skill.
+                                     #   "core" = always loaded (nova-feature, validar, adr)
+                                     #   "domain" = loaded when domain matches
+                                     #   "tier" = loaded when work tier matches
+                                     #   "explicit" = only when requested via --skills=<id>
+lazy_load: <bool>                   # default true. false = load full body, not just frontmatter.
+                                     #   Set false for tiny skills (<100 tokens) or
+                                     #   skills the assembler can't summarize well.
+---
 ```
-skills/<skill-name>/
-├── SKILL.md                # required — human-readable instructions
-├── frontmatter.yaml        # required — machine-readable contract
-├── examples/               # optional — worked examples
-│   ├── trivial.md
-│   ├── medium.md
-│   └── complex.md
-├── scripts/                # optional — helper scripts the skill may invoke
-│   └── <helper>.sh
-└── CHANGELOG.md            # optional — per-skill version history
-```
 
-`<skill-name>` MUST be kebab-case (lowercase, hyphens), 1-32 chars, unique within a project.
+## Field Reference
+
+### Required
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique kebab-case identifier. Used in `--skills=<id>` flag. |
+| `name` | string | Human-readable display name. |
+| `description` | string | One sentence. Shown in CONTEXT.md instead of full skill body. |
+| `domain` | list | Domains where this skill is relevant. |
+| `tier` | list | Work tiers where this skill is relevant. |
+
+### Optional (v2.0)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | — | Set to `"2.0"` to enable strict v2 validation. |
+| `tags` | list | `[]` | Arbitrary tags for `--skills=<tag>` filter. |
+| `token_budget` | int\|"auto" | `"auto"` | Max tokens for this skill's content in context. |
+| `context_tier` | string | `"domain"` | When to auto-include this skill. |
+| `lazy_load` | bool | `true` | Whether to defer body loading. |
 
 ---
 
-## 3. `SKILL.md` structure
+## Context Tiers
 
-`SKILL.md` is plain Markdown. No proprietary frontmatter — the YAML contract lives in `frontmatter.yaml` (separate file) so the prose stays clean.
+| `context_tier` | When loaded |
+|---------------|-------------|
+| `core` | Always — regardless of domain or tier |
+| `domain` | When project domain matches `domain:` list |
+| `tier` | When work tier matches `tier:` list |
+| `explicit` | Only via `--skills=<id>` or `--skills=<tag>` |
 
-```markdown
-# Skill: <name>
+Skills with `context_tier: explicit` are never auto-included; they must be
+explicitly requested. Good for niche skills (e.g., `solidity-audit`) that
+would add noise to most projects.
 
-> One-paragraph orientation (2-4 sentences). Written for a busy
-> agent who needs to decide in 5 seconds whether this skill
-> applies. Reference the inputs from frontmatter.yaml.
+---
 
-## Decision tree
+## Token Budget Rules
 
-[ASCII or Mermaid diagram showing which paths apply in which cases]
+1. `auto`: estimated as `ceil(len(description) / 4) + 20` tokens.
+2. If the assembler would exceed the total budget, it drops skills in reverse
+   priority order (explicit → tier → domain → core).
+3. Core skills are never dropped.
+4. When a skill is dropped, its `id` appears in the "skills omitted" line of CONTEXT.md.
 
-## Workflow
-
-[Step-by-step instructions. Reference the CLI commands from
-frontmatter.yaml. Each step should be unambiguous enough that an
-LLM can execute it without improvisation.]
-
-### Step 1: <title>
-[what to do, what file to read/write, what gate to validate]
-
-### Step 2: <title>
-[...]
-
-### Step N: <title>
-[...]
+---
 
 ## Examples
 
-### Example 1: trivial
-[Input + Walkthrough + Output]
-
-### Example 2: medium
-[Input + Walkthrough + Output]
-
-### Example 3: complex
-[Input + Walkthrough + Output]
-
-## Anti-patterns
-
-[Concrete examples of what NOT to do, with the wrong output shown
-alongside the corrected version. The wrong/correct pairs are the
-highest-leverage teaching content.]
-
-## Failure modes
-
-[For each gate in frontmatter.yaml, describe what to do when it
-fails. Include: how to detect the failure, how to retry, when to
-escalate to a human or another skill.]
-
-## Related skills
-
-[Cross-references to other skills in `.radiant-harness/skills/`,
-with one-line descriptions of when to chain them.]
-```
-
----
-
-## 4. `frontmatter.yaml` schema (canonical)
-
+### v1 skill (backwards-compatible)
 ```yaml
-# ─────────────────────────────────────────────────────────────
-# Required fields
-# ─────────────────────────────────────────────────────────────
-
-# kebab-case identifier, unique within project
-name: nova-feature
-
-# semver, updated by `radiant update` when skills are revised
-version: 1.0.0
-
-# One-paragraph summary. Plain text, no Markdown.
-description: |
-  Inicia uma nova feature no pipeline SDD. Decide o tier,
-  cria a pasta, conduz pelos gates, e entrega spec.md +
-  tasks.md prontos para implementação.
-
-# When to invoke this skill. Used by agents to decide if it's
-# applicable. 1-3 sentences, plain text.
-when_to_use: |
-  O usuário pediu uma feature nova. Tem intenção clara mas
-  ainda não decidiu se é trivial, feature ou architecture.
-
-# Which tiers this skill can produce. Trivial/Feature/Architecture
-# match the radiant tier system.
-tier_eligible: [trivial, feature, architecture]
-
-# ─────────────────────────────────────────────────────────────
-# Contract: inputs
-# ─────────────────────────────────────────────────────────────
-
-inputs:
-  - name: intent
-    type: string              # string | number | enum | object | path
-    required: true
-    description: "O que o usuário quer construir (1-3 frases)"
-  - name: context
-    type: string
-    required: false
-    description: "Contexto adicional (projeto, restrições, links)"
-
-# ─────────────────────────────────────────────────────────────
-# Contract: outputs (artifacts this skill produces)
-# ─────────────────────────────────────────────────────────────
-
-outputs:
-  - path: specs/<NNNN>-<slug>/spec.md
-    type: artifact             # artifact | report | commit | pr | decision
-    description: "Spec com ACs Given/When/Then"
-  - path: specs/<NNNN>-<slug>/tasks.md
-    type: artifact
-    description: "Tabela de tasks com gate commands"
-
-# ─────────────────────────────────────────────────────────────
-# Contract: gates (validation steps before outputs are accepted)
-# ─────────────────────────────────────────────────────────────
-
-gates:
-  - name: tier-decided
-    description: "Tier escolhido (trivial/feature/architecture)"
-    on_failure: |
-      Re-abrir o skill /kickoff ou perguntar ao usuário até que
-      o tier esteja claro. Não prosseguir sem tier definido.
-  - name: ac-testable
-    description: "Cada AC tem formato Given/When/Then verificável"
-    on_failure: |
-      Chamar a skill /clarificar para refinar ACs ambíguos.
-
-# ─────────────────────────────────────────────────────────────
-# Optional but recommended
-# ─────────────────────────────────────────────────────────────
-
-# Context files this skill reads from the project before executing
-context_provides:
-  - vision.md       # if exists
-  - glossary.md     # always
-  - state.md        # always (.radiant-harness/state.md)
-
-# Equivalent CLI command — so non-agent users get the same
-# capability through the binary
-commands_available:
-  - radiant spec <intent>
-
-# Other skills this one references (for chaining)
-related_skills:
-  - clarificar
-  - validar
-
-# What this skill helps you AVOID (most valuable for review)
-anti_patterns:
-  - "Implementing without reading state.md (loses session context)"
-  - "Writing ACs as 'should work correctly' (not testable)"
-
-# Author + license metadata
-author: radiant-harness contributors
-license: MIT
+---
+id: nova-feature
+name: Nova Feature
+description: Start any new feature with clean spec, tests, and handoff checklist.
+domain:
+  - general
+tier:
+  - feature
+  - architecture
+  - product
+tags:
+  - core
+  - feature
+---
 ```
 
----
-
-## 5. Field reference
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | ✓ | kebab-case, 1-32 chars, unique within project |
-| `version` | semver | ✓ | `MAJOR.MINOR.PATCH`. Bump MAJOR on contract change, MINOR on new optional field, PATCH on text-only updates |
-| `description` | string | ✓ | One-paragraph summary. Used by agents to decide if the skill applies |
-| `when_to_use` | string | ✓ | 1-3 sentences. Decision criterion for invocation |
-| `tier_eligible` | array | ✓ | Subset of `[trivial, feature, architecture]` |
-| `inputs[].name` | string | ✓ | kebab-case identifier within inputs |
-| `inputs[].type` | enum | ✓ | `string \| number \| enum \| object \| path` |
-| `inputs[].required` | bool | ✓ | Whether the skill fails without this input |
-| `inputs[].description` | string | ✓ | Human-readable description |
-| `outputs[].path` | glob | ✓ | Where the artifact lands. `<NNNN>` = sequence number, `<slug>` = kebab-case name |
-| `outputs[].type` | enum | ✓ | `artifact \| report \| commit \| pr \| decision` |
-| `outputs[].description` | string | ✓ | What the artifact is |
-| `gates[].name` | string | ✓ | Identifier |
-| `gates[].description` | string | ✓ | What is being validated |
-| `gates[].on_failure` | string | ✗ | Recovery procedure. If omitted, the skill fails closed |
-| `context_provides` | array | ✗ | Files the skill expects to read before executing |
-| `commands_available` | array | ✗ | Equivalent CLI commands for non-agent users |
-| `related_skills` | array | ✗ | Other skills this one references |
-| `anti_patterns` | array | ✗ | Mistakes this skill helps avoid |
-| `author` | string | ✗ | Skill author |
-| `license` | string | ✗ | License identifier (SPDX) |
-
----
-
-## 6. Validation rules
-
-A skill is valid iff:
-
-1. `name` matches `^[a-z][a-z0-9-]{0,31}$`
-2. `version` matches `^\d+\.\d+\.\d+$`
-3. `tier_eligible` is non-empty subset of `{trivial, feature, architecture}`
-4. Every `inputs[].name` is unique within the skill
-5. Every `outputs[].path` is unique within the skill
-6. Every `gates[].name` is unique within the skill
-7. All required fields are present
-8. `SKILL.md` exists and is non-empty
-9. The `name` in `frontmatter.yaml` matches the parent directory name
-10. (Recommended) `SKILL.md` includes all section headers from §3
-
-The reference validator is `radiant skills validate <skill-name>`, shipped with the CLI.
-
----
-
-## 7. Distribution
-
-Skills are bundled in the `radiant` CLI binary at build time via `//go:embed`. Distribution channels:
-
-| Channel | Mechanism |
-|---------|-----------|
-| GitHub release | `radiant` binary + `radiant-skills.tar.gz` (extractable into a project) |
-| `go install` | `go install github.com/quant-risk/radiant-harness/cmd/radiant@latest` |
-| `brew install` | Homebrew tap |
-| npm | `@quant-risk/radiant-harness` wraps the binary; provides the `npx @quant-risk/radiant-harness` entry |
-| Direct download | `dist/radiant-{linux,darwin,windows}-{amd64,arm64}` per the Makefile |
-
-Updating skills on an existing project:
-
-```bash
-$ radiant update
-# Reads the bundled skills, compares against the project's
-# .radiant-harness/skills/, prompts for each changed skill,
-# updates frontmatter.yaml version + skill body, preserves
-# any local customizations (skills the user wrote themselves).
-```
-
----
-
-## 8. Reference parsers
-
-Parsers implementing this spec should:
-
-1. Read the project root for `AGENTS.md` (the index) and `.radiant-harness/skills/` (the skills)
-2. For each skill, parse `frontmatter.yaml` to extract the contract
-3. Present the contract to the agent as structured metadata
-4. When the agent invokes a skill, render `SKILL.md` as instructions
-5. Validate outputs against the contract (`path` matches, gates satisfied) before considering the skill done
-
-The CLI ships with a Go reference parser. Community parsers in other languages are welcome — please link them in the project README.
-
----
-
-## 9. Versioning policy
-
-- **PATCH**: text-only changes to SKILL.md (clarity, examples). No contract change.
-- **MINOR**: new optional field in frontmatter.yaml (e.g. `inputs[].default`). Old parsers still work.
-- **MAJOR**: rename or removal of a field, change in `tier_eligible` values, change in `inputs[].required`. Old parsers may break.
-
-When `radiant update` runs, it warns on MAJOR bumps and refuses to auto-update — the user must explicitly opt in.
-
----
-
-## 10. Example: minimal valid skill
-
-**`skills/hello-world/frontmatter.yaml`**:
-
+### v2 core skill
 ```yaml
-name: hello-world
-version: 1.0.0
-description: |
-  Greet the user with the project name and current state.
-when_to_use: |
-  Any greeting context (agent startup, user "hi", etc.).
-tier_eligible: [trivial]
-inputs: []
-outputs:
-  - path: -        # no artifact
-    type: report
-    description: "A greeting printed to stdout"
-gates: []
+---
+id: nova-feature
+version: "2.0"
+name: Nova Feature
+description: Start any new feature with clean spec, tests, and handoff checklist.
+domain:
+  - general
+tier:
+  - feature
+  - architecture
+  - product
+tags:
+  - core
+token_budget: 150
+context_tier: core
+lazy_load: true
+---
 ```
 
-**`skills/hello-world/SKILL.md`**:
+### v2 domain-specific skill
+```yaml
+---
+id: finance-risk
+version: "2.0"
+name: Finance Risk Assessment
+description: IFRS9 ECL, VaR, Basel compliance checks for financial software.
+domain:
+  - finance
+tier:
+  - feature
+  - architecture
+tags:
+  - finance
+  - risk
+token_budget: 300
+context_tier: domain
+lazy_load: true
+---
+```
 
-```markdown
-# Skill: hello-world
-
-> Print a friendly greeting that includes the project name
-> from `.radiant-harness/config.yaml` and the current state
-> from `.radiant-harness/state.md`.
-
-## Decision tree
-
-Greeting? → Use this skill. Anything else? → Not applicable.
-
-## Workflow
-
-1. Read `.radiant-harness/config.yaml` → extract `project_name`
-2. Read `.radiant-harness/state.md` → extract `current_feature`
-3. Print: `Hello! Working on <project_name>, currently on <current_feature>.`
-
-## Examples
-
-### Example 1: trivial
-Input: (none)
-Output: `Hello! Working on my-app, currently on 0001-jwt-auth.`
-
-## Anti-patterns
-- Don't invent fields that don't exist in config.yaml.
-- Don't print more than one line — this is a greeting, not a status report.
-
-## Failure modes
-
-- `config.yaml` missing → print: `Hello! (project name unknown — run radiant init)`
-- `state.md` missing → print: `Hello! (no active feature)`
-
-## Related skills
-- (none)
+### v2 explicit-only skill (never auto-loaded)
+```yaml
+---
+id: solidity-audit
+version: "2.0"
+name: Solidity Audit
+description: Smart contract security audit: reentrancy, overflow, access control.
+domain:
+  - blockchain
+tier:
+  - architecture
+tags:
+  - audit
+  - security
+token_budget: 500
+context_tier: explicit
+lazy_load: false
+---
 ```
 
 ---
 
-## 11. License
+## Validation
 
-This spec is released under MIT. Implementations are welcome in any language. The radiant-harness project provides a Go reference implementation; community implementations in TypeScript, Python, Rust, etc. are encouraged and will be linked from the README.
+Run `radiant validate-file skills/<id>/SKILL.md` to check schema compliance.
+
+Errors reported:
+- Missing required fields
+- Unknown `context_tier` value
+- `token_budget` exceeded by actual content length
+- `lazy_load: false` on a skill with >300 tokens body (warning)
