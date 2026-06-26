@@ -22,6 +22,7 @@ import (
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
@@ -1737,6 +1738,112 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd, contextSummarizeCmd)
 	root.AddCommand(contextCmd)
+
+	// ── improve (Sprint 38) ──────────────────────────────────────────────────
+	improveCmd := &cobra.Command{
+		Use:   "improve",
+		Short: "Self-improvement engine — analyze traces, propose and apply skill edits",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			skill, _ := cmd.Flags().GetString("skill")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			apply, _ := cmd.Flags().GetBool("apply")
+			fromTraces, _ := cmd.Flags().GetBool("from-traces")
+
+			if !fromTraces && !apply {
+				return fmt.Errorf("specify --from-traces to analyze, or --apply to apply validated proposals")
+			}
+
+			// Step 1: analyze traces
+			fmt.Println("Analyzing traces...")
+			analysis, err := improve.AnalyzeTraces(cwd, skill)
+			if err != nil {
+				return fmt.Errorf("analyze traces: %w", err)
+			}
+			fmt.Print(improve.FormatAnalysis(analysis))
+
+			if len(analysis.Patterns) == 0 {
+				return nil
+			}
+
+			// Step 2: propose edits
+			proposals := improve.ProposeEdits(analysis.Patterns, cwd)
+			fmt.Print(improve.FormatProposals(proposals))
+
+			if dryRun || !apply {
+				fmt.Println("\n(dry-run — pass --apply to apply validated proposals)")
+				return nil
+			}
+
+			// Step 3: validate and apply
+			applied := 0
+			for _, proposal := range proposals {
+				vr := improve.ValidateProposal(proposal, analysis)
+				fmt.Print(improve.FormatValidationResult(vr))
+				if !vr.Passed {
+					continue
+				}
+
+				backupPath, err := improve.ApplyProposal(proposal, cwd)
+				if err != nil {
+					fmt.Printf("  ✗ Failed to apply: %v\n", err)
+					continue
+				}
+				fmt.Printf("  ✓ Applied (backup: %s)\n", backupPath)
+
+				record := improve.ImprovementRecord{
+					Skill:       proposal.Skill,
+					File:        proposal.File,
+					Category:    string(proposal.Category),
+					Description: proposal.Description,
+					RunIDs:      proposal.RunIDs,
+					OldScore:    vr.OldScore,
+					NewScore:    vr.NewScore,
+					DeltaPP:     vr.DeltaPP,
+				}
+				improve.PersistRecord(record, cwd)
+				applied++
+			}
+
+			if applied == 0 {
+				fmt.Println("\nNo proposals passed validation threshold (≥5pp improvement required).")
+			} else {
+				fmt.Printf("\n✓ Applied %d improvement(s). History: .radiant-harness/improvements.jsonl\n", applied)
+			}
+			return nil
+		},
+	}
+	improveCmd.Flags().String("skill", "", "Filter analysis to a specific skill name")
+	improveCmd.Flags().Bool("from-traces", false, "Analyze loop traces for failure patterns")
+	improveCmd.Flags().Bool("dry-run", false, "Show proposals without applying")
+	improveCmd.Flags().Bool("apply", false, "Apply validated proposals to skill files")
+
+	improveHistoryCmd := &cobra.Command{
+		Use:   "history",
+		Short: "Show the improvement history log",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			records, err := improve.ReadHistory(cwd)
+			if err != nil {
+				return err
+			}
+			if len(records) == 0 {
+				fmt.Println("No improvement history. Run `radiant improve --from-traces --apply` to start.")
+				return nil
+			}
+			for _, r := range records {
+				fmt.Printf("[%s] %s/%s — %s → +%.1fpp (%.0f%%→%.0f%%)\n",
+					r.AppliedAt.Format("2006-01-02"),
+					r.Skill, r.File,
+					r.Category,
+					r.DeltaPP, r.OldScore*100, r.NewScore*100)
+			}
+			return nil
+		},
+	}
+
+	improveCmd.AddCommand(improveHistoryCmd)
+	root.AddCommand(improveCmd)
 
 	// ── budget (Sprint 37) ───────────────────────────────────────────────────
 	budgetCmd := &cobra.Command{
