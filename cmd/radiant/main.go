@@ -18,6 +18,8 @@ import (
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/benchmark"
+	"github.com/quant-risk/radiant-harness/internal/boot"
+	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/quality"
@@ -1539,6 +1541,154 @@ func main() {
 	}
 	skillsCmd.AddCommand(skillsListCmd, skillsValidateCmd)
 	root.AddCommand(skillsCmd)
+
+	// ── boot (Sprint 34) ──────────────────────────────────────────────────────
+	bootCmd := &cobra.Command{
+		Use:   "boot",
+		Short: "Print a minimal project manifest for any LLM or IDE",
+		Long: `Bootstrap Protocol — universal entry point for any agent.
+
+Outputs a <500-token manifest describing the project domain, recommended skills,
+and the loop command to start autonomous work. Run this first in any session.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			jsonMode, _ := cmd.Flags().GetBool("json")
+			agentFlavor, _ := cmd.Flags().GetString("agent")
+			profile, _ := cmd.Flags().GetString("profile")
+
+			m, err := boot.Generate(cwd, boot.Options{
+				Flavor:        boot.AgentFlavor(agentFlavor),
+				JSON:          jsonMode,
+				BudgetProfile: profile,
+			})
+			if err != nil {
+				return err
+			}
+
+			if jsonMode {
+				out, err := boot.RenderJSON(m)
+				if err != nil {
+					return err
+				}
+				fmt.Println(out)
+				return nil
+			}
+
+			fmt.Print(boot.RenderMarkdown(m, boot.AgentFlavor(agentFlavor)))
+			return nil
+		},
+	}
+	bootCmd.Flags().Bool("json", false, "Output machine-readable JSON manifest")
+	bootCmd.Flags().String("agent", "generic", "Tailor output for agent: claude|cursor|copilot|gemini|windsurf|codex")
+	bootCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
+	root.AddCommand(bootCmd)
+
+	// ── context (Sprint 33) ──────────────────────────────────────────────────
+	contextCmd := &cobra.Command{
+		Use:   "context",
+		Short: "Manage project context (detect domain, assemble minimal CONTEXT.md, compress)",
+	}
+
+	contextDetectCmd := &cobra.Command{
+		Use:   "detect",
+		Short: "Detect project domain, tier and recommended skills",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			jsonMode, _ := cmd.Flags().GetBool("json")
+
+			r, err := radctx.Detect(cwd)
+			if err != nil {
+				return err
+			}
+
+			if jsonMode {
+				b, err := json.MarshalIndent(r, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(b))
+				return nil
+			}
+
+			fmt.Printf("Domain:  %s\n", r.Domain)
+			fmt.Printf("Tier:    %s\n", r.Tier)
+			fmt.Printf("Project: %s\n", r.ProjectName)
+			if r.ActiveSpec != "" {
+				fmt.Printf("Spec:    %s\n", r.ActiveSpec)
+			}
+			fmt.Printf("Signals: %s\n", strings.Join(r.Signals, ", "))
+			fmt.Printf("Skills:  %s\n", strings.Join(r.RecommendedSkills, ", "))
+			return nil
+		},
+	}
+	contextDetectCmd.Flags().Bool("json", false, "Output JSON")
+
+	contextAssembleCmd := &cobra.Command{
+		Use:   "assemble",
+		Short: "Build .radiant-harness/CONTEXT.md with only skills relevant to this project",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			budget, _ := cmd.Flags().GetInt("budget")
+			withSpec, _ := cmd.Flags().GetBool("with-spec")
+			extra, _ := cmd.Flags().GetStringSlice("skills")
+
+			r, err := radctx.Detect(cwd)
+			if err != nil {
+				return fmt.Errorf("detect: %w", err)
+			}
+
+			outPath, tokens, err := radctx.Assemble(cwd, r, radctx.AssembleOptions{
+				BudgetTokens:      budget,
+				IncludeActiveSpec: withSpec,
+				ExtraSkills:       extra,
+			})
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("✓ %s (%d skills, ~%d tokens)\n",
+				outPath, len(r.RecommendedSkills)+len(extra), tokens)
+			return nil
+		},
+	}
+	contextAssembleCmd.Flags().Int("budget", 0, "Token budget (0 = no limit)")
+	contextAssembleCmd.Flags().Bool("with-spec", false, "Include active spec tasks.md in context")
+	contextAssembleCmd.Flags().StringSlice("skills", nil, "Additional skills to include")
+
+	contextCompressCmd := &cobra.Command{
+		Use:   "compress",
+		Short: "Compress .radiant-harness/CONTEXT.md to fit a token budget",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			budget, _ := cmd.Flags().GetInt("budget")
+			if budget <= 0 {
+				return fmt.Errorf("--budget is required and must be > 0")
+			}
+
+			path := filepath.Join(cwd, ".radiant-harness", "CONTEXT.md")
+			result, err := radctx.CompressFile(path, budget)
+			if err != nil {
+				return err
+			}
+
+			if result.Original == result.Compressed {
+				fmt.Printf("✓ Already within budget (%d tokens)\n", result.Original)
+				return nil
+			}
+
+			fmt.Printf("✓ Compressed %d → %d tokens (%.0f%% reduction)\n",
+				result.Original, result.Compressed,
+				(1-result.Ratio)*100)
+			if result.Truncated {
+				fmt.Println("⚠ Content was hard-truncated to fit budget")
+			}
+			return nil
+		},
+	}
+	contextCompressCmd.Flags().Int("budget", 0, "Target token budget (required)")
+
+	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd)
+	root.AddCommand(contextCmd)
 
 	// ── version ──
 	root.SetVersionTemplate("{{.Version}}\n")
