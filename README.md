@@ -1,62 +1,128 @@
 # radiant-harness
 
-> A vendor-neutral Spec-Driven Development harness for any LLM.
+> A vendor-neutral autonomous development harness for any LLM.
 > Shipped as a single binary — works with Claude Code, Cursor,
 > Codex, Copilot, Gemini CLI, and Windsurf.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-298_pass-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-155_pass-green.svg)](CHANGELOG.md)
 [![Cross-compile](https://img.shields.io/badge/cross--compile-6_of_6-blueviolet.svg)](CHANGELOG.md)
 
 ---
 
-## What it is
+## What it is (v2.0)
 
-`radiant` is a CLI that implements an end-to-end Spec-Driven
-Development methodology, designed to work with **any modern LLM**
-through an open skill schema (no Claude-centrism, no vendor lock-in).
-The CLI ships 18 commands and 17 vendor-neutral skills.
+`radiant` is a CLI harness for **autonomous LLM-driven development**. It solves four problems:
 
-The methodology runs in five phases:
+1. **Token bloat** — instead of loading all 60 skills at session start (~55K tokens), the Context Engine detects your project domain and loads 3–10 skills (~300 tokens). **99% reduction**.
+2. **No feedback loop** — the Loop Engine runs a crash-safe Discover→Plan→Execute→Verify→Persist cycle. The verifier is always a separate agent call; the executor never grades its own work.
+3. **Static instructions** — the Self-Improvement Engine analyzes failure traces, proposes SKILL.md patches, and applies them only when improvement ≥ 5pp.
+4. **Single-agent bottleneck** — the Fleet layer coordinates Planner + Implementer + Verifier + Summarizer agents with conflict-safe shared state.
 
-1. **Discover** — `radiant product` (Lean Inception)
-2. **Specify** — `radiant spec` (AC→test mapping)
-3. **Implement** — `radiant run` (the LLM agent drives this)
-4. **Verify** — `radiant validate`, `radiant review-pr`, `radiant evals`, `radiant audit`
-5. **Operate** — `radiant update`, `radiant release`, `radiant mcp serve`, `radiant setup-ci`
+Works with any OpenAI-compatible API. No vendor lock-in.
 
-Plus companion commands: `radiant adr` (decisions), `radiant diagramar`
-(C4 Mermaid), `radiant integrations list` (MCP discovery), `radiant views`
-(native agent views), `radiant handoff` (session pause).
+---
 
-## Install
+## Quick Start (v2.0) — zero to autonomous loop in 5 minutes
 
 ```bash
-# from source
+# 1. Install
 go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
 
-# or download a release binary
-# https://github.com/quant-risk/radiant-harness/releases
-
-# verify
-radiant --version
-```
-
-Cross-platform: Linux (amd64, arm64), macOS (amd64, arm64),
-Windows (amd64, arm64). All binaries are statically linked.
-
-## Quick start
-
-```bash
-# 1. Initialize a project
-mkdir my-saas && cd my-saas
+# 2. Initialize a project
+mkdir my-project && cd my-project
 radiant init . --all --yes
 
-# 2. Start a product (Lean Inception)
-radiant product "API observability for small dev teams"
+# 3. Detect your project domain (optional — shown for transparency)
+radiant context detect
 
-# 3. Spec the first feature
+# 4. Generate the minimal context file (~300 tokens)
+radiant context assemble
+
+# 5. Boot — emit a <500-token manifest any LLM can read
+radiant boot
+
+# 6. Start the autonomous loop
+radiant loop start "add rate limiting to the /api/users endpoint"
+
+# 7. Watch progress
+radiant loop status
+radiant trace show <run-id>
+```
+
+That's it. The loop runs Discover→Plan→Execute→Verify→Persist automatically.
+It writes a checkpoint after each phase so it can resume after interruption.
+
+---
+
+## IDE Setup
+
+```bash
+# Generate native files for your IDE(s)
+radiant views --agent=claude     # .claude/settings.json + skills
+radiant views --agent=cursor     # .cursor/rules/*.mdc
+radiant views --agent=copilot    # .github/copilot-instructions.md
+radiant views --agent=gemini     # GEMINI.md + .gemini/commands/
+radiant views --agent=windsurf   # .windsurfrules
+radiant views --agent=codex      # AGENTS.md
+
+# Or all at once
+radiant views --agent=all --force
+
+# Preview changes before writing
+radiant views --agent=cursor --diff
+```
+
+---
+
+## Command Reference
+
+### Context & Boot
+```bash
+radiant boot                              # ≤500-token entry point for any LLM
+radiant context detect [--json]           # detect domain + tier
+radiant context assemble [--budget=N]     # build .radiant-harness/CONTEXT.md
+radiant context compress --budget=2000    # compress to fit budget
+radiant context summarize --phase=<name>  # compress a completed phase
+```
+
+### Loop Engine
+```bash
+radiant loop start "<goal>" [--profile=lean|standard|thorough]
+radiant loop status
+radiant loop resume
+radiant trace show <run-id> [--json]
+radiant trace list
+```
+
+### Token Budget
+```bash
+radiant budget estimate [spec-file] [--profile=standard]
+radiant budget report <run-id>
+```
+
+### Multi-Agent Fleet
+```bash
+radiant fleet start "<goal>" [--agents=N]
+radiant fleet status <run-id>
+```
+
+### Self-Improvement
+```bash
+radiant improve --from-traces [--skill=<id>] [--dry-run] [--apply]
+radiant improve history
+```
+
+### IDE Views
+```bash
+radiant views --agent=<id> [--force] [--diff]
+```
+
+### Classic SDD workflow (still works)
+```bash
+radiant init . --all --yes
+radiant product "API observability for small dev teams"
 radiant spec "JWT auth so users stay logged in across restarts"
 
 # 4. Run the implementation (the LLM does this)

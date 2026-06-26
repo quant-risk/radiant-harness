@@ -385,9 +385,9 @@ func GenerateViewsForAgent(agent radiant.AgentID) []View {
 
 // ViewDiff describes the difference between a generated view and what's on disk.
 type ViewDiff struct {
-	Path    string
-	Status  string // "new" | "changed" | "unchanged"
-	OnDisk  string
+	Path      string
+	Status    string // "new" | "changed" | "unchanged"
+	OnDisk    string
 	Generated string
 }
 
@@ -444,8 +444,14 @@ func FormatDiff(diffs []ViewDiff) string {
 func EnrichContent(content string, agent radiant.AgentID) string {
 	switch agent {
 	case radiant.AgentCopilot:
+		if strings.Contains(content, "## Radiant Harness Bootstrap") {
+			return content
+		}
 		return content + copilotBootstrapRef()
 	case radiant.AgentGemini:
+		if strings.Contains(content, "## Token Budget Guidance") {
+			return content
+		}
 		return content + geminiBudgetHints()
 	case radiant.AgentCursor:
 		return enrichCursorMDC(content)
