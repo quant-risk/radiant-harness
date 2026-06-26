@@ -5,10 +5,45 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/load-context.mjs"
+            "command": "node hooks/load-context.mjs"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node hooks/pre-tool.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node hooks/post-tool.mjs"
           }
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go fmt *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(radiant *)"
+    ],
+    "deny": []
   }
 }

@@ -760,6 +760,7 @@ func main() {
 			agentFlag, _ := cmd.Flags().GetString("agent")
 			force, _ := cmd.Flags().GetBool("force")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			diffMode, _ := cmd.Flags().GetBool("diff")
 
 			if agentFlag == "" {
 				return fmt.Errorf("--agent=<list> required (e.g. --agent=claude,codex,cursor,copilot,gemini,windsurf)")
@@ -769,8 +770,17 @@ func main() {
 				return fmt.Errorf("no valid agents in --agent=%q (allowed: claude, codex, cursor, copilot, gemini, windsurf)", agentFlag)
 			}
 
+			cwd, _ := os.Getwd()
 			var written, skipped int
 			for _, agent := range agents {
+				// --diff: show changes before writing
+				if diffMode {
+					diffs := scaffold.DiffViews(agent, cwd)
+					fmt.Printf("  [%s]\n", agent)
+					fmt.Print(scaffold.FormatDiff(diffs))
+					continue
+				}
+
 				views := scaffold.GenerateViewsForAgent(agent)
 				if len(views) == 0 {
 					fmt.Printf("  [skip] %s: no adapter registered\n", agent)
@@ -797,9 +807,11 @@ func main() {
 					written++
 				}
 			}
-			fmt.Printf("\n  Summary: %d written, %d skipped\n", written, skipped)
-			if !force && skipped > 0 {
-				fmt.Println("  Re-run with --force to overwrite existing views.")
+			if !diffMode {
+				fmt.Printf("\n  Summary: %d written, %d skipped\n", written, skipped)
+				if !force && skipped > 0 {
+					fmt.Println("  Re-run with --force to overwrite existing views.")
+				}
 			}
 			return nil
 		},
@@ -807,6 +819,7 @@ func main() {
 	viewsCmd.Flags().String("agent", "", "comma-separated agent list (claude,codex,cursor,copilot,gemini,windsurf) or --agent=all")
 	viewsCmd.Flags().Bool("force", false, "overwrite existing views (DESTRUCTIVE — loses local edits)")
 	viewsCmd.Flags().Bool("dry-run", false, "show what would change without writing")
+	viewsCmd.Flags().Bool("diff", false, "show diff between generated and on-disk views before writing")
 	root.AddCommand(viewsCmd)
 
 	// ── review-pr (Sprint 13.2 — PR review against spec ACs) ──

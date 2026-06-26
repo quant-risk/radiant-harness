@@ -383,6 +383,124 @@ func GenerateViewsForAgent(agent radiant.AgentID) []View {
 	return views
 }
 
+// ViewDiff describes the difference between a generated view and what's on disk.
+type ViewDiff struct {
+	Path    string
+	Status  string // "new" | "changed" | "unchanged"
+	OnDisk  string
+	Generated string
+}
+
+// DiffViews compares what would be generated for agent against files in projectDir.
+// Returns one ViewDiff per view — callers can display before overwriting.
+func DiffViews(agent radiant.AgentID, projectDir string) []ViewDiff {
+	views := GenerateViewsForAgent(agent)
+	diffs := make([]ViewDiff, 0, len(views))
+	for _, v := range views {
+		path := filepath.Join(projectDir, v.Path)
+		onDisk, err := os.ReadFile(path)
+		d := ViewDiff{Path: v.Path, Generated: v.Content}
+		if os.IsNotExist(err) {
+			d.Status = "new"
+		} else if err != nil || string(onDisk) == v.Content {
+			d.Status = "unchanged"
+			d.OnDisk = string(onDisk)
+		} else {
+			d.Status = "changed"
+			d.OnDisk = string(onDisk)
+		}
+		diffs = append(diffs, d)
+	}
+	return diffs
+}
+
+// FormatDiff renders a human-readable diff summary.
+func FormatDiff(diffs []ViewDiff) string {
+	var b strings.Builder
+	newCount, changedCount, unchangedCount := 0, 0, 0
+	for _, d := range diffs {
+		switch d.Status {
+		case "new":
+			newCount++
+			fmt.Fprintf(&b, "  + %s (new)\n", d.Path)
+		case "changed":
+			changedCount++
+			fmt.Fprintf(&b, "  ~ %s (changed)\n", d.Path)
+		case "unchanged":
+			unchangedCount++
+		}
+	}
+	if unchangedCount > 0 {
+		fmt.Fprintf(&b, "  = %d file(s) unchanged\n", unchangedCount)
+	}
+	if newCount+changedCount == 0 {
+		b.WriteString("Nothing to update — all views are current.\n")
+	}
+	return b.String()
+}
+
+// EnrichContent adds IDE-specific sections to the base CONVENTIONS.md content.
+// This enables per-IDE enrichment without forking the template.
+func EnrichContent(content string, agent radiant.AgentID) string {
+	switch agent {
+	case radiant.AgentCopilot:
+		return content + copilotBootstrapRef()
+	case radiant.AgentGemini:
+		return content + geminiBudgetHints()
+	case radiant.AgentCursor:
+		return enrichCursorMDC(content)
+	default:
+		return content
+	}
+}
+
+func copilotBootstrapRef() string {
+	return `
+
+## Radiant Harness Bootstrap
+
+This project uses radiant-harness for structured autonomous workflows.
+
+**Start any session with:**
+` + "```" + `
+radiant boot --agent=copilot
+` + "```" + `
+
+This emits a <500-token manifest with the project domain, recommended skills,
+and the loop command. Follow its instructions to start autonomous work.
+
+**Loop commands:**
+- ` + "`radiant loop start \"<goal>\"`" + ` — start Discover→Plan→Execute→Verify→Persist cycle
+- ` + "`radiant loop status`" + ` — check current phase and budget
+- ` + "`radiant trace show <run-id>`" + ` — inspect reasoning trace
+`
+}
+
+func geminiBudgetHints() string {
+	return `
+
+## Token Budget Guidance
+
+This project tracks token consumption via radiant-harness loop engine.
+
+- Run ` + "`radiant loop status`" + ` to check current token budget before large operations
+- Budget profiles: lean (10K), standard (50K), thorough (200K)
+- When budget warning appears (>70% used), compress context: ` + "`radiant context assemble`" + `
+- Completed phase blocks are auto-stripped to reclaim tokens
+`
+}
+
+func enrichCursorMDC(content string) string {
+	// Ensure MDC files have the correct alwaysApply frontmatter for Cursor.
+	// If frontmatter is already present, add alwaysApply if missing.
+	if strings.HasPrefix(strings.TrimSpace(content), "---") {
+		if !strings.Contains(content, "alwaysApply:") {
+			content = strings.Replace(content, "---\n", "---\nalwaysApply: true\n", 1)
+		}
+	}
+	return content
+}
+
 func stripFrontmatter(text string) string {
 	if !strings.HasPrefix(text, "---") {
 		return text
