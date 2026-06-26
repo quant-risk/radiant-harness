@@ -21,9 +21,9 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/boot"
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/engine"
-	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/fleet"
 	"github.com/quant-risk/radiant-harness/internal/improve"
+	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
@@ -419,7 +419,6 @@ func main() {
 	// ── config ──
 	var configProvider string
 	var configModel string
-	var configAPIKey string
 
 	configCmd := &cobra.Command{
 		Use:   "config",
@@ -444,7 +443,6 @@ func main() {
 	}
 	configCmd.Flags().StringVar(&configProvider, "provider", "openrouter", "LLM provider")
 	configCmd.Flags().StringVar(&configModel, "model", "", "LLM model name")
-	configCmd.Flags().StringVar(&configAPIKey, "api-key", "", "API key")
 	root.AddCommand(configCmd)
 
 	// ── models ──

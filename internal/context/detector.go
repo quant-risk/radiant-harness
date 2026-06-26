@@ -200,7 +200,7 @@ func detectTier(projectDir string) tierResult {
 		{"docs/architecture", true, 2, "docs/architecture/"},
 		{"specs", true, 1, "specs/"},
 		{"docs/adr", true, 2, "docs/adr/"},
-		{".radiant-harness/STATE.md", false, 1, "STATE.md"},
+		{".radiant-harness/state.md", false, 1, "state.md"},
 	}
 
 	for _, c := range checks {
@@ -316,11 +316,11 @@ func scanImports(projectDir string) (map[Domain]int, []string) {
 	return scores, signals
 }
 
-// detectActiveSpec looks for a spec directory referenced in STATE.md or
+// detectActiveSpec looks for a spec directory referenced in state.md or
 // the most-recently-modified spec directory.
 func detectActiveSpec(projectDir string) string {
-	// Check STATE.md for active spec reference
-	stateFile := filepath.Join(projectDir, ".radiant-harness", "STATE.md")
+	// Check state.md for active spec reference
+	stateFile := filepath.Join(projectDir, ".radiant-harness", "state.md")
 	if data, err := os.ReadFile(stateFile); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			lower := strings.ToLower(line)
