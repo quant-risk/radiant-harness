@@ -181,6 +181,31 @@ A cada fase:
 
 ---
 
+## Mudança de direção registrada (2026-06-26) — v2.0
+
+Após avaliação dos princípios de Loop Engineering, Harness Engineering, Self-Harness e Code as Agent Harness (ver referências em `docs/ROADMAP-V2.md`), o projeto evolui de plataforma SDD sólida para **harness topo de linha, autônomo e auto-melhorável**:
+
+- **Antes (v0.7)**: Skills carregadas monoliticamente; sem loop autônomo; sem self-improvement.
+- **Agora (v1.0 alvo)**: Context-First (lazy skill loading); Loop-Native (Discover → Verify → Persist); Self-Improving (aprende com traces de falha).
+
+O plano detalhado (8 sprints, Sprints 33–40) vive em [`docs/ROADMAP-V2.md`](./ROADMAP-V2.md).  
+A implementação técnica completa vive em [`docs/HARNESS-V2-PLAN.md`](./HARNESS-V2-PLAN.md).
+
+### Sprints v2.0 (resumo)
+
+| Sprint | Versão | Tema |
+|--------|--------|------|
+| 33 | v0.8.0 | Context Engine — lazy skill loading, domain detection |
+| 34 | v0.8.1 | Bootstrap Protocol — `radiant boot`, entrada universal |
+| 35 | v0.9.0 | Loop Engine — ciclo autônomo + adversarial verifier |
+| 36 | v0.9.1 | Enhanced Hooks + IDE Adapters v2 |
+| 37 | v0.9.2 | Token Budget & Compression |
+| 38 | v1.0.0-beta | Self-Improvement Engine |
+| 39 | v1.0.0 | Multi-Agent Coordination |
+| 40 | v1.0.0-final | Hardening + Documentação completa |
+
+---
+
 ## Anti-backlog
 
 Itens **explicitamente fora do roadmap** até segunda ordem:
