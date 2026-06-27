@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-06-27 — Output Streaming (Sprint 52)
+
+19/19 packages green. 133 testes no loop package (↑8).
+
+### Added — `internal/loop/runner.go`
+- `RunConfig.Stream bool` — executor usa `ChatStream` quando true; verifier permanece não-streaming
+- `RunConfig.StreamOut StreamWriter` — writer para chunks; nil → `os.Stdout`
+- `StreamWriter` interface — `Write([]byte)` satisfeita por `*os.File`, `*bytes.Buffer`
+- `simpleChatStream()` — wrapper de `ChatStream` com acumulação + escrita em tempo real
+- Header `── executor (iter N) ──` e separador escritos ao redor de cada chamada streaming
+
+### Fixed — `internal/loop/runner.go`
+- Bug: `discover → discover` causava `invalid transition` em toda primeira chamada real a `Run()`
+  Fix: skip da transição quando `c.State().Phase == PhaseDiscover`
+
+### Added — `cmd/radiant/main.go`
+- `--stream` flag em `loopStartCmd`
+
+---
+
 ## [1.9.0] — 2026-06-27 — Context Injection (Sprint 51)
 
 19/19 packages green. 125 testes no loop package (↑11).

@@ -13,6 +13,9 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/llm"
 )
 
+// Ensure os.Stdout satisfies StreamWriter at compile time.
+var _ StreamWriter = os.Stdout
+
 // RunConfig holds all runtime parameters for an autonomous loop run.
 // It is built from CLI flags by the caller and passed to Run().
 type RunConfig struct {
@@ -48,6 +51,20 @@ type RunConfig struct {
 	// If nil, Run() creates a Tracer automatically using projectDir + runID.
 	// Pass an already-open Tracer to share it with an outer caller.
 	Trace *Tracer
+
+	// Stream — when true, executor output is streamed to stdout chunk by chunk.
+	// Verifier and reviewer always use non-streaming (their output is parsed, not displayed).
+	Stream bool
+
+	// StreamOut is the writer for streamed executor chunks. Defaults to os.Stdout.
+	// Set to a custom writer in tests to capture output without printing.
+	StreamOut StreamWriter
+}
+
+// StreamWriter is the interface for streaming output — satisfied by *os.File,
+// *bytes.Buffer, and any io.Writer. Kept minimal to avoid the io import cycle.
+type StreamWriter interface {
+	Write(p []byte) (n int, err error)
 }
 
 // RunResult is the outcome of a completed autonomous loop.
@@ -84,6 +101,12 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			return nil, fmt.Errorf("init tracer: %w", err)
 		}
 		defer tr.Close()
+	}
+
+	// Resolve stream output writer.
+	streamOut := cfg.StreamOut
+	if streamOut == nil {
+		streamOut = os.Stdout
 	}
 
 	// Assemble project context once per run (expensive — detect + write CONTEXT.md).
@@ -150,8 +173,11 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		// ── Discover / Plan (lightweight — no LLM call needed) ──────────
-		if err := c.Transition(PhaseDiscover, fmt.Sprintf("iter %d", c.State().Iteration+1)); err != nil {
-			return nil, err
+		// Skip discover transition if already in discover (first iteration after startup).
+		if c.State().Phase != PhaseDiscover {
+			if err := c.Transition(PhaseDiscover, fmt.Sprintf("iter %d", c.State().Iteration+1)); err != nil {
+				return nil, err
+			}
 		}
 		if err := c.Transition(PhasePlan, "planning"); err != nil {
 			return nil, err
@@ -170,7 +196,16 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, lastReviewFindings)
-		execOutput, execErr := execClient.SimpleChat(ctx, executorSystemPrompt(projectCtxBlock), execPrompt)
+		var execOutput string
+		var execErr error
+		if cfg.Stream {
+			iter := c.State().Iteration + 1
+			fmt.Fprintf(streamOut, "\n── executor (iter %d) ──────────────────────────────\n", iter)
+			execOutput, execErr = simpleChatStream(ctx, execClient, executorSystemPrompt(projectCtxBlock), execPrompt, streamOut)
+			fmt.Fprintf(streamOut, "\n────────────────────────────────────────────────────\n")
+		} else {
+			execOutput, execErr = execClient.SimpleChat(ctx, executorSystemPrompt(projectCtxBlock), execPrompt)
+		}
 		toks := estimateTokens(execPrompt, execOutput)
 		traceCall(tr, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
 		if execErr != nil {
@@ -358,6 +393,24 @@ func buildExecutorPrompt(goal, groundBlock string, priorReviewFindings []string)
 		}
 	}
 	return sb.String()
+}
+
+// simpleChatStream calls ChatStream and writes each chunk to w, returning the
+// full accumulated response. w may be nil (output discarded).
+func simpleChatStream(ctx context.Context, client *llm.Client, systemPrompt, userPrompt string, w StreamWriter) (string, error) {
+	var sb strings.Builder
+	callback := func(chunk string) {
+		sb.WriteString(chunk)
+		if w != nil {
+			_, _ = fmt.Fprint(w, chunk)
+		}
+	}
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+	_, err := client.ChatStream(ctx, messages, callback)
+	return sb.String(), err
 }
 
 // traceCall records a single LLM call to the Tracer.

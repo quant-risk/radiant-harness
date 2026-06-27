@@ -2175,6 +2175,7 @@ and the loop command to start autonomous work. Run this first in any session.`,
 			ground, _ := cmd.Flags().GetBool("ground")
 			reviewRestarts, _ := cmd.Flags().GetInt("review-restarts")
 			contextBudget, _ := cmd.Flags().GetInt("context-budget")
+			stream, _ := cmd.Flags().GetBool("stream")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			// Resolve API key from env (vendor-neutral order).
@@ -2225,6 +2226,7 @@ and the loop command to start autonomous work. Run this first in any session.`,
 				Ground:              ground,
 				MaxGroundCommits:    0, // use GroundingBlock default (10)
 				ContextBudgetTokens: contextBudget,
+				Stream:              stream,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -2290,6 +2292,7 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	loopStartCmd.Flags().String("base-url", "", "Override LLM base URL (e.g. http://localhost:11434/v1)")
 	loopStartCmd.Flags().Bool("dry-run", false, "Register goal and print config without calling any LLM")
 	loopStartCmd.Flags().Int("context-budget", 0, "Inject assembled CONTEXT.md into executor prompt (tokens cap, e.g. 6000). 0 = disabled")
+	loopStartCmd.Flags().Bool("stream", false, "Stream executor output to stdout chunk by chunk (verifier stays non-streaming)")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",
