@@ -142,7 +142,7 @@ func TestBuildExecutorPromptEmptyFindingsNoSection(t *testing.T) {
 // ── system prompt content ─────────────────────────────────────────────────────
 
 func TestExecutorSystemPromptNotEmpty(t *testing.T) {
-	if executorSystemPrompt() == "" {
+	if executorSystemPrompt("") == "" {
 		t.Fatal("executor system prompt is empty")
 	}
 }

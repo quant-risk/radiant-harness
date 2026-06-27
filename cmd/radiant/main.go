@@ -2174,6 +2174,7 @@ and the loop command to start autonomous work. Run this first in any session.`,
 			quorumN, _ := cmd.Flags().GetInt("quorum-n")
 			ground, _ := cmd.Flags().GetBool("ground")
 			reviewRestarts, _ := cmd.Flags().GetInt("review-restarts")
+			contextBudget, _ := cmd.Flags().GetInt("context-budget")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			// Resolve API key from env (vendor-neutral order).
@@ -2220,9 +2221,10 @@ and the loop command to start autonomous work. Run this first in any session.`,
 				Verifier: loop.VerifierConfig{
 					Quorum: loop.QuorumConfig{K: quorumK, N: quorumN},
 				},
-				Review:           loop.ReviewPanel{MaxRestarts: reviewRestarts},
-				Ground:           ground,
-				MaxGroundCommits: 0, // use GroundingBlock default (10)
+				Review:              loop.ReviewPanel{MaxRestarts: reviewRestarts},
+				Ground:              ground,
+				MaxGroundCommits:    0, // use GroundingBlock default (10)
+				ContextBudgetTokens: contextBudget,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -2287,6 +2289,7 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	loopStartCmd.Flags().String("verifier-model", "", "Separate model for verification (default = same as --model)")
 	loopStartCmd.Flags().String("base-url", "", "Override LLM base URL (e.g. http://localhost:11434/v1)")
 	loopStartCmd.Flags().Bool("dry-run", false, "Register goal and print config without calling any LLM")
+	loopStartCmd.Flags().Int("context-budget", 0, "Inject assembled CONTEXT.md into executor prompt (tokens cap, e.g. 6000). 0 = disabled")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",

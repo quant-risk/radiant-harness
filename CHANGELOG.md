@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-06-27 — Context Injection (Sprint 51)
+
+19/19 packages green. 125 testes no loop package (↑11).
+
+### Added — `internal/loop/runner.go`
+- `RunConfig.ContextBudgetTokens int` — 0 = disabled; >0 = detect + assemble CONTEXT.md
+- `assembleContextBlock(projectDir, tokens)` — fail-open; monta uma vez por run, injeta em todas as iterações
+- `executorSystemPrompt(contextBlock string)` — estendido; context appended após base prompt
+- Import: `internal/context` (radctx), `os`
+
+### Added — `cmd/radiant/main.go`
+- `--context-budget <n>` flag em `loopStartCmd`
+
+### Fixed — `internal/loop/sprint47_test.go`
+- `executorSystemPrompt()` → `executorSystemPrompt("")` (assinatura mudou)
+
+---
+
 ## [1.8.0] — 2026-06-27 — Trace Integration (Sprint 50)
 
 19/19 packages green. 114 testes no loop package (↑10 neste sprint).

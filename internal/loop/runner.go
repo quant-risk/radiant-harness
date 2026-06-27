@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 )
 
@@ -36,6 +38,11 @@ type RunConfig struct {
 
 	// MaxGroundCommits — number of commits to include (0 → default 10).
 	MaxGroundCommits int
+
+	// ContextBudgetTokens caps the assembled CONTEXT.md injected into the
+	// executor system prompt. 0 = no injection; >0 = detect + assemble + inject.
+	// Recommended: 4000–8000 for most models.
+	ContextBudgetTokens int
 
 	// Trace — when non-nil, every LLM call is recorded as a TraceEvent.
 	// If nil, Run() creates a Tracer automatically using projectDir + runID.
@@ -77,6 +84,13 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			return nil, fmt.Errorf("init tracer: %w", err)
 		}
 		defer tr.Close()
+	}
+
+	// Assemble project context once per run (expensive — detect + write CONTEXT.md).
+	// Injected into every executor system prompt. Empty string = disabled.
+	projectCtxBlock := ""
+	if cfg.ContextBudgetTokens > 0 {
+		projectCtxBlock = assembleContextBlock(projectDir, cfg.ContextBudgetTokens)
 	}
 
 	// Build stall brake (disabled when patience == 0).
@@ -156,7 +170,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, lastReviewFindings)
-		execOutput, execErr := execClient.SimpleChat(ctx, executorSystemPrompt(), execPrompt)
+		execOutput, execErr := execClient.SimpleChat(ctx, executorSystemPrompt(projectCtxBlock), execPrompt)
 		toks := estimateTokens(execPrompt, execOutput)
 		traceCall(tr, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
 		if execErr != nil {
@@ -277,11 +291,40 @@ func estimateTokens(prompt, response string) int {
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
-func executorSystemPrompt() string {
-	return `You are an expert software engineer implementing a goal autonomously.
+func executorSystemPrompt(contextBlock string) string {
+	base := `You are an expert software engineer implementing a goal autonomously.
 Read the goal and any prior context carefully.
 Produce a concrete, complete implementation. No stubs, no TODOs, no placeholders.
 Output the result clearly so a separate verifier can assess it.`
+	if contextBlock == "" {
+		return base
+	}
+	return base + "\n\n" + contextBlock
+}
+
+// assembleContextBlock runs project detection and assembles CONTEXT.md,
+// returning its content trimmed to contextBudgetTokens.
+// Returns "" cleanly on any error (fail-open: missing context ≠ broken run).
+func assembleContextBlock(projectDir string, contextBudgetTokens int) string {
+	det, err := radctx.Detect(projectDir)
+	if err != nil {
+		return ""
+	}
+	path, _, err := radctx.Assemble(projectDir, det, radctx.AssembleOptions{
+		BudgetTokens: contextBudgetTokens,
+	})
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	return "## PROJECT CONTEXT\n\n" + content
 }
 
 func verifierSystemPrompt() string {

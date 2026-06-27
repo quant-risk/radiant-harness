@@ -376,9 +376,10 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 48 | v1.6.0 | Loop Runner Wiring — `loopStartCmd` → `loop.Run()` end-to-end | 1 | `cmd/` | 0 | ✅ |
 | 49 | v1.7.0 | Status cost display + `loop resume` → `loop.Run()` | 2 | `internal/loop/`, `cmd/` | 0 | ✅ |
 | 50 | v1.8.0 | Trace Integration — LLM calls gravados em JSONL por `loop.Run()` | 1 | `internal/loop/` | 10 | ✅ |
+| 51 | v1.9.0 | Context Injection — CONTEXT.md injetado no executor via `--context-budget` | 2 | `internal/loop/`, `cmd/` | 11 | ✅ |
 
-**Total entregue (Sprints 1–50)**: 19 packages, 114 testes no loop package, suite completa green  
-**Versão atual**: v1.8.0
+**Total entregue (Sprints 1–51)**: 19 packages, 125 testes no loop package, suite completa green  
+**Versão atual**: v1.9.0
 
 ---
 
