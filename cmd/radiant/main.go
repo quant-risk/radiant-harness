@@ -28,6 +28,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/ontology"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
+	"github.com/quant-risk/radiant-harness/internal/schedule"
 	"github.com/quant-risk/radiant-harness/internal/skill"
 	"github.com/quant-risk/radiant-harness/internal/worktree"
 	"github.com/spf13/cobra"
@@ -2227,7 +2228,60 @@ and the loop command to start autonomous work. Run this first in any session.`,
 		},
 	}
 
-	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd)
+	loopScheduleCmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Evaluate work signals and decide whether to dispatch a loop run",
+		Long: `The Schedule stage of the loop cycle: reads work signals from the repo
+(new commits, pending TODO/FIXME, optionally a failing gate) and decides under a
+policy whether to re-dispatch an autonomous run. With --check it only reports the
+decision; without it, a RUN decision advances and persists scheduler state.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			checkOnly, _ := cmd.Flags().GetBool("check")
+			gateFailing, _ := cmd.Flags().GetBool("gate-failing")
+			minInterval, _ := cmd.Flags().GetDuration("min-interval")
+			maxRuns, _ := cmd.Flags().GetInt("max-per-day")
+
+			state, err := schedule.LoadState(cwd)
+			if err != nil {
+				return fmt.Errorf("load schedule state: %w", err)
+			}
+
+			policy := schedule.DefaultPolicy()
+			if minInterval > 0 {
+				policy.MinInterval = minInterval
+			}
+			if maxRuns > 0 {
+				policy.MaxRunsPerDay = maxRuns
+			}
+
+			signals := schedule.DetectSignals(cwd, state)
+			if gateFailing {
+				signals = append(signals, schedule.Signal{
+					Kind: schedule.TriggerFailingGate, Detail: "reported via --gate-failing", Value: 1,
+				})
+			}
+
+			now := time.Now().UTC()
+			decision := schedule.Evaluate(policy, state, signals, now)
+			fmt.Print(schedule.FormatDecision(decision, now))
+
+			if decision.ShouldRun && !checkOnly {
+				newState := schedule.RecordRun(state, schedule.CurrentCommit(cwd), now)
+				if err := schedule.SaveState(cwd, newState); err != nil {
+					return fmt.Errorf("persist schedule state: %w", err)
+				}
+				fmt.Printf("\nDispatch: `radiant loop start \"<goal>\"` — scheduler state advanced (run %d today).\n", newState.RunsToday)
+			}
+			return nil
+		},
+	}
+	loopScheduleCmd.Flags().Bool("check", false, "Only report the decision; do not advance scheduler state")
+	loopScheduleCmd.Flags().Bool("gate-failing", false, "Signal that a gate is currently red")
+	loopScheduleCmd.Flags().Duration("min-interval", 0, "Override min interval between runs (e.g. 15m)")
+	loopScheduleCmd.Flags().Int("max-per-day", 0, "Override max runs per day")
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd)
 	root.AddCommand(loopCmd)
 
 	// ── trace (Sprint 35) ────────────────────────────────────────────────────
