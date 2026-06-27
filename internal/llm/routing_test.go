@@ -100,10 +100,11 @@ func TestAutoRouteGPT5Family(t *testing.T) {
 }
 
 func TestAutoRouteBudgetFamilyStaysCheap(t *testing.T) {
-	// Groq family has no TierTop model — research should fall back to anchor.
+	// Groq budget model (8b) routing to research now finds the
+	// top-tier sibling (70b) — so it does NOT stay on anchor.
 	research := AutoRoute("groq-llama-3.3-8b", PhaseResearch)
-	if research != "groq-llama-3.3-8b" {
-		t.Errorf("expected to stay on anchor (no TierTop in groq family), got %q", research)
+	if research != "groq-llama-3.3-70b" {
+		t.Errorf("expected upgrade to 70b (TierTop), got %q", research)
 	}
 }
 
