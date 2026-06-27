@@ -371,7 +371,7 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 44 | v1.2.0 | Loop Hardening | 3 | — | +20 | 📋 |
 
 | 44 | v1.2.0 | Loop Hardening (brakes + escalate) | 2 | — | +20 | 📋 |
-| 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | — | +20 | 📋 |
+| 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | — | +23 | ✅ |
 
 **Total entregue (40–43)**: +8 comandos, +4 packages, +52 testes (total ~350+)  
 **Planejado v1.2.0 (Sprint 44)**: +2 comandos, ~20 testes  

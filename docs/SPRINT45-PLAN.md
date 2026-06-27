@@ -1,6 +1,6 @@
 # Sprint 45 — Verifier Hardening: Review Panel + Quorum + Grounding
 
-> **Status**: Planned  
+> **Status**: Shipped ✅  
 > **Version target**: v1.3.0  
 > **Sources**: Code study of `jonny981/loops` (loop.ts, condition.ts, ground.ts),
 > `awesome-loop-engineering` (FIELD-NOTES.md, docs/05-stop-conditions-and-verification.md),

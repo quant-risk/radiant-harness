@@ -4,40 +4,40 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v1.3.0 — Verifier Hardening (Sprint 45)
+## [1.3.0] — 2026-06-27 — Verifier Hardening (Sprint 45)
 
-Code study of `jonny981/loops` (loop.ts, condition.ts, ground.ts) and
-`awesome-loop-engineering` (FIELD-NOTES.md, docs/05) confirmed five verifier gaps.
-See `docs/SPRINT45-PLAN.md` for full design.
+3 new files, 84 tests in loop package (all -race clean). Full suite green.
 
-### Planned — Review Panel (post-convergence slot)
-- `internal/loop/review.go` — second verification layer that runs ONLY after `until`
-  passes; a fail re-opens the loop body with `lastReview` findings threaded to next iter
-- `MaxRestarts` caps the worker↔reviewer standoff independently of `MaxIter`
-- Source: `jonny981/loops/src/core/loop.ts:config.review()`
+### Added — Review Panel (`internal/loop/review.go`)
+- `ReviewPanel{MaxRestarts int}` — post-convergence second layer; runs ONLY after verifier passes
+- `BuildReviewPrompt(goal, output, lastFindings)` — 4 dimensions + prior-findings threading
+- `ParseReviewResponse()` — parses REVIEW/SCORE/EVIDENCE/FINDINGS
+- `ReviewResult{Pass, Score, Findings, Evidence}` — findings fed to next iteration on fail
+- `ReviewPanel.maxRestarts()` — caps standoff at 3 (default); independent of MaxIter
 
-### Planned — Quorum k-of-n Verifier
-- Extend `internal/loop/verifier.go`: `QuorumK`, `QuorumN` fields; parallel judge goroutines
-- A judge that errors counts as a "no" vote (not a crash); K must pass from N
-- Source: `jonny981/loops/src/core/condition.ts:quorum()`
+### Added — Quorum k-of-n (`internal/loop/review.go`)
+- `QuorumConfig{K, N int}` — minimum passing judges / total judges
+- `RunQuorum(cfg, []VerifyResult) QuorumResult` — aggregates pre-run judge results
+- `QuorumResult{Passed, Total, Met, Confidence, Reason}` — confidence = mean of passing scores
+- `VerifierConfig.Quorum QuorumConfig` — wired into verifier config
+- A failing judge counts as "no" vote; K must pass from N
 
-### Planned — Geometric-Mean per Dimension
-- `VerifyDimension []struct{Name string; Score float64}` in `VerifyResult`
-- `geometricMean()`: one zero dimension → overall 0.0 (no hiding a bad dimension in averages)
-- Source: `jonny981/loops/src/core/condition.ts:agentCheck.dimensions`
+### Added — Geometric-Mean per Dimension (`internal/loop/review.go`)
+- `VerifyDimension{Name string; Score float64}` — named scoring axis
+- `GeometricMean([]VerifyDimension) float64` — any zero dimension → result 0.0
+- `VerifyResult.Dimensions []VerifyDimension` — per-axis breakdown (optional)
+- Review prompt instructs scorer to rate 4 named dimensions; final = geo mean
 
-### Planned — Commit-Log Grounding
-- `internal/loop/ground.go` — `GroundingBlock()` injects recent commits into each fresh
-  context; prevents the agent from re-walking dead ends across iterations
-- Source: `jonny981/loops/src/core/ground.ts:groundingText()`
+### Added — Commit-Log Grounding (`internal/loop/ground.go`)
+- `GroundingBlock(repoDir, maxCommits) (string, error)` — recent N commits as markdown
+- Injected into loop prompt on each fresh-context iteration
+- Bodies truncated to 400 chars to avoid re-introducing context rot
+- Returns `("", nil)` cleanly when git unavailable or repo has no commits
 
-### Planned — Anti-Cheat Clauses in Verifier
-- Extend `BuildVerifierPrompt()`: explicit checks for test deletion, stub implementations,
-  and scope widening by the maker before any APPROVED verdict
-- Source: `awesome-loop-engineering/FIELD-NOTES.md` Note #8
-
-### Planned — Tests
-- ≥20 new tests; version bump `1.2.0` → `1.3.0`
+### Added — Anti-Cheat Clauses in Verifier (`internal/loop/verifier.go`)
+- `BuildVerifierPrompt` extended with ANTI-CHEAT CHECKS section
+- Explicit: no test deleted, no stubs, no scope widening, no gate widening
+- Any violation requires `ESCALATE: true` (wired to Sprint 44 inbox mechanism)
 
 ---
 

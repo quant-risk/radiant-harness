@@ -7,12 +7,13 @@ import (
 
 // VerifyResult is the outcome of an adversarial verification pass.
 type VerifyResult struct {
-	Approved  bool     // true if the verifier approved the executor's work
-	Score     float64  // 0.0–1.0 confidence of the verdict
-	Issues    []string // specific issues found (empty if approved)
-	Evidence  string   // summary evidence for the verdict
-	TokensIn  int      // tokens used for verification prompt
-	TokensOut int      // tokens used for verification response
+	Approved   bool              // true if the verifier approved the executor's work
+	Score      float64           // geometric mean of Dimensions if set, else raw 0..1
+	Dimensions []VerifyDimension // per-axis breakdown (optional; Sprint 45)
+	Issues     []string          // specific issues found (empty if approved)
+	Evidence   string            // summary evidence for the verdict
+	TokensIn   int               // tokens used for verification prompt
+	TokensOut  int               // tokens used for verification response
 	// Escalate signals that this result requires human review and the loop
 	// should stop with ExitNeedsHuman instead of retrying. The verifier
 	// sets this when the situation is genuinely ambiguous or risky — not
@@ -28,6 +29,8 @@ type VerifierConfig struct {
 	RequireEvidence bool
 	// StrictMode makes the verifier default to "rejected" on ambiguity.
 	StrictMode bool
+	// Quorum configures k-of-n parallel judging. Zero K disables quorum.
+	Quorum QuorumConfig
 }
 
 // DefaultVerifierConfig returns sensible defaults.
