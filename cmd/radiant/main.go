@@ -25,6 +25,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
+	"github.com/quant-risk/radiant-harness/internal/ontology"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/quant-risk/radiant-harness/internal/skill"
@@ -1589,12 +1590,19 @@ and the loop command to start autonomous work. Run this first in any session.`,
 			}
 
 			fmt.Print(boot.RenderMarkdown(m, boot.AgentFlavor(agentFlavor)))
+
+			if withWM, _ := cmd.Flags().GetBool("world-model"); withWM {
+				fmt.Print("\n```\n")
+				fmt.Print(ontology.Default().ExportCompact())
+				fmt.Print("```\n")
+			}
 			return nil
 		},
 	}
 	bootCmd.Flags().Bool("json", false, "Output machine-readable JSON manifest")
 	bootCmd.Flags().String("agent", "generic", "Tailor output for agent: claude|cursor|copilot|gemini|windsurf|codex")
 	bootCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
+	bootCmd.Flags().Bool("world-model", false, "Append the compact ontology world model (~300 tokens)")
 	root.AddCommand(bootCmd)
 
 	// ── context (Sprint 33) ──────────────────────────────────────────────────
@@ -1737,6 +1745,68 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 	contextCmd.AddCommand(contextDetectCmd, contextAssembleCmd, contextCompressCmd, contextSummarizeCmd)
 	root.AddCommand(contextCmd)
+
+	// ── ontology (Sprint 41) ─────────────────────────────────────────────────
+	ontologyCmd := &cobra.Command{
+		Use:   "ontology",
+		Short: "Inspect the harness world model (entities, relations, axioms)",
+	}
+
+	ontologyExportCmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export the world model for any LLM to reason over",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o := ontology.Default()
+			compact, _ := cmd.Flags().GetBool("compact")
+			if compact {
+				fmt.Print(o.ExportCompact())
+			} else {
+				fmt.Print(o.Export())
+			}
+			return nil
+		},
+	}
+	ontologyExportCmd.Flags().Bool("compact", false, "Token-budgeted form (~300 tokens) for LLM context")
+
+	ontologyValidateCmd := &cobra.Command{
+		Use:   "validate",
+		Short: "Check the world model for axiom violations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o := ontology.Default()
+			violations := o.Violations()
+			if len(violations) == 0 {
+				fmt.Println("✓ ontology consistent — 0 axiom violations")
+				return nil
+			}
+			fmt.Printf("✗ %d axiom violation(s):\n", len(violations))
+			for _, v := range violations {
+				fmt.Printf("  - %s\n", v)
+			}
+			return fmt.Errorf("ontology has %d violation(s)", len(violations))
+		},
+	}
+
+	ontologySkillsCmd := &cobra.Command{
+		Use:   "skills <domain>",
+		Short: "List skills that govern a domain (semantic skill routing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o := ontology.Default()
+			skills := o.SkillsForDomain("domain:" + args[0])
+			if len(skills) == 0 {
+				fmt.Printf("no skills govern domain %q\n", args[0])
+				return nil
+			}
+			fmt.Printf("skills governing %q:\n", args[0])
+			for _, s := range skills {
+				fmt.Printf("  - %s\n", s)
+			}
+			return nil
+		},
+	}
+
+	ontologyCmd.AddCommand(ontologyExportCmd, ontologyValidateCmd, ontologySkillsCmd)
+	root.AddCommand(ontologyCmd)
 
 	// ── fleet (Sprint 39) ────────────────────────────────────────────────────
 	fleetCmd := &cobra.Command{
