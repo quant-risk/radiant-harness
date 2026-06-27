@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-06-27 — Trace Integration (Sprint 50)
+
+19/19 packages green. 114 testes no loop package (↑10 neste sprint).
+
+### Added — `internal/loop/runner.go`
+- `traceCall()` — nil-safe helper; grava `TraceEvent` após cada `SimpleChat`
+- `RunConfig.Trace *Tracer` — campo opcional; nil → tracer criado automaticamente
+- Tracer auto-criado com `defer tr.Close()` para flush garantido
+- Eventos gravados por iteração: `executor` (execute), `verifier` (verify), `reviewer` (verify)
+- `PromptHash`: `sha256(prompt)[0:4]` hex; `Meta["model"]`: modelo usado na chamada
+- Tokens split 50/50 entre `TokensIn` / `TokensOut` (estimativa quando provider não retorna contagem)
+
+### Added — `internal/loop/sprint50_test.go` (10 testes)
+- nil-safety, campos de evento, hash por prompt, múltiplos eventos, arquivo criado em disco, timestamp
+
+---
+
 ## [1.7.0] — 2026-06-27 — Status Cost + Resume Wiring (Sprint 49)
 
 19/19 packages green.

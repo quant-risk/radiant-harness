@@ -2,6 +2,8 @@ package loop
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -34,6 +36,11 @@ type RunConfig struct {
 
 	// MaxGroundCommits — number of commits to include (0 → default 10).
 	MaxGroundCommits int
+
+	// Trace — when non-nil, every LLM call is recorded as a TraceEvent.
+	// If nil, Run() creates a Tracer automatically using projectDir + runID.
+	// Pass an already-open Tracer to share it with an outer caller.
+	Trace *Tracer
 }
 
 // RunResult is the outcome of a completed autonomous loop.
@@ -60,6 +67,17 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 	// Build budget and cycle.
 	b := NewBudget(cfg.Budget)
 	c := NewCycle(projectDir, runID, goal, b)
+
+	// Open tracer — use caller-supplied or create one automatically.
+	tr := cfg.Trace
+	if tr == nil {
+		var err error
+		tr, err = NewTracer(projectDir, runID)
+		if err != nil {
+			return nil, fmt.Errorf("init tracer: %w", err)
+		}
+		defer tr.Close()
+	}
 
 	// Build stall brake (disabled when patience == 0).
 	var stall *StallBrake
@@ -139,13 +157,15 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, lastReviewFindings)
 		execOutput, execErr := execClient.SimpleChat(ctx, executorSystemPrompt(), execPrompt)
+		toks := estimateTokens(execPrompt, execOutput)
+		traceCall(tr, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
 		if execErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("executor error: %v", execErr))
 			_ = c.IncrIteration()
-			b.Consume(500, PhaseExecute) // estimate on error
+			b.Consume(500, PhaseExecute)
 			continue
 		}
-		b.Consume(estimateTokens(execPrompt, execOutput), PhaseExecute)
+		b.Consume(toks, PhaseExecute)
 		lastVerifyOutput = execOutput
 
 		// Stall check — hash the executor output.
@@ -161,13 +181,15 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 
 		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg)
 		verResponse, verErr := verClient.SimpleChat(ctx, verifierSystemPrompt(), verPrompt)
+		verToks := estimateTokens(verPrompt, verResponse)
+		traceCall(tr, runID, PhaseVerify, "verifier", verModel.Model, verPrompt, verResponse, verToks, verErr)
 		if verErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("verifier error: %v", verErr))
 			_ = c.IncrIteration()
 			b.Consume(500, PhaseVerify)
 			continue
 		}
-		b.Consume(estimateTokens(verPrompt, verResponse), PhaseVerify)
+		b.Consume(verToks, PhaseVerify)
 
 		result := ParseVerifyResponse(verResponse, verCfg)
 
@@ -180,7 +202,6 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		if !result.Approved {
-			// Retry execute next iteration.
 			_ = c.Transition(PhaseExecute, "verifier rejected — retrying")
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("rejected: %s", strings.Join(result.Issues, "; ")))
 			_ = c.IncrIteration()
@@ -191,8 +212,10 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		// ── Post-convergence review panel ────────────────────────────────
 		reviewPrompt := BuildReviewPrompt(goal, lastVerifyOutput, lastReviewFindings)
 		reviewResponse, reviewErr := verClient.SimpleChat(ctx, reviewerSystemPrompt(), reviewPrompt)
+		revToks := estimateTokens(reviewPrompt, reviewResponse)
+		traceCall(tr, runID, PhaseVerify, "reviewer", verModel.Model, reviewPrompt, reviewResponse, revToks, reviewErr)
 		if reviewErr == nil {
-			b.Consume(estimateTokens(reviewPrompt, reviewResponse), PhaseVerify)
+			b.Consume(revToks, PhaseVerify)
 			reviewResult := ParseReviewResponse(reviewResponse)
 			if !reviewResult.Pass {
 				reviewRestarts++
@@ -201,7 +224,6 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 					_ = c.SetExit(ExitCritical, fmt.Sprintf("review panel rejected %d times", reviewRestarts))
 					return buildResult(runID, goal, ExitCritical, c, b, started), nil
 				}
-				// Re-enter loop body with findings.
 				_ = c.IncrIteration()
 				stall.reset()
 				continue
@@ -293,4 +315,33 @@ func buildExecutorPrompt(goal, groundBlock string, priorReviewFindings []string)
 		}
 	}
 	return sb.String()
+}
+
+// traceCall records a single LLM call to the Tracer.
+// It is nil-safe: if tr is nil, it does nothing.
+// errVal drives the result field: nil → "ok", non-nil → "failed".
+func traceCall(tr *Tracer, runID string, phase Phase, agent, model, prompt, response string, tokens int, errVal error) {
+	if tr == nil {
+		return
+	}
+	result := "ok"
+	evidence := ""
+	if errVal != nil {
+		result = "failed"
+		evidence = errVal.Error()
+	}
+	h := sha256.Sum256([]byte(prompt))
+	_ = tr.Record(TraceEvent{
+		Timestamp:  time.Now().UTC(),
+		RunID:      runID,
+		Phase:      phase,
+		Action:     "llm_call",
+		Agent:      agent,
+		PromptHash: hex.EncodeToString(h[:4]),
+		TokensIn:   tokens / 2, // rough split: half in, half out
+		TokensOut:  tokens / 2,
+		Result:     result,
+		Evidence:   evidence,
+		Meta:       map[string]string{"model": model},
+	})
 }
