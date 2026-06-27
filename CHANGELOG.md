@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-06-27 — Status Cost + Resume Wiring (Sprint 49)
+
+19/19 packages green.
+
+### Changed — `radiant loop status`
+- Budget line now shown when tokens or cost data present: `tokens 12450/50000 | cost $0.0374/$1.00`
+- Silent when budget not configured (zero-value check)
+
+### Changed — `radiant loop resume`
+- Now calls `loop.Run()` — resumes real LLM inference from persisted phase
+- Restores `BudgetConfig` from persisted `Snapshot` (tokens, iter, cost ceiling)
+- Guards against resuming a finished run (exits with clear error unless `needs_human`)
+- New flags: `--model`, `--verifier-model`, `--base-url`, `--dry-run`
+
+---
+
 ## [1.6.0] — 2026-06-27 — Loop Runner Wiring (Sprint 48)
 
 `radiant loop start` now calls `loop.Run()` end-to-end. 19/19 packages green.

@@ -2306,6 +2306,9 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	loopResumeCmd := &cobra.Command{
 		Use:   "resume",
 		Short: "Resume an interrupted loop from its last persisted state",
+		Long: `Load the last persisted loop state and continue running from where it left off.
+Accepts the same LLM flags as 'loop start'. When no flags are given, uses
+the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			c, err := loop.LoadCycle(cwd)
@@ -2313,14 +2316,84 @@ and the loop command to start autonomous work. Run this first in any session.`,
 				return fmt.Errorf("no loop state found (run `radiant loop start` first): %w", err)
 			}
 			state := c.State()
+
+			if state.ExitReason != "" && state.ExitReason != loop.ExitNeedsHuman {
+				return fmt.Errorf("loop already finished with exit=%s — start a new one with `radiant loop start`", state.ExitReason)
+			}
+
+			modelID, _ := cmd.Flags().GetString("model")
+			verifierModelID, _ := cmd.Flags().GetString("verifier-model")
+			baseURL, _ := cmd.Flags().GetString("base-url")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
+			if apiKey == "" && !dryRun {
+				return fmt.Errorf(
+					"no LLM API key found — set one of: OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY\n" +
+						"  or use --dry-run to inspect state without resuming")
+			}
+
+			if modelID == "" {
+				modelID = os.Getenv("RADIANT_MODEL")
+			}
+			if modelID == "" {
+				modelID = "claude-sonnet-4-6"
+			}
+			if verifierModelID == "" {
+				verifierModelID = modelID
+			}
+
+			execModel := llm.Model{Model: modelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+			verModel := llm.Model{Model: verifierModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+			costPer1K, _ := loop.PriceFor(modelID)
+
+			// Restore budget config from persisted snapshot.
+			snap := state.Budget
+			runCfg := loop.RunConfig{
+				ExecutorModel: execModel,
+				VerifierModel: verModel,
+				Budget: loop.BudgetConfig{
+					MaxTokens:  snap.MaxTokens,
+					MaxIter:    state.MaxIter,
+					MaxCostUSD: snap.MaxCostUSD,
+					CostPer1K:  costPer1K,
+				},
+			}
+
 			fmt.Printf("✓ Resuming loop %s\n", state.RunID)
-			fmt.Printf("  Phase:  %s\n", state.Phase)
 			fmt.Printf("  Goal:   %s\n", state.Goal)
-			fmt.Printf("  Iter:   %d / %d\n", state.Iteration, state.MaxIter)
-			fmt.Printf("\nThe loop is ready to continue from phase: %s\n", state.Phase)
+			fmt.Printf("  Phase:  %s  (iter %d/%d)\n", state.Phase, state.Iteration, state.MaxIter)
+			fmt.Printf("  Model:  %s\n", modelID)
+			fmt.Println()
+
+			if dryRun {
+				fmt.Println("(dry-run: state loaded, no LLM calls made)")
+				return nil
+			}
+
+			result, err := loop.Run(context.Background(), cwd, state.RunID, state.Goal, runCfg)
+			if err != nil {
+				return fmt.Errorf("loop resume: %w", err)
+			}
+
+			fmt.Printf("✓ Loop finished\n")
+			fmt.Printf("  Exit:       %s\n", result.ExitReason)
+			fmt.Printf("  Iterations: %d\n", result.Iterations)
+			fmt.Printf("  Elapsed:    %s\n", result.Elapsed.Round(time.Second))
+			fmt.Printf("  Tokens:     %d\n", result.TokensUsed)
+			if result.CostUSD > 0 {
+				fmt.Printf("  Cost:       $%.4f\n", result.CostUSD)
+			}
+			if result.ExitReason == loop.ExitNeedsHuman {
+				fmt.Printf("\nAction required: radiant loop review\n")
+			}
 			return nil
 		},
 	}
+	loopResumeCmd.Flags().String("model", "", "Model ID for the resumed run (default = claude-sonnet-4-6)")
+	loopResumeCmd.Flags().String("verifier-model", "", "Separate model for verification")
+	loopResumeCmd.Flags().String("base-url", "", "Override LLM base URL")
+	loopResumeCmd.Flags().Bool("dry-run", false, "Inspect persisted state without calling any LLM")
 
 	loopScheduleCmd := &cobra.Command{
 		Use:   "schedule",

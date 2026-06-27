@@ -374,9 +374,10 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 46 | v1.4.0 | CLI Wiring (loop start flags + loop review) | 1 | `cmd/` | 0 | ✅ |
 | 47 | v1.5.0 | Loop Runner — `loop.Run()` conecta LLM ao ciclo autônomo | 1 | `internal/loop/` | 21 | ✅ |
 | 48 | v1.6.0 | Loop Runner Wiring — `loopStartCmd` → `loop.Run()` end-to-end | 1 | `cmd/` | 0 | ✅ |
+| 49 | v1.7.0 | Status cost display + `loop resume` → `loop.Run()` | 2 | `internal/loop/`, `cmd/` | 0 | ✅ |
 
-**Total entregue (Sprints 1–48)**: 19 packages, 104 testes no loop package, suite completa green  
-**Versão atual**: v1.6.0
+**Total entregue (Sprints 1–49)**: 19 packages, 104 testes no loop package, suite completa green  
+**Versão atual**: v1.7.0
 
 ---
 

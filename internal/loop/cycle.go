@@ -366,6 +366,19 @@ func FormatStatus(state LoopState) string {
 
 	status += fmt.Sprintf("Since: %s\n", state.StartedAt.Format("2006-01-02 15:04 UTC"))
 
+	// Budget line — tokens and cost when tracked.
+	b := state.Budget
+	if b.MaxTokens > 0 || b.MaxCostUSD > 0 || b.EstimatedCostUSD > 0 {
+		budgetLine := fmt.Sprintf("Budget: tokens %d/%d", b.UsedTokens, b.MaxTokens)
+		if b.EstimatedCostUSD > 0 || b.MaxCostUSD > 0 {
+			budgetLine += fmt.Sprintf(" | cost $%.4f", b.EstimatedCostUSD)
+			if b.MaxCostUSD > 0 {
+				budgetLine += fmt.Sprintf("/$%.2f", b.MaxCostUSD)
+			}
+		}
+		status += budgetLine + "\n"
+	}
+
 	if len(state.Log) > 0 {
 		status += "\nRecent transitions:\n"
 		start := len(state.Log) - 5
