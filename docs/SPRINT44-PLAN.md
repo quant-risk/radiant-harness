@@ -1,6 +1,6 @@
 # Sprint 44 — Loop Hardening: Human Checkpoint + Brakes
 
-> **Status**: Planned  
+> **Status**: Shipped ✅ — commit `a2f232e`  
 > **Version target**: v1.2.0  
 > **Sources**: Loop Engineering Playbook (Osmani/Cherny/Steinberger), Akshay Twitter/X images Q2,
 > `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py` (code verified)

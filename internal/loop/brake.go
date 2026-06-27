@@ -14,10 +14,10 @@ import (
 // The caller provides the action string; StallBrake only counts.
 type StallBrake struct {
 	mu       sync.Mutex
-	patience int    // consecutive identical hashes before stall is declared
+	patience int      // consecutive identical hashes before stall is declared
 	ring     []string // ring buffer of recent action hashes
-	pos      int    // next write position
-	size     int    // number of entries recorded so far
+	pos      int      // next write position
+	size     int      // number of entries recorded so far
 }
 
 // NewStallBrake creates a StallBrake with the given patience window.

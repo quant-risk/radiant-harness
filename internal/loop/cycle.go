@@ -13,15 +13,15 @@ import (
 type Phase string
 
 const (
-	PhaseIdle           Phase = "idle"
-	PhaseDiscover       Phase = "discover"
-	PhasePlan           Phase = "plan"
-	PhaseExecute        Phase = "execute"
-	PhaseVerify         Phase = "verify"
-	PhasePersist        Phase = "persist"
-	PhaseDone           Phase = "done"
-	PhaseFailed         Phase = "failed"
-	PhaseAwaitingHuman  Phase = "awaiting_human"
+	PhaseIdle          Phase = "idle"
+	PhaseDiscover      Phase = "discover"
+	PhasePlan          Phase = "plan"
+	PhaseExecute       Phase = "execute"
+	PhaseVerify        Phase = "verify"
+	PhasePersist       Phase = "persist"
+	PhaseDone          Phase = "done"
+	PhaseFailed        Phase = "failed"
+	PhaseAwaitingHuman Phase = "awaiting_human"
 )
 
 // validTransitions is the state machine — only listed transitions are allowed.
@@ -46,8 +46,8 @@ const (
 	ExitMaxIter          ExitReason = "max_iterations"
 	ExitCritical         ExitReason = "critical_failure"
 	ExitCanceled         ExitReason = "canceled"
-	ExitNeedsHuman       ExitReason = "needs_human"       // verifier escalated
-	ExitStalled          ExitReason = "stalled"           // no-progress brake
+	ExitNeedsHuman       ExitReason = "needs_human"        // verifier escalated
+	ExitStalled          ExitReason = "stalled"            // no-progress brake
 	ExitTimeLimitReached ExitReason = "time_limit_reached" // wall-clock brake
 	ExitCostLimitReached ExitReason = "cost_limit_reached" // dollar brake
 )

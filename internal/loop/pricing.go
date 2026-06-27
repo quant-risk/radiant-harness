@@ -10,25 +10,25 @@ type ModelPricing struct {
 // Source: provider pricing pages as of June 2026.
 var providerPricing = map[string]ModelPricing{
 	// Anthropic
-	"claude-opus-4-8":            {CostPer1KOutput: 0.015},
-	"claude-opus-4-7":            {CostPer1KOutput: 0.015},
-	"claude-sonnet-4-6":          {CostPer1KOutput: 0.003},
-	"claude-haiku-4-5":           {CostPer1KOutput: 0.00025},
-	"claude-haiku-4-5-20251001":  {CostPer1KOutput: 0.00025},
+	"claude-opus-4-8":           {CostPer1KOutput: 0.015},
+	"claude-opus-4-7":           {CostPer1KOutput: 0.015},
+	"claude-sonnet-4-6":         {CostPer1KOutput: 0.003},
+	"claude-haiku-4-5":          {CostPer1KOutput: 0.00025},
+	"claude-haiku-4-5-20251001": {CostPer1KOutput: 0.00025},
 
 	// OpenAI
-	"gpt-4o":           {CostPer1KOutput: 0.005},
-	"gpt-4o-mini":      {CostPer1KOutput: 0.00015},
-	"o3":               {CostPer1KOutput: 0.060},
-	"o4-mini":          {CostPer1KOutput: 0.0044},
+	"gpt-4o":      {CostPer1KOutput: 0.005},
+	"gpt-4o-mini": {CostPer1KOutput: 0.00015},
+	"o3":          {CostPer1KOutput: 0.060},
+	"o4-mini":     {CostPer1KOutput: 0.0044},
 
 	// Google
-	"gemini-2.0-flash":      {CostPer1KOutput: 0.00035},
-	"gemini-2.5-pro":        {CostPer1KOutput: 0.005},
+	"gemini-2.0-flash": {CostPer1KOutput: 0.00035},
+	"gemini-2.5-pro":   {CostPer1KOutput: 0.005},
 
 	// DeepSeek
-	"deepseek-chat":    {CostPer1KOutput: 0.00028},
-	"deepseek-r1":      {CostPer1KOutput: 0.00219},
+	"deepseek-chat": {CostPer1KOutput: 0.00028},
+	"deepseek-r1":   {CostPer1KOutput: 0.00219},
 }
 
 // PriceFor returns the cost per 1K output tokens for the given model ID.

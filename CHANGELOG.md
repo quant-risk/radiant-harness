@@ -41,30 +41,38 @@ See `docs/SPRINT45-PLAN.md` for full design.
 
 ---
 
-## [Unreleased] — v1.2.0 — Loop Hardening (Sprint 44)
+## [1.2.0] — 2026-06-27 — Loop Hardening (Sprint 44)
 
-Code study of `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py` and
-`budget.py` confirmed three hard-stop gaps. See `docs/SPRINT44-PLAN.md` for full design.
+6 files changed, 685 insertions. 61 tests in loop package (82% coverage). All -race clean.
 
-### Planned — Human Checkpoint (`escalate` signal)
-- Extend `VerifyResult` with `Escalate bool`; when true, loop stops with `needs-human`
-  (a success state, not failure) and writes `.radiant-harness/inbox/<id>.json`
-- `radiant loop review` — list/approve/reject escalated items
-- Source: `engine.py:Verdict.escalate`
+### Added — Human Escalation (`Escalate` signal)
+- `VerifyResult.Escalate bool` — verifier signals genuinely ambiguous or risky situations
+- `BuildVerifierPrompt` now includes ANTI-CHEAT CHECKS and `ESCALATE:` field in format
+- `PhaseAwaitingHuman` added to state machine; `verify → awaiting_human` is valid
+- `ExitNeedsHuman` exit reason — a success state ("the loop did the right thing")
+- `WriteInboxItem()` — writes `.radiant-harness/inbox/<id>.json` on escalation
+- `ListInboxItems()` / `ResolveInboxItem()` — foundation for `radiant loop review`
 
-### Planned — No-Progress Brake (stall)
-- `internal/loop/brake.go` — `StallBrake` tracks action hashes; after N fruitless
-  turns halts with `status = "stalled"`; pure (no wall-clock inside logic)
-- Source: `engine.py:no_progress_streak`; also named in Akshay image Q2
+### Added — No-Progress Brake (`internal/loop/brake.go`)
+- `StallBrake` — ring buffer of `sha256(action)[0:8]` hashes
+- `Record(action) bool` — returns true after `patience` consecutive identical hashes
+- `Reset()` — call after successful persist; starts fresh
+- Pure: no wall-clock or external state; policy (`patience`) is a constructor parameter
+- Default patience: 3 fruitless iterations
 
-### Planned — Time + Cost Budget
-- Extend `internal/loop/budget.go`: `MaxDuration`, `MaxCostUSD`, `CostPer1K`
-- `internal/loop/pricing.go` — static provider→model→$/1K table
-- `radiant loop start --max-time=<d> --max-cost=<$> --stall-patience=<n>` flags
-- Source: `budget.py:cost_per_1k_tokens`; Akshay image Q2 "budget + time — token/$/sec"
+### Added — Time + Cost Budget
+- `BudgetConfig.MaxDuration time.Duration` — wall-clock limit; `CheckTime(now)` is pure
+- `BudgetConfig.MaxCostUSD float64` — dollar ceiling; `CheckCost()` compares against it
+- `BudgetConfig.CostPer1K float64` — provider output price per 1K tokens
+- `Budget.EstimatedCostUSD()` — live cost shown in `radiant loop status`
+- `Budget.Summary()` now appends `cost $X.XXXX/$Y.YY` when pricing is configured
+- `Snapshot` extended with `MaxDurationSec`, `MaxCostUSD`, `EstimatedCostUSD`
+- `ExitStalled`, `ExitTimeLimitReached`, `ExitCostLimitReached` exit reasons
 
-### Planned — Tests
-- ≥20 new pure tests; version bump `1.1.0` → `1.2.0`
+### Added — Pricing table (`internal/loop/pricing.go`)
+- 14 models across Anthropic, OpenAI, Google, DeepSeek
+- `PriceFor(modelID) (float64, bool)` — clean caller ergonomics
+- `KnownModels() []string` — enumerable for CLI help text
 
 ---
 

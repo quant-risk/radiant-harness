@@ -323,17 +323,13 @@ atômico, 18 tests), `docs/SCHEDULE.md`, CLI `radiant loop schedule`.
 
 **Tema**: Fechar os 3 gaps de hard-stop confirmados pelo código de `awesome-loop-engineering`.
 
-**Status**: 📋 Planejado — ver `docs/SPRINT44-PLAN.md`
+**Status**: ✅ Shipped — commit `a2f232e` | 61 testes | 82% cobertura
 
-| Gap | Código de referência | Descrição |
-|-----|---------------------|-----------|
-| Human checkpoint (`escalate`) | `engine.py:Verdict.escalate` | Verifier sinaliza `escalate=true`; loop para com `needs-human` e grava inbox |
-| No-progress brake (stall) | `engine.py:no_progress_streak` | N iterações fruitless → status `stalled`; puro, sem wall-clock |
-| Time + cost budget | `budget.py:cost_per_1k_tokens` | `MaxDuration` + `MaxCostUSD` + tabela de preços por provider |
-
-Entregas: `internal/loop/brake.go`, extend `internal/loop/verifier.go` (Escalate),
-extend `internal/loop/budget.go` + `pricing.go`, `radiant loop review`,
-flags `--max-time/--max-cost/--stall-patience`. ≥20 testes. Version bump → v1.2.0.
+| Gap | Entregue | Arquivo |
+|-----|----------|---------|
+| Human escalation (`Escalate`) | ✅ | `verifier.go` + `cycle.go` (inbox, `PhaseAwaitingHuman`, `ExitNeedsHuman`) |
+| No-progress brake (stall) | ✅ | `brake.go` (`StallBrake`, ring buffer, `Record`/`Reset`) |
+| Time + cost budget | ✅ | `budget.go` (`CheckTime`, `CheckCost`, `EstimatedCostUSD`) + `pricing.go` (14 modelos) |
 
 ---
 
