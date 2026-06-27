@@ -5,8 +5,8 @@
 > Codex, Copilot, Gemini CLI, and Windsurf.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-155_pass-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-200+_pass-green.svg)](CHANGELOG.md)
 [![Cross-compile](https://img.shields.io/badge/cross--compile-6_of_6-blueviolet.svg)](CHANGELOG.md)
 
 ---
@@ -92,8 +92,25 @@ radiant context summarize --phase=<name>  # compress a completed phase
 radiant loop start "<goal>" [--profile=lean|standard|thorough]
 radiant loop status
 radiant loop resume
+radiant loop schedule [--check] [--gate-failing]   # decide whether to re-run
 radiant trace show <run-id> [--json]
 radiant trace list
+```
+
+### Ontology (world model)
+```bash
+radiant ontology export [--compact]   # ~300-token world model for any LLM
+radiant ontology validate             # check axioms
+radiant ontology skills <domain>      # skills that govern a domain
+radiant boot --world-model            # boot manifest + world model
+```
+
+### Worktree Isolation
+```bash
+radiant worktree add <name>           # isolated checkout for a parallel agent
+radiant worktree list
+radiant worktree remove <path> [--force]
+radiant worktree prune
 ```
 
 ### Token Budget

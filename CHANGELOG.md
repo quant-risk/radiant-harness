@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-27 — World Model + Loop Closure (Sprints 41–43)
+
+Post-v1.0 deep-audit gaps, grounded in the agent-harness / loop-engineering
+literature (Self-Harness arXiv:2606.09498, the senior-Anthropic-engineer loop
+framework, ontology-grounding research).
+
+### Added — Ontology Layer (Sprint 41)
+- `internal/ontology/` — the harness **world model**: 10 entity kinds, 10
+  relation kinds, 4 axioms. Replaces scattered/duplicated domain concepts
+  (Task defined 2×, Phase 3×) with one queryable semantic schema.
+- Query API: `Related`, `RelatedInbound`, `SkillsForDomain`,
+  `ValidateTransition`, `Violations`, `Export`, `ExportCompact` (~300-token
+  world model for any LLM).
+- `internal/context/ontology_bridge.go` — `TestRegistryMatchesOntology`
+  guarantees the registry routing table and the ontology never drift.
+- CLI: `radiant ontology export[--compact]/validate/skills <domain>`;
+  `radiant boot --world-model` appends the compact model.
+
+### Added — Real Worktree Isolation (Sprint 42)
+- `internal/worktree/` — `Manager` over real `git worktree` (Add/Remove/
+  List/Prune). Each parallel agent gets its own checkout on branch
+  `radiant/wt/<name>`; before this, Fleet's `WorktreeDir` was an empty field.
+- `internal/fleet/isolation.go` — `Isolator.ClaimIsolated` provisions a real
+  worktree then atomically claims the next task, with rollback on race.
+- CLI: `radiant worktree add/list/remove[--force]/prune`.
+
+### Added — Schedule Stage (Sprint 43)
+- `internal/schedule/` — closes the loop cycle (…→Persist→**Schedule**).
+  `Evaluate(policy, state, signals, now)` is a pure, deterministic decision.
+- Signals: `new-commits`, `pending-work` (TODO/FIXME), `failing-gate`,
+  `interval`. Policy: rate limit + daily cap. State persisted atomically.
+- CLI: `radiant loop schedule [--check] [--gate-failing] [--min-interval]
+  [--max-per-day]`.
+
+### Fixed
+- `internal/improve/proposer.go` — self-assignment (go vet SA4001).
+- `internal/context/detector.go` — `STATE.md` → `state.md` case mismatch that
+  silently broke active-spec detection.
+- `cmd/radiant/main.go` — removed unused `config --api-key` flag.
+- `internal/gaterun/` — consolidated 6 duplicated gate-runner files (harness/
+  engine/quality) into one package.
+
+### Tests
+- +47 tests (22 ontology, 13 worktree+isolation, 18 schedule, bridge). All
+  green with `-race`. 6/6 cross-compile targets clean.
+
 ## [1.0.0] — 2026-06-26 — v2.0 Roadmap Complete (Sprints 33–40)
 
 ### Added — Context Engine (Sprint 33, v0.8.0)
