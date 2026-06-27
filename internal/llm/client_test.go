@@ -137,8 +137,8 @@ func TestListPresetsIsSorted(t *testing.T) {
 
 func TestListPresetsContainsExpectedModels(t *testing.T) {
 	got := ListPresets()
-	want := []string{"claude-sonnet-4.5", "gpt-5", "gemini-2.5-pro",
-		"mistral-large-2", "codestral-22b", "groq-llama-3.3-70b", "grok-2"}
+	want := []string{"claude-sonnet-4-6", "gpt-5", "gemini-2.5-pro",
+		"mistral-large-2", "codestral-22b", "groq-llama-3.3-70b"}
 	for _, w := range want {
 		found := false
 		for _, g := range got {
@@ -154,7 +154,7 @@ func TestListPresetsContainsExpectedModels(t *testing.T) {
 }
 
 func TestGetPresetOverridesAPIKey(t *testing.T) {
-	m, ok := GetPreset("claude-sonnet-4.5", "my-key")
+	m, ok := GetPreset("claude-sonnet-4-6", "my-key")
 	if !ok {
 		t.Fatal("expected to find preset")
 	}

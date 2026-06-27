@@ -13,11 +13,11 @@ func TestPresetFamily(t *testing.T) {
 		// any OpenAI to "openai", etc. This is what AutoRoute uses to
 		// find a top-tier sibling (e.g. opus) when the anchor is mid
 		// tier (e.g. sonnet).
-		{"claude-sonnet-4.5", "claude"},
-		{"claude-opus-4.1", "claude"},
+		{"claude-sonnet-4-6", "claude"},
+		{"claude-opus-4-8", "claude"},
 		{"gpt-5", "openai"},
 		{"gpt-5-codex", "openai"},
-		{"gemini-2.5-pro", "google"},
+		{"gemini-2.5-pro", "gemini"},
 		{"deepseek-v4-pro", "deepseek"},
 		{"groq-llama-3.3-70b", "groq"},
 		{"unknown-model", ""},
@@ -35,12 +35,18 @@ func TestTierByPreset(t *testing.T) {
 		preset string
 		tier   ModelTier
 	}{
-		{"claude-opus-4.1", TierTop},
-		{"claude-sonnet-4.5", TierMid},
-		{"gpt-5", TierMid},
-		{"gemini-2.5-pro", TierMid},
-		{"deepseek-v4-flash", TierBudget},
-		{"mistral-large-2", TierBudget},
+		{"claude-opus-4-8", TierTop},
+		{"claude-sonnet-4-6", TierMid},
+		{"claude-haiku-4-5", TierBudget},
+		{"gpt-5", TierTop},
+		{"gpt-5-mini", TierMid},
+		{"gpt-5-nano", TierBudget},
+		{"gemini-2.5-pro", TierTop},
+		{"gemini-2.5-flash", TierMid},
+		{"deepseek-v4-pro", TierTop},
+		{"deepseek-v4-flash", TierMid},
+		{"mistral-large-2", TierTop},
+		{"codestral-22b", TierMid},
 	}
 	for _, c := range cases {
 		got := tierByPreset(c.preset)
@@ -58,13 +64,13 @@ func TestAutoRouteUnknownFamilyIsNoop(t *testing.T) {
 }
 
 func TestAutoRouteAnthropicFamily(t *testing.T) {
-	// Anchor is Sonnet 4.5; research should pick a top-tier model
+	// Anchor is Sonnet 4-6; research should pick a top-tier model
 	// (Opus), plan and implement stay mid-tier (Sonnet).
-	research := AutoRoute("claude-sonnet-4.5", PhaseResearch)
-	plan := AutoRoute("claude-sonnet-4.5", PhasePlan)
-	implement := AutoRoute("claude-sonnet-4.5", PhaseImplement)
+	research := AutoRoute("claude-sonnet-4-6", PhaseResearch)
+	plan := AutoRoute("claude-sonnet-4-6", PhasePlan)
+	implement := AutoRoute("claude-sonnet-4-6", PhaseImplement)
 
-	if research == "claude-sonnet-4.5" {
+	if research == "claude-sonnet-4-6" {
 		t.Errorf("research should NOT stay on anchor when top-tier available, got %q", research)
 	}
 	if !hasPrefix(research, "claude-opus") {
@@ -94,11 +100,10 @@ func TestAutoRouteGPT5Family(t *testing.T) {
 }
 
 func TestAutoRouteBudgetFamilyStaysCheap(t *testing.T) {
-	// DeepSeek family: nothing stronger available, so all phases
-	// stay on the budget model.
-	research := AutoRoute("deepseek-v4-flash", PhaseResearch)
-	if research != "deepseek-v4-flash" {
-		t.Errorf("expected to stay on flash (no stronger sibling), got %q", research)
+	// Groq family has no TierTop model — research should fall back to anchor.
+	research := AutoRoute("groq-llama-3.3-8b", PhaseResearch)
+	if research != "groq-llama-3.3-8b" {
+		t.Errorf("expected to stay on anchor (no TierTop in groq family), got %q", research)
 	}
 }
 
@@ -109,16 +114,16 @@ func TestCostUSDFallsBackToZeroOnUnknown(t *testing.T) {
 }
 
 func TestCostUSDSimpleCalculation(t *testing.T) {
-	// claude-sonnet-4.5 is $3 / 1M tokens. 1M input + 1M output = $6.
-	got := CostUSD("claude-sonnet-4.5", 1_000_000, 1_000_000)
+	// claude-sonnet-4-6 is $3 / 1M tokens. 1M input + 1M output = $6.
+	got := CostUSD("claude-sonnet-4-6", 1_000_000, 1_000_000)
 	if got < 5.99 || got > 6.01 {
-		t.Errorf("expected ~$6 for 2M tokens on sonnet-4.5, got %f", got)
+		t.Errorf("expected ~$6 for 2M tokens on sonnet-4-6, got %f", got)
 	}
 }
 
 func TestCostUSDScales(t *testing.T) {
-	// 1K tokens on sonnet-4.5: 1000 * 3 / 1M = $0.003
-	got := CostUSD("claude-sonnet-4.5", 500, 500)
+	// 1K tokens on sonnet-4-6: 1000 * 3 / 1M = $0.003
+	got := CostUSD("claude-sonnet-4-6", 500, 500)
 	if got > 0.01 || got < 0 {
 		t.Errorf("expected ~$0.003 for 1K tokens, got %f", got)
 	}

@@ -38,12 +38,44 @@ const (
 // tierByPreset returns the default tier for a known preset name.
 func tierByPreset(presetName string) ModelTier {
 	switch {
-	case strings.HasPrefix(presetName, "claude-opus"):
+	// Top tier — most powerful models (research, verify).
+	// Exact-match gpt-5 BEFORE prefix matches (gpt-5-mini etc).
+	case strings.HasPrefix(presetName, "claude-opus"),
+		presetName == "gpt-5",
+		strings.HasPrefix(presetName, "gpt-5-codex"),
+		strings.HasPrefix(presetName, "gemini-2.5-pro"),
+		strings.HasPrefix(presetName, "deepseek-v4-pro"),
+		strings.HasPrefix(presetName, "deepseek-r1"),
+		strings.HasPrefix(presetName, "mimo-v2.5-pro"),
+		strings.HasPrefix(presetName, "mistral-large"),
+		strings.HasPrefix(presetName, "minimax-m1"),
+		strings.HasPrefix(presetName, "glm-5.2"),
+		strings.HasPrefix(presetName, "kimi-k2"),
+		strings.HasPrefix(presetName, "qwen-3-coder"),
+		strings.HasPrefix(presetName, "groq-llama-3.3-70b"):
 		return TierTop
+
+	// Mid tier — balanced (plan, implement).
 	case strings.HasPrefix(presetName, "claude-sonnet"),
-		strings.HasPrefix(presetName, "gpt-5"),
-		strings.HasPrefix(presetName, "gemini-2.5-pro"):
+		strings.HasPrefix(presetName, "gpt-5-mini"),
+		strings.HasPrefix(presetName, "gemini-2.5-flash"),
+		strings.HasPrefix(presetName, "deepseek-v4-flash"),
+		strings.HasPrefix(presetName, "codestral"),
+		strings.HasPrefix(presetName, "minimax-text"),
+		strings.HasPrefix(presetName, "glm-5.2-air"),
+		strings.HasPrefix(presetName, "mimo-v2.5-lite"),
+		strings.HasPrefix(presetName, "qwen-2.5-coder"),
+		strings.HasPrefix(presetName, "mistral"):
 		return TierMid
+
+	// Budget tier — cheap, fast (summarize, persist).
+	case strings.HasPrefix(presetName, "claude-haiku"),
+		strings.HasPrefix(presetName, "gpt-5-nano"),
+		strings.HasPrefix(presetName, "kimi-k2-flash"),
+		strings.HasPrefix(presetName, "abab"),
+		strings.HasPrefix(presetName, "groq-llama-3.3-8b"):
+		return TierBudget
+
 	default:
 		return TierBudget
 	}
@@ -94,7 +126,7 @@ func presetFamily(preset string) string {
 		strings.HasPrefix(preset, "gpt-4o"):
 		return "openai"
 	case strings.HasPrefix(preset, "gemini"):
-		return "google"
+		return "gemini"
 	case strings.HasPrefix(preset, "deepseek"):
 		return "deepseek"
 	case strings.HasPrefix(preset, "mistral"),
@@ -106,6 +138,15 @@ func presetFamily(preset string) string {
 		return "xai"
 	case strings.HasPrefix(preset, "mimo"):
 		return "xiaomi"
+	case strings.HasPrefix(preset, "glm"):
+		return "glm"
+	case strings.HasPrefix(preset, "kimi"):
+		return "kimi"
+	case strings.HasPrefix(preset, "minimax"),
+		strings.HasPrefix(preset, "abab"):
+		return "minimax"
+	case strings.HasPrefix(preset, "qwen"):
+		return "qwen"
 	}
 	return ""
 }
@@ -134,29 +175,44 @@ func pickFromFamily(family string, tier ModelTier) string {
 // record the input and output token counts separately and apply the
 // vendor's published per-direction pricing.
 var PricePerMTokensUSD = map[string]float64{
-	// Anthropic
-	"claude-opus-4.1":   15.0,
-	"claude-sonnet-4.5": 3.0,
-	"claude-sonnet-4":   3.0,
+	// Anthropic (input $/M tokens; output ~3-5x but we blend)
+	"claude-opus-4-8":   15.0,
+	"claude-sonnet-4-6": 3.0,
+	"claude-haiku-4-5":  0.25,
 	// OpenAI
 	"gpt-5":       5.0,
+	"gpt-5-mini":  0.40,
+	"gpt-5-nano":  0.10,
 	"gpt-5-codex": 5.0,
-	"gpt-4o":      2.5,
 	// Google
-	"gemini-2.5-pro": 1.25,
+	"gemini-2.5-pro":   1.25,
+	"gemini-2.5-flash": 0.075,
+	// Xiaomi
+	"mimo-v2.5-pro":  0.30,
+	"mimo-v2.5-lite": 0.07,
 	// DeepSeek
 	"deepseek-v4-pro":   0.27,
 	"deepseek-v4-flash": 0.07,
+	"deepseek-r1":       0.55,
+	// Z.AI / GLM
+	"glm-5.2":     0.50,
+	"glm-5.2-air": 0.14,
+	// Kimi / Moonshot
+	"kimi-k2":       0.55,
+	"kimi-k2-flash": 0.14,
+	// MiniMax
+	"minimax-m1":     0.70,
+	"minimax-text-01": 0.28,
+	"abab-7":         0.14,
+	// Qwen
+	"qwen-3-coder-plus":  0.50,
+	"qwen-2.5-coder-plus": 0.18,
 	// Mistral
 	"mistral-large-2": 2.0,
 	"codestral-22b":   0.30,
-	// Groq (cheap because Groq's infra is cheap)
+	// Groq
 	"groq-llama-3.3-70b": 0.59,
-	"groq-mixtral-8x7b":  0.27,
-	// xAI
-	"grok-2": 2.0,
-	// Xiaomi
-	"mimo-v2.5-pro": 0.30,
+	"groq-llama-3.3-8b":  0.05,
 }
 
 // CostUSD estimates the USD cost of generating `outputTokens` tokens

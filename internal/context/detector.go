@@ -367,8 +367,8 @@ var domainKeywordPatterns = map[Domain][]string{
 		"server", "service-mesh",
 	},
 	DomainOps: {
-		"devops", "infra", "infrastructure", "platform", "sre", "observability",
-		"monitoring", "deployment", "ci-cd", "gitops",
+		"devops", "infra", "infrastructure", "sre", "observability",
+		"monitoring", "deployment", "ci-cd", "gitops", "ops-platform",
 	},
 	DomainSystems: {
 		"systems", "kernel", "embedded", "firmware", "driver", "runtime",
