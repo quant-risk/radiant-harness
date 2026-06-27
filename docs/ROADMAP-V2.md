@@ -372,9 +372,10 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | `loop/` | +23 | ✅ |
 
 | 46 | v1.4.0 | CLI Wiring (loop start flags + loop review) | 1 | `cmd/` | 0 | ✅ |
+| 47 | v1.5.0 | Loop Runner — `loop.Run()` conecta LLM ao ciclo autônomo | 1 | `internal/loop/` | 21 | ✅ |
 
-**Total entregue (Sprints 1–46)**: 19 packages, 84 testes no loop package, suite completa green  
-**Versão atual**: v1.4.0
+**Total entregue (Sprints 1–47)**: 19 packages, 105 testes no loop package, suite completa green  
+**Versão atual**: v1.5.0
 
 ---
 

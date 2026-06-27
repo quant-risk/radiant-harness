@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-06-27 — Loop Runner: LLM Integration (Sprint 47)
+
+Autonomous loop now calls real LLMs. 19/19 packages green. 21 new tests.
+
+### Added — `internal/loop/runner.go`
+- `loop.Run()` — full Discover→Plan→Execute→Verify→Persist cycle with real LLM calls
+- `RunConfig` — unifies all brakes: executor/verifier models, budget, stall, verifier, review panel, grounding
+- `RunResult` — exit reason, iterations, elapsed, tokens, cost
+- Executor and verifier use separate `llm.Client` (maker never grades own work)
+- Nil-safe stall brake, fail-open reviewer, `estimateTokens()` helper
+
+---
+
 ## [1.4.0] — 2026-06-27 — CLI Wiring (Sprint 46)
 
 All Sprint 44–45 internals now exposed via CLI. 19/19 packages green. Build clean.
