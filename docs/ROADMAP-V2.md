@@ -368,14 +368,11 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 41 | v1.1.0 | Ontology / World Model | 3 | `ontology/` | +22 | ✅ |
 | 42 | v1.1.0 | Worktree Isolation | 4 | `worktree/` | +12 | ✅ |
 | 43 | v1.1.0 | Schedule Stage | 1 | `schedule/` | +18 | ✅ |
-| 44 | v1.2.0 | Loop Hardening | 3 | — | +20 | 📋 |
+| 44 | v1.2.0 | Loop Hardening (brakes + escalate) | 2 | `loop/` | +30 | ✅ |
+| 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | `loop/` | +23 | ✅ |
 
-| 44 | v1.2.0 | Loop Hardening (brakes + escalate) | 2 | — | +20 | 📋 |
-| 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | — | +23 | ✅ |
-
-**Total entregue (40–43)**: +8 comandos, +4 packages, +52 testes (total ~350+)  
-**Planejado v1.2.0 (Sprint 44)**: +2 comandos, ~20 testes  
-**Planejado v1.3.0 (Sprint 45)**: +3 comandos, ~20 testes
+**Total entregue (Sprints 1–45)**: 19 packages, 84 testes no loop package, suite completa green  
+**Versão atual**: v1.3.0
 
 ---
 
