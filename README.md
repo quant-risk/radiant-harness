@@ -6,8 +6,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-200+_pass-green.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-298_pass-green.svg)](CHANGELOG.md)
 [![Cross-compile](https://img.shields.io/badge/cross--compile-6_of_6-blueviolet.svg)](CHANGELOG.md)
+[![Roadmap](https://img.shields.io/badge/next-v1.2.0_loop_hardening-orange.svg)](docs/SPRINT44-PLAN.md)
 
 ---
 
@@ -90,9 +91,16 @@ radiant context summarize --phase=<name>  # compress a completed phase
 ### Loop Engine
 ```bash
 radiant loop start "<goal>" [--profile=lean|standard|thorough]
+                            [--max-time=<duration>]    # wall-clock brake (v1.2.0)
+                            [--max-cost=<$>]           # dollar brake (v1.2.0)
+                            [--stall-patience=<n>]     # no-progress brake (v1.2.0)
+                            [--quorum-n=<n>]           # parallel judges (v1.3.0)
+                            [--quorum-k=<k>]           # votes needed (v1.3.0)
+                            [--ground]                 # inject commit log (v1.3.0)
 radiant loop status
 radiant loop resume
-radiant loop schedule [--check] [--gate-failing]   # decide whether to re-run
+radiant loop review [--approve <id>] [--reject <id>]  # human checkpoint (v1.2.0)
+radiant loop schedule [--check] [--gate-failing]      # decide whether to re-run
 radiant trace show <run-id> [--json]
 radiant trace list
 ```
@@ -247,12 +255,48 @@ are included in context (see [docs/CONTEXT-ENGINE.md](docs/CONTEXT-ENGINE.md)).
 Each skill is plain Markdown + YAML frontmatter — any LLM can
 consume them. The open spec is at [docs/SKILL-SCHEMA.md](docs/SKILL-SCHEMA.md).
 
+## Loop Engine — How it works
+
+The Loop Engine runs a crash-safe state machine: `idle → discover → plan → execute → verify → persist → done`.
+
+```
+radiant loop start "add rate limiting to /api/users"
+
+  iteration 1
+  ├─ discover  → domain: backend, relevant skills: [api, security]
+  ├─ plan      → decompose into tasks
+  ├─ execute   → write internal/api/ratelimit.go
+  ├─ verify    → REJECTED: missing tests        ← separate agent, never self-grades
+  ├─ execute   → write internal/api/ratelimit_test.go
+  └─ verify    → APPROVED: score 0.92
+     persist   → checkpoint + JSONL trace
+     done      → exit reason: success
+
+$ radiant loop status
+  phase: done | iter: 2/20 | tokens: 3420/50000 | status: ok
+```
+
+**Exit brakes (v1.1.0):** max-iterations, token-budget, critical-failures, user-cancel  
+**Exit brakes (v1.2.0, planned):** stall (no-progress), wall-clock time, dollar cost, human escalation  
+**Verifier hardening (v1.3.0, planned):** quorum k-of-n judges, geometric-mean by dimension, post-convergence review panel, commit-log grounding, anti-cheat clauses
+
+See [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) for the full exit-condition table.
+
+---
+
 ## Architecture
 
 `radiant` is structured as:
 
 ```
 cmd/radiant/main.go          ← CLI entrypoint (cobra commands)
+internal/loop/               ← Loop Engine (cycle, budget, verifier, trace)
+internal/context/            ← Context Engine (domain detect, skill selector)
+internal/ontology/           ← world model (domains, axioms, dependencies)
+internal/worktree/           ← git worktree isolation for parallel agents
+internal/schedule/           ← loop scheduler (gate-failing, backoff)
+internal/improve/            ← Self-Improvement Engine (weakness mining)
+internal/fleet/              ← Multi-agent fleet coordinator
 internal/skill/              ← skill schema validator + bundle loader
 internal/scaffold/           ← scaffold + native agent view generation
 internal/engine/             ← SDD execution engine (planner/implementer/validator)
@@ -264,8 +308,7 @@ internal/quality/            ← fidelity scoring + drift detection
 internal/benchmark/          ← cross-framework benchmark harness
 ```
 
-The CLI binary embeds 17 skills via `//go:embed` — no external
-dependencies at install time.
+The CLI binary embeds skills via `//go:embed` — no external dependencies at install time.
 
 ## Quality
 
@@ -287,12 +330,16 @@ demonstrates every command end-to-end.
 
 ## Documentation
 
-- `docs/HARNESS-PLAN.md` — the methodology merge plan
-- `docs/SKILL-SCHEMA.md` — open MIT spec for the skill format
-- `docs/METHODOLOGY-MERGE-FINAL.md` — consolidated report of Sprints 10-13
-- `docs/ROADMAP.md` — current roadmap
-- `docs/CHANGELOG.md` (top-level) — version history
-- `docs/validation-report-*.md` — per-sprint validation reports
+| Doc | What it covers |
+|-----|---------------|
+| [`docs/ROADMAP-V2.md`](docs/ROADMAP-V2.md) | Sprint plan through v1.3.0 |
+| [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) | Loop state machine, exit conditions, components |
+| [`docs/SPRINT44-PLAN.md`](docs/SPRINT44-PLAN.md) | v1.2.0 — stall brake, cost budget, human escalation |
+| [`docs/SPRINT45-PLAN.md`](docs/SPRINT45-PLAN.md) | v1.3.0 — quorum, geo-mean, review panel, grounding |
+| [`docs/SKILL-SCHEMA.md`](docs/SKILL-SCHEMA.md) | Open MIT spec for the skill format |
+| [`docs/CONTEXT-ENGINE.md`](docs/CONTEXT-ENGINE.md) | Domain detection + lazy-loading logic |
+| [`docs/HARNESS-PLAN.md`](docs/HARNESS-PLAN.md) | Methodology merge plan |
+| [`CHANGELOG.md`](CHANGELOG.md) | Full version history |
 
 ## License
 
