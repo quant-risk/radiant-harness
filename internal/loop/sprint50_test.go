@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -151,7 +152,7 @@ func TestRunCreatesTraceFile(t *testing.T) {
 	}
 
 	// Run will fail fast (no API key) but should still create the file.
-	ctx := t.Context()
+	ctx := context.Background()
 	cfg := RunConfig{
 		Budget: BudgetConfig{MaxIter: 1},
 	}
