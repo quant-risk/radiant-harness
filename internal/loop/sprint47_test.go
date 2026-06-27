@@ -60,18 +60,18 @@ func TestEstimateTokensEmpty(t *testing.T) {
 }
 
 func TestEstimateTokensApprox(t *testing.T) {
-	// 400 chars → ~100 tokens
+	// 400 ASCII runes → (400*10+34)/35 = 115 tokens (≈3.5 chars/token)
 	prompt := strings.Repeat("a", 200)
 	resp := strings.Repeat("b", 200)
-	if n := estimateTokens(prompt, resp); n != 100 {
-		t.Fatalf("expected 100, got %d", n)
+	if n := estimateTokens(prompt, resp); n != 115 {
+		t.Fatalf("expected 115, got %d", n)
 	}
 }
 
 func TestEstimateTokensRounding(t *testing.T) {
-	// 5 chars / 4 = 1 (integer division)
-	if n := estimateTokens("hello", ""); n != 1 {
-		t.Fatalf("expected 1, got %d", n)
+	// 5 runes → (5*10+34)/35 = 84/35 = 2
+	if n := estimateTokens("hello", ""); n != 2 {
+		t.Fatalf("expected 2, got %d", n)
 	}
 }
 

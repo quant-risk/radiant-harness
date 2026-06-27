@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/llm"
@@ -318,10 +319,13 @@ func (s *StallBrake) reset() {
 }
 
 // estimateTokens returns a rough token estimate for a prompt+response pair.
-// Used to account usage when the LLM response doesn't include token counts.
-// ~4 chars per token is a standard approximation.
+// Counts Unicode code points (runes) rather than bytes so CJK and accented
+// text don't get systematically underestimated. ~3.5 chars/token is more
+// conservative than the ASCII-only 4-byte rule and works better for mixed
+// Portuguese/code content. Integer division truncates toward zero.
 func estimateTokens(prompt, response string) int {
-	return (len(prompt) + len(response)) / 4
+	runes := utf8.RuneCountInString(prompt) + utf8.RuneCountInString(response)
+	return (runes*10 + 34) / 35 // ≈ runes / 3.5, integer-only
 }
 
 // ── System prompts ────────────────────────────────────────────────────────────

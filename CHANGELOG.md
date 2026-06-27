@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-06-27 — main.go Split + Token Estimation (Sprint 53B)
+
+19/19 packages green. 651 testes. gofmt + goimports clean.
+
+### Refactor — `cmd/radiant/`
+- Split `main.go` (7.117 linhas) em 10 arquivos de registro de comandos por domínio
+- `main()` reduzida a 26 linhas: root declaration + 10 `registerXxx(root)` + Execute
+- Arquivos criados: `cmd_run.go`, `cmd_spec.go`, `cmd_audit.go`, `cmd_telemetry.go`,
+  `cmd_ops.go`, `cmd_session.go`, `cmd_skills.go`, `cmd_context.go`,
+  `cmd_fleet.go`, `cmd_loop.go`
+- Zero mudança de behavior — Cobra multi-file, todos `package main`
+
+### Fixed — `internal/loop/runner.go`
+- `estimateTokens`: trocou `len/4` (bytes) por `utf8.RuneCountInString/3.5` (runes)
+- Correção para português, CJK e qualquer conteúdo multibyte UTF-8
+- Testes `sprint47_test.go` atualizados para os novos valores corretos
+
+---
+
 ## [2.0.0] — 2026-06-27 — Output Streaming (Sprint 52)
 
 19/19 packages green. 133 testes no loop package (↑8).
