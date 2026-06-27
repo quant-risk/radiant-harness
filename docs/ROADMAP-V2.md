@@ -337,7 +337,7 @@ atômico, 18 tests), `docs/SCHEDULE.md`, CLI `radiant loop schedule`.
 
 **Tema**: Tornar o verifier honesto — múltiplas lentes, mean geométrica, memória de contexto.
 
-**Status**: 📋 Planejado — ver `docs/SPRINT45-PLAN.md`
+**Status**: ✅ Shipped — commit `f8f8a62` | 84 testes | 84.2% cobertura
 
 | Gap | Código de referência | Descrição |
 |-----|---------------------|-----------|

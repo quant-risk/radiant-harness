@@ -98,42 +98,44 @@ radiant trace list
 | Max iterations reached | `budget_exhausted` (iter limit) | ✅ v1.1.0 |
 | 3 consecutive failures | `critical_failure` | ✅ v1.1.0 |
 | User cancellation | `canceled` | ✅ v1.1.0 |
-| **No-progress stall** (N fruitless turns) | `stalled` | 📋 v1.2.0 |
-| **Wall-clock time exceeded** | `time_exhausted` | 📋 v1.2.0 |
-| **Dollar cost exceeded** | `cost_exhausted` | 📋 v1.2.0 |
-| **Verifier escalated to human** | `needs_human` | 📋 v1.2.0 |
-| **Review panel failed** (post-convergence) | re-opens loop | 📋 v1.3.0 |
+| **No-progress stall** (N fruitless turns) | `stalled` | ✅ v1.2.0 |
+| **Wall-clock time exceeded** | `time_limit_reached` | ✅ v1.2.0 |
+| **Dollar cost exceeded** | `cost_limit_reached` | ✅ v1.2.0 |
+| **Verifier escalated to human** | `needs_human` | ✅ v1.2.0 |
+| **Review panel failed** (post-convergence) | re-opens loop | ✅ v1.3.0 |
 
-> Sources: `awesome-loop-engineering/engine.py` (stall + escalate), `jonny981/loops/loop.ts`
-> (review panel). See `docs/SPRINT44-PLAN.md` and `docs/SPRINT45-PLAN.md`.
+## Shipped Components (Sprints 44–45)
 
-## Planned Components (Sprints 44–45)
+### StallBrake (`internal/loop/brake.go`) — v1.2.0 ✅
+Ring buffer of `sha256(action)[0:8]` hashes. `Record(action) bool` returns true after
+`patience` consecutive identical hashes. `Reset()` called after successful persist.
+Pure: no wall-clock inside logic.
 
-### StallBrake (`internal/loop/brake.go`) — v1.2.0
-Tracks action hashes across iterations. After N fruitless turns (no observable change),
-halts with `stalled`. Pure: no wall-clock inside logic. Policy: `stall_patience` (default 3).
+### Pricing + Cost Brake (`internal/loop/pricing.go`) — v1.2.0 ✅
+Static `provider→model→$/1K-output-token` table (14 models). `Budget.EstimatedCostUSD()`
+reports live spend. `CheckCost()` is a hard brake before each iteration.
 
-### Pricing + Cost Brake (`internal/loop/pricing.go`) — v1.2.0
-Static `provider→model→$/1K-token` table. `Budget.EstimatedCostUSD()` reports live spend.
-`MaxCostUSD` is a hard brake enforced before each iteration.
+### Escalate / Inbox (`internal/loop/verifier.go` + `cycle.go`) — v1.2.0 ✅
+`VerifyResult.Escalate bool` stops loop with `needs_human` and writes
+`.radiant-harness/inbox/<id>.json`. `ListInboxItems()` / `ResolveInboxItem()` power
+`radiant loop review`.
 
-### Escalate / Inbox (`internal/loop/verifier.go` + cycle) — v1.2.0
-`VerifyResult.Escalate bool` signals the loop to stop with `needs_human` and write the
-finding to `.radiant-harness/inbox/<id>.json`. `radiant loop review` lists/resolves items.
+### Review Panel (`internal/loop/review.go`) — v1.3.0 ✅
+Post-convergence second layer. `BuildReviewPrompt` threads `lastFindings` from prior
+failed review. `ParseReviewResponse` returns `ReviewResult{Pass, Score, Findings}`.
+`MaxRestarts` (default 3) caps standoff independently of `MaxIter`.
 
-### Review Panel (`internal/loop/review.go`) — v1.3.0
-Post-convergence second layer. Runs after `verifier` passes. A fail re-opens the loop
-body with `lastReview` findings threaded as context. Capped by `MaxRestarts` (default 3),
-independent of `MaxIter`. Pattern from `jonny981/loops:config.review()`.
+### Quorum Verifier (`internal/loop/review.go`) — v1.3.0 ✅
+`RunQuorum(QuorumConfig{K,N}, []VerifyResult) QuorumResult`. K must pass from N.
+Confidence = mean score of passing judges. `VerifierConfig.Quorum` wires it in.
 
-### Quorum Verifier — v1.3.0
-N parallel judge goroutines; K must pass. A goroutine that errors counts as "no."
-Confidence = mean of passing judges. Prevents a single biased model from rubber-stamping.
+### Geometric-Mean per Dimension (`internal/loop/review.go`) — v1.3.0 ✅
+`VerifyDimension{Name, Score}`. `GeometricMean([]VerifyDimension)`: any zero → 0.
+`VerifyResult.Dimensions []VerifyDimension` for per-axis breakdown.
 
-### Commit-Log Grounding (`internal/loop/ground.go`) — v1.3.0
-`GroundingBlock()` injects recent branch commits into each iteration's prompt.
-Prevents the agent from re-walking dead ends across fresh-context turns.
-Pattern from `jonny981/loops:ground.ts:groundingText()`.
+### Commit-Log Grounding (`internal/loop/ground.go`) — v1.3.0 ✅
+`GroundingBlock(repoDir, maxCommits)`: recent branch commits as markdown block.
+Bodies truncated to 400 chars. Returns `("", nil)` cleanly when git unavailable.
 
 ## Example Run
 
