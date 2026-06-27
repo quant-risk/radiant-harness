@@ -13,37 +13,43 @@ import (
 type Phase string
 
 const (
-	PhaseIdle     Phase = "idle"
-	PhaseDiscover Phase = "discover"
-	PhasePlan     Phase = "plan"
-	PhaseExecute  Phase = "execute"
-	PhaseVerify   Phase = "verify"
-	PhasePersist  Phase = "persist"
-	PhaseDone     Phase = "done"
-	PhaseFailed   Phase = "failed"
+	PhaseIdle           Phase = "idle"
+	PhaseDiscover       Phase = "discover"
+	PhasePlan           Phase = "plan"
+	PhaseExecute        Phase = "execute"
+	PhaseVerify         Phase = "verify"
+	PhasePersist        Phase = "persist"
+	PhaseDone           Phase = "done"
+	PhaseFailed         Phase = "failed"
+	PhaseAwaitingHuman  Phase = "awaiting_human"
 )
 
 // validTransitions is the state machine — only listed transitions are allowed.
 var validTransitions = map[Phase][]Phase{
-	PhaseIdle:     {PhaseDiscover},
-	PhaseDiscover: {PhasePlan, PhaseFailed},
-	PhasePlan:     {PhaseExecute, PhaseFailed},
-	PhaseExecute:  {PhaseVerify, PhaseFailed},
-	PhaseVerify:   {PhasePersist, PhaseExecute, PhaseFailed}, // PhaseExecute = retry
-	PhasePersist:  {PhaseDone, PhaseDiscover},                // PhaseDiscover = next iter
-	PhaseDone:     {PhaseIdle},
-	PhaseFailed:   {PhaseIdle, PhaseDiscover},
+	PhaseIdle:          {PhaseDiscover},
+	PhaseDiscover:      {PhasePlan, PhaseFailed},
+	PhasePlan:          {PhaseExecute, PhaseFailed},
+	PhaseExecute:       {PhaseVerify, PhaseFailed},
+	PhaseVerify:        {PhasePersist, PhaseExecute, PhaseAwaitingHuman, PhaseFailed},
+	PhasePersist:       {PhaseDone, PhaseDiscover},
+	PhaseDone:          {PhaseIdle},
+	PhaseFailed:        {PhaseIdle, PhaseDiscover},
+	PhaseAwaitingHuman: {PhaseExecute, PhaseFailed}, // resume after human reviews inbox
 }
 
 // ExitReason describes why a loop terminated.
 type ExitReason string
 
 const (
-	ExitSuccess  ExitReason = "success"
-	ExitBudget   ExitReason = "budget_exhausted"
-	ExitMaxIter  ExitReason = "max_iterations"
-	ExitCritical ExitReason = "critical_failure"
-	ExitCanceled ExitReason = "canceled"
+	ExitSuccess          ExitReason = "success"
+	ExitBudget           ExitReason = "budget_exhausted"
+	ExitMaxIter          ExitReason = "max_iterations"
+	ExitCritical         ExitReason = "critical_failure"
+	ExitCanceled         ExitReason = "canceled"
+	ExitNeedsHuman       ExitReason = "needs_human"       // verifier escalated
+	ExitStalled          ExitReason = "stalled"           // no-progress brake
+	ExitTimeLimitReached ExitReason = "time_limit_reached" // wall-clock brake
+	ExitCostLimitReached ExitReason = "cost_limit_reached" // dollar brake
 )
 
 // LoopState is the persisted state of a running or completed loop.
@@ -241,6 +247,89 @@ func (c *Cycle) persistLocked() error {
 	}
 	tmp.Close()
 	return os.Rename(tmpName, c.statePath)
+}
+
+// InboxItem is a human-review request written when the verifier escalates.
+type InboxItem struct {
+	ID        string    `json:"id"`
+	RunID     string    `json:"run_id"`
+	Goal      string    `json:"goal"`
+	Phase     Phase     `json:"phase"`
+	Iteration int       `json:"iteration"`
+	Evidence  string    `json:"evidence"`
+	Issues    []string  `json:"issues"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// WriteInboxItem persists an escalated verifier result to the inbox directory.
+// The file is named <id>.json and lives in .radiant-harness/inbox/.
+// Returns the item ID (usable with `radiant loop review --approve <id>`).
+func (c *Cycle) WriteInboxItem(result VerifyResult) (string, error) {
+	c.mu.Lock()
+	state := c.state
+	c.mu.Unlock()
+
+	id := fmt.Sprintf("%s-iter%d", state.RunID, state.Iteration)
+	item := InboxItem{
+		ID:        id,
+		RunID:     state.RunID,
+		Goal:      state.Goal,
+		Phase:     state.Phase,
+		Iteration: state.Iteration,
+		Evidence:  result.Evidence,
+		Issues:    result.Issues,
+		CreatedAt: time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(item, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal inbox item: %w", err)
+	}
+	dir := filepath.Join(c.projectDir, ".radiant-harness", "inbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir inbox: %w", err)
+	}
+	path := filepath.Join(dir, id+".json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("write inbox item: %w", err)
+	}
+	return id, nil
+}
+
+// ListInboxItems returns all pending human-review items from the inbox directory.
+func ListInboxItems(projectDir string) ([]InboxItem, error) {
+	dir := filepath.Join(projectDir, ".radiant-harness", "inbox")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var items []InboxItem
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var item InboxItem
+		if err := json.Unmarshal(data, &item); err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// ResolveInboxItem removes an inbox item after human review (approve or reject).
+func ResolveInboxItem(projectDir, id string) error {
+	path := filepath.Join(projectDir, ".radiant-harness", "inbox", id+".json")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove inbox item %s: %w", id, err)
+	}
+	return nil
 }
 
 // isValidTransition returns true if the transition from → to is allowed.

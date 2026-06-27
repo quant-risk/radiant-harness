@@ -59,15 +59,19 @@ func (s BudgetStatus) String() string {
 	}
 }
 
-// Budget tracks token and iteration consumption for a loop run.
+// Budget tracks token, iteration, time, and cost consumption for a loop run.
 // All methods are safe for concurrent use.
 type Budget struct {
 	mu          sync.Mutex
 	maxTokens   int
 	maxIter     int
 	warnRatio   float64
+	maxDuration time.Duration
+	maxCostUSD  float64
+	costPer1K   float64
 	usedTokens  int
 	usedIter    int
+	startedAt   time.Time
 	phaseTokens map[Phase]int // tokens consumed per phase
 }
 
@@ -81,6 +85,13 @@ type BudgetConfig struct {
 	WarnRatio float64
 	// Profile is a named preset — overrides MaxTokens if MaxTokens is 0.
 	Profile BudgetProfile
+	// MaxDuration is the wall-clock time limit per run. Zero means unlimited.
+	MaxDuration time.Duration
+	// MaxCostUSD is the dollar ceiling for the run. Zero means unlimited.
+	MaxCostUSD float64
+	// CostPer1K is the provider's output-token price per 1K tokens (USD).
+	// Used to compute EstimatedCostUSD. Zero disables cost tracking.
+	CostPer1K float64
 }
 
 // NewBudget creates a Budget from a BudgetConfig.
@@ -103,8 +114,56 @@ func NewBudget(cfg BudgetConfig) *Budget {
 		maxTokens:   maxTokens,
 		maxIter:     maxIter,
 		warnRatio:   warnRatio,
+		maxDuration: cfg.MaxDuration,
+		maxCostUSD:  cfg.MaxCostUSD,
+		costPer1K:   cfg.CostPer1K,
+		startedAt:   time.Now().UTC(),
 		phaseTokens: map[Phase]int{},
 	}
+}
+
+// CheckTime returns ExitTimeLimit if wall-clock elapsed >= MaxDuration.
+// now is injected so the check is pure and testable.
+func (b *Budget) CheckTime(now time.Time) (exceeded bool, elapsed time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.maxDuration <= 0 {
+		return false, 0
+	}
+	elapsed = now.Sub(b.startedAt)
+	return elapsed >= b.maxDuration, elapsed
+}
+
+// EstimatedCostUSD returns the current estimated cost in USD.
+// Returns 0 if CostPer1K is not set.
+func (b *Budget) EstimatedCostUSD() float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.costPer1K <= 0 {
+		return 0
+	}
+	return float64(b.usedTokens) / 1000.0 * b.costPer1K
+}
+
+// CheckCost returns true if estimated cost >= MaxCostUSD.
+func (b *Budget) CheckCost() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.maxCostUSD <= 0 || b.costPer1K <= 0 {
+		return false
+	}
+	cost := float64(b.usedTokens) / 1000.0 * b.costPer1K
+	return cost >= b.maxCostUSD
+}
+
+// MaxDuration returns the configured time limit.
+func (b *Budget) MaxDuration() time.Duration {
+	return b.maxDuration
+}
+
+// MaxCostUSD returns the configured dollar ceiling.
+func (b *Budget) MaxCostUSD() float64 {
+	return b.maxCostUSD
 }
 
 // Consume records token usage. phase may be PhaseUnknown.
@@ -193,15 +252,26 @@ func (b *Budget) Summary() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	var s string
 	if b.maxTokens > 0 {
 		pct := float64(b.usedTokens) / float64(b.maxTokens) * 100
-		return fmt.Sprintf("tokens %d/%d (%.0f%%) | iter %d/%d | status: %s",
+		s = fmt.Sprintf("tokens %d/%d (%.0f%%) | iter %d/%d | status: %s",
 			b.usedTokens, b.maxTokens, pct,
 			b.usedIter, b.maxIter,
 			b.statusLocked())
+	} else {
+		s = fmt.Sprintf("tokens %d/∞ | iter %d/%d | status: %s",
+			b.usedTokens, b.usedIter, b.maxIter, b.statusLocked())
 	}
-	return fmt.Sprintf("tokens %d/∞ | iter %d/%d | status: %s",
-		b.usedTokens, b.usedIter, b.maxIter, b.statusLocked())
+	if b.costPer1K > 0 {
+		cost := float64(b.usedTokens) / 1000.0 * b.costPer1K
+		if b.maxCostUSD > 0 {
+			s += fmt.Sprintf(" | cost $%.4f/$%.2f", cost, b.maxCostUSD)
+		} else {
+			s += fmt.Sprintf(" | cost $%.4f", cost)
+		}
+	}
+	return s
 }
 
 // PhaseBreakdown returns tokens consumed per phase.
@@ -217,13 +287,16 @@ func (b *Budget) PhaseBreakdown() map[Phase]int {
 
 // Snapshot is a point-in-time copy of budget state (for persistence).
 type Snapshot struct {
-	MaxTokens   int            `json:"max_tokens"`
-	MaxIter     int            `json:"max_iter"`
-	UsedTokens  int            `json:"used_tokens"`
-	UsedIter    int            `json:"used_iter"`
-	PhaseTokens map[string]int `json:"phase_tokens"`
-	Status      string         `json:"status"`
-	CapturedAt  time.Time      `json:"captured_at"`
+	MaxTokens        int            `json:"max_tokens"`
+	MaxIter          int            `json:"max_iter"`
+	MaxDurationSec   float64        `json:"max_duration_sec,omitempty"`
+	MaxCostUSD       float64        `json:"max_cost_usd,omitempty"`
+	UsedTokens       int            `json:"used_tokens"`
+	UsedIter         int            `json:"used_iter"`
+	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
+	PhaseTokens      map[string]int `json:"phase_tokens"`
+	Status           string         `json:"status"`
+	CapturedAt       time.Time      `json:"captured_at"`
 }
 
 // Snapshot returns a point-in-time copy for JSON persistence.
@@ -234,13 +307,24 @@ func (b *Budget) Snapshot() Snapshot {
 	for k, v := range b.phaseTokens {
 		pt[string(k)] = v
 	}
+	var estimatedCost float64
+	if b.costPer1K > 0 {
+		estimatedCost = float64(b.usedTokens) / 1000.0 * b.costPer1K
+	}
+	var maxDurSec float64
+	if b.maxDuration > 0 {
+		maxDurSec = b.maxDuration.Seconds()
+	}
 	return Snapshot{
-		MaxTokens:   b.maxTokens,
-		MaxIter:     b.maxIter,
-		UsedTokens:  b.usedTokens,
-		UsedIter:    b.usedIter,
-		PhaseTokens: pt,
-		Status:      b.statusLocked().String(),
-		CapturedAt:  time.Now().UTC(),
+		MaxTokens:        b.maxTokens,
+		MaxIter:          b.maxIter,
+		MaxDurationSec:   maxDurSec,
+		MaxCostUSD:       b.maxCostUSD,
+		UsedTokens:       b.usedTokens,
+		UsedIter:         b.usedIter,
+		EstimatedCostUSD: estimatedCost,
+		PhaseTokens:      pt,
+		Status:           b.statusLocked().String(),
+		CapturedAt:       time.Now().UTC(),
 	}
 }

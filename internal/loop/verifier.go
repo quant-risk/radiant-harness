@@ -13,6 +13,11 @@ type VerifyResult struct {
 	Evidence  string   // summary evidence for the verdict
 	TokensIn  int      // tokens used for verification prompt
 	TokensOut int      // tokens used for verification response
+	// Escalate signals that this result requires human review and the loop
+	// should stop with ExitNeedsHuman instead of retrying. The verifier
+	// sets this when the situation is genuinely ambiguous or risky — not
+	// a simple implementation bug the executor can fix on retry.
+	Escalate bool
 }
 
 // VerifierConfig controls adversarial verification behavior.
@@ -72,10 +77,23 @@ Your task:
 4. Check: do tests exist and do they actually verify the goal (not just pass trivially)?
 %s%s
 
+ANTI-CHEAT CHECKS (verify all before approving):
+- No test was deleted, commented out, or had its assertion weakened
+- No function was left as a stub or placeholder
+- Scope is unchanged from the original goal (no unrelated changes snuck in)
+- No gate or threshold was widened just to make a check pass
+If any of these are violated, you MUST set ESCALATE: true.
+
+ESCALATE (set to true if the situation requires human review):
+- The problem is genuinely ambiguous and retrying will not resolve it
+- A security or data-integrity concern requires human judgment
+- An anti-cheat violation was detected (see above)
+
 Respond with EXACTLY this format:
 VERDICT: [APPROVED|REJECTED]
 SCORE: [0.0-1.0]
 EVIDENCE: [one sentence citing specific proof]
+ESCALATE: [true|false]
 ISSUES:
 - [issue 1, if any]
 - [issue 2, if any]`,
@@ -111,6 +129,11 @@ func ParseVerifyResponse(response string, cfg VerifierConfig) VerifyResult {
 
 		case strings.HasPrefix(line, "EVIDENCE:"):
 			result.Evidence = strings.TrimSpace(strings.TrimPrefix(line, "EVIDENCE:"))
+			inIssues = false
+
+		case strings.HasPrefix(line, "ESCALATE:"):
+			val := strings.TrimSpace(strings.TrimPrefix(line, "ESCALATE:"))
+			result.Escalate = strings.EqualFold(val, "true")
 			inIssues = false
 
 		case strings.HasPrefix(line, "ISSUES:"):
