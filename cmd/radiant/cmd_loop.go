@@ -38,6 +38,7 @@ func registerLoopCmds(root *cobra.Command) {
 			maxCost, _ := cmd.Flags().GetFloat64("max-cost")
 			modelID, _ := cmd.Flags().GetString("model")
 			verifierModelID, _ := cmd.Flags().GetString("verifier-model")
+			plannerModelID, _ := cmd.Flags().GetString("planner-model")
 			baseURL, _ := cmd.Flags().GetString("base-url")
 			stall, _ := cmd.Flags().GetInt("stall-patience")
 			quorumK, _ := cmd.Flags().GetInt("quorum-k")
@@ -46,6 +47,7 @@ func registerLoopCmds(root *cobra.Command) {
 			reviewRestarts, _ := cmd.Flags().GetInt("review-restarts")
 			contextBudget, _ := cmd.Flags().GetInt("context-budget")
 			stream, _ := cmd.Flags().GetBool("stream")
+			plan, _ := cmd.Flags().GetBool("plan")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			// Resolve API key from env (vendor-neutral order).
@@ -69,6 +71,10 @@ func registerLoopCmds(root *cobra.Command) {
 
 			execModel := llm.Model{Model: modelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
 			verModel := llm.Model{Model: verifierModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+			if plannerModelID == "" {
+				plannerModelID = modelID
+			}
+			planModel := llm.Model{Model: plannerModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
 
 			// Resolve cost-per-1K from model pricing table.
 			costPer1K, _ := loop.PriceFor(modelID)
@@ -80,6 +86,7 @@ func registerLoopCmds(root *cobra.Command) {
 			runCfg := loop.RunConfig{
 				ExecutorModel: execModel,
 				VerifierModel: verModel,
+				PlannerModel:  planModel,
 				Budget: loop.BudgetConfig{
 					MaxTokens:   budget,
 					MaxIter:     maxIter,
@@ -94,9 +101,10 @@ func registerLoopCmds(root *cobra.Command) {
 				},
 				Review:              loop.ReviewPanel{MaxRestarts: reviewRestarts},
 				Ground:              ground,
-				MaxGroundCommits:    0, // use GroundingBlock default (10)
+				MaxGroundCommits:    0,
 				ContextBudgetTokens: contextBudget,
 				Stream:              stream,
+				Plan:                plan,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -163,6 +171,8 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().Bool("dry-run", false, "Register goal and print config without calling any LLM")
 	loopStartCmd.Flags().Int("context-budget", 0, "Inject assembled CONTEXT.md into executor prompt (tokens cap, e.g. 6000). 0 = disabled")
 	loopStartCmd.Flags().Bool("stream", false, "Stream executor output to stdout chunk by chunk (verifier stays non-streaming)")
+	loopStartCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal before each executor call")
+	loopStartCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model; a cheaper model like haiku is often sufficient)")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",
@@ -199,7 +209,9 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 
 			modelID, _ := cmd.Flags().GetString("model")
 			verifierModelID, _ := cmd.Flags().GetString("verifier-model")
+			plannerModelID, _ := cmd.Flags().GetString("planner-model")
 			baseURL, _ := cmd.Flags().GetString("base-url")
+			plan, _ := cmd.Flags().GetBool("plan")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
@@ -218,9 +230,13 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 			if verifierModelID == "" {
 				verifierModelID = modelID
 			}
+			if plannerModelID == "" {
+				plannerModelID = modelID
+			}
 
 			execModel := llm.Model{Model: modelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
 			verModel := llm.Model{Model: verifierModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+			planModel := llm.Model{Model: plannerModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
 			costPer1K, _ := loop.PriceFor(modelID)
 
 			// Restore budget config from persisted snapshot.
@@ -228,12 +244,14 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 			runCfg := loop.RunConfig{
 				ExecutorModel: execModel,
 				VerifierModel: verModel,
+				PlannerModel:  planModel,
 				Budget: loop.BudgetConfig{
 					MaxTokens:  snap.MaxTokens,
 					MaxIter:    state.MaxIter,
 					MaxCostUSD: snap.MaxCostUSD,
 					CostPer1K:  costPer1K,
 				},
+				Plan: plan,
 			}
 
 			fmt.Printf("✓ Resuming loop %s\n", state.RunID)
@@ -268,7 +286,9 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 	}
 	loopResumeCmd.Flags().String("model", "", "Model ID for the resumed run (default = claude-sonnet-4-6)")
 	loopResumeCmd.Flags().String("verifier-model", "", "Separate model for verification")
+	loopResumeCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model)")
 	loopResumeCmd.Flags().String("base-url", "", "Override LLM base URL")
+	loopResumeCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal")
 	loopResumeCmd.Flags().Bool("dry-run", false, "Inspect persisted state without calling any LLM")
 
 	loopScheduleCmd := &cobra.Command{

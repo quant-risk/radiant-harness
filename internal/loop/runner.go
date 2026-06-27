@@ -60,6 +60,15 @@ type RunConfig struct {
 	// StreamOut is the writer for streamed executor chunks. Defaults to os.Stdout.
 	// Set to a custom writer in tests to capture output without printing.
 	StreamOut StreamWriter
+
+	// Plan — when true, the Plan phase calls the LLM to decompose the goal
+	// into a step-by-step plan before each executor call. The plan is injected
+	// into the executor prompt as context. Disabled by default (lightweight mode).
+	Plan bool
+
+	// PlannerModel is the LLM used for planning. Zero value → falls back to
+	// ExecutorModel. A cheaper/faster model (e.g. haiku) is often sufficient.
+	PlannerModel llm.Model
 }
 
 // StreamWriter is the interface for streaming output — satisfied by *os.File,
@@ -130,6 +139,11 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		verModel = cfg.ExecutorModel
 	}
 	verClient := llm.NewClient(verModel)
+	planModel := cfg.PlannerModel
+	if planModel.Model == "" {
+		planModel = cfg.ExecutorModel
+	}
+	planClient := llm.NewClient(planModel)
 
 	// Verifier config defaults.
 	verCfg := cfg.Verifier
@@ -173,7 +187,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			return buildResult(runID, goal, ExitCanceled, c, b, started), nil
 		}
 
-		// ── Discover / Plan (lightweight — no LLM call needed) ──────────
+		// ── Discover / Plan ──────────────────────────────────────────────
 		// Skip discover transition if already in discover (first iteration after startup).
 		if c.State().Phase != PhaseDiscover {
 			if err := c.Transition(PhaseDiscover, fmt.Sprintf("iter %d", c.State().Iteration+1)); err != nil {
@@ -182,6 +196,22 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 		if err := c.Transition(PhasePlan, "planning"); err != nil {
 			return nil, err
+		}
+
+		// Optional LLM-based planning: decompose the goal before execution.
+		// Only runs on iteration 0 (fresh start) or when cfg.Plan is enabled
+		// and there is no prior verifier feedback to act on directly.
+		var planOutput string
+		if cfg.Plan && len(lastReviewFindings) == 0 {
+			planPrompt := BuildPlannerPrompt(goal, c.State().Iteration)
+			planResp, planErr := planClient.SimpleChat(ctx, plannerSystemPrompt(), planPrompt)
+			planToks := estimateTokens(planPrompt, planResp)
+			traceCall(tr, runID, PhasePlan, "planner", planModel.Model, planPrompt, planResp, planToks, planErr)
+			if planErr == nil {
+				b.Consume(planToks, PhasePlan)
+				planOutput = planResp
+			}
+			// Fail-open: if planner errors, continue without a plan.
 		}
 
 		// ── Execute ──────────────────────────────────────────────────────
@@ -196,7 +226,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			}
 		}
 
-		execPrompt := buildExecutorPrompt(goal, groundBlock, lastReviewFindings)
+		execPrompt := buildExecutorPrompt(goal, groundBlock, planOutput, lastReviewFindings)
 		var execOutput string
 		var execErr error
 		if cfg.Stream {
@@ -380,7 +410,7 @@ Score honestly. Flag regressions. Follow the format exactly.`
 }
 
 // buildExecutorPrompt assembles the executor's user prompt for this iteration.
-func buildExecutorPrompt(goal, groundBlock string, priorReviewFindings []string) string {
+func buildExecutorPrompt(goal, groundBlock, planOutput string, priorReviewFindings []string) string {
 	var sb strings.Builder
 	if groundBlock != "" {
 		sb.WriteString(groundBlock)
@@ -388,6 +418,10 @@ func buildExecutorPrompt(goal, groundBlock string, priorReviewFindings []string)
 	}
 	sb.WriteString("GOAL:\n")
 	sb.WriteString(goal)
+	if planOutput != "" {
+		sb.WriteString("\n\nPLAN:\n")
+		sb.WriteString(planOutput)
+	}
 	if len(priorReviewFindings) > 0 {
 		sb.WriteString("\n\nPRIOR REVIEW FINDINGS TO ADDRESS:\n")
 		for _, f := range priorReviewFindings {
@@ -397,6 +431,26 @@ func buildExecutorPrompt(goal, groundBlock string, priorReviewFindings []string)
 		}
 	}
 	return sb.String()
+}
+
+// BuildPlannerPrompt assembles the planner's user prompt.
+// Exported so tests can inspect its structure without calling the LLM.
+func BuildPlannerPrompt(goal string, iteration int) string {
+	var sb strings.Builder
+	sb.WriteString("GOAL:\n")
+	sb.WriteString(goal)
+	if iteration > 0 {
+		fmt.Fprintf(&sb, "\n\nThis is iteration %d. Prior attempts did not satisfy the verifier.", iteration)
+		sb.WriteString("\nDecompose the goal into concrete steps that address likely gaps.")
+	}
+	return sb.String()
+}
+
+func plannerSystemPrompt() string {
+	return `You are a software planning assistant. Your job is to decompose a goal
+into a numbered list of concrete implementation steps. Be specific and actionable.
+Do not implement — only plan. Output a numbered list, one step per line.
+Keep it under 10 steps. Focus on what the executor needs to do next.`
 }
 
 // simpleChatStream calls ChatStream and writes each chunk to w, returning the

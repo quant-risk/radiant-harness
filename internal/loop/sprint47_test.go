@@ -98,7 +98,7 @@ func TestStallBrakeResetClearsState(t *testing.T) {
 // ── buildExecutorPrompt ───────────────────────────────────────────────────────
 
 func TestBuildExecutorPromptGoalOnly(t *testing.T) {
-	out := buildExecutorPrompt("fix the bug", "", nil)
+	out := buildExecutorPrompt("fix the bug", "", "", nil)
 	if !strings.Contains(out, "fix the bug") {
 		t.Fatal("goal missing from prompt")
 	}
@@ -108,7 +108,7 @@ func TestBuildExecutorPromptGoalOnly(t *testing.T) {
 }
 
 func TestBuildExecutorPromptWithGround(t *testing.T) {
-	out := buildExecutorPrompt("fix the bug", "## Grounding\n- commit abc", nil)
+	out := buildExecutorPrompt("fix the bug", "## Grounding\n- commit abc", "", nil)
 	if !strings.Contains(out, "commit abc") {
 		t.Fatal("grounding block missing")
 	}
@@ -116,7 +116,7 @@ func TestBuildExecutorPromptWithGround(t *testing.T) {
 
 func TestBuildExecutorPromptWithFindings(t *testing.T) {
 	findings := []string{"missing test", "wrong return type"}
-	out := buildExecutorPrompt("fix the bug", "", findings)
+	out := buildExecutorPrompt("fix the bug", "", "", findings)
 	if !strings.Contains(out, "missing test") {
 		t.Fatal("finding 1 missing")
 	}
@@ -126,14 +126,14 @@ func TestBuildExecutorPromptWithFindings(t *testing.T) {
 }
 
 func TestBuildExecutorPromptNoFindingsSection(t *testing.T) {
-	out := buildExecutorPrompt("goal", "", nil)
+	out := buildExecutorPrompt("goal", "", "", nil)
 	if strings.Contains(out, "PRIOR REVIEW") {
 		t.Fatal("unexpected review section when findings is nil")
 	}
 }
 
 func TestBuildExecutorPromptEmptyFindingsNoSection(t *testing.T) {
-	out := buildExecutorPrompt("goal", "", []string{})
+	out := buildExecutorPrompt("goal", "", "", []string{})
 	if strings.Contains(out, "PRIOR REVIEW") {
 		t.Fatal("unexpected review section when findings is empty")
 	}

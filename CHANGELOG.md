@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-06-27 — LLM Planning no loop (Sprint 55)
+
+19/19 packages green. 144 testes no loop package (↑11).
+
+### Added — `internal/loop/runner.go`
+- `RunConfig.Plan bool` — habilita LLM planning na fase Plan (opt-in, default false)
+- `RunConfig.PlannerModel llm.Model` — modelo separado para planner (zero → ExecutorModel)
+- `BuildPlannerPrompt(goal string, iteration int) string` — prompt do planner, exportado
+- `plannerSystemPrompt()` — instrui o LLM a decompor o goal em ≤10 passos numerados
+- `buildExecutorPrompt` — nova assinatura com `planOutput string`; injeta bloco PLAN: antes de PRIOR REVIEW
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `--plan` flag em `loopStartCmd` e `loopResumeCmd`
+- `--planner-model` flag em `loopStartCmd` e `loopResumeCmd`
+
+### Fixed
+- `sprint47_test.go` — 5 calls a `buildExecutorPrompt` atualizadas para nova assinatura
+
+---
+
 ## [2.2.0] — 2026-06-27 — helpers.go extraction (Sprint 54)
 
 19/19 packages green. 651 testes.
