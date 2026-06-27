@@ -2167,63 +2167,109 @@ and the loop command to start autonomous work. Run this first in any session.`,
 			maxTime, _ := cmd.Flags().GetDuration("max-time")
 			maxCost, _ := cmd.Flags().GetFloat64("max-cost")
 			modelID, _ := cmd.Flags().GetString("model")
+			verifierModelID, _ := cmd.Flags().GetString("verifier-model")
+			baseURL, _ := cmd.Flags().GetString("base-url")
 			stall, _ := cmd.Flags().GetInt("stall-patience")
 			quorumK, _ := cmd.Flags().GetInt("quorum-k")
 			quorumN, _ := cmd.Flags().GetInt("quorum-n")
 			ground, _ := cmd.Flags().GetBool("ground")
 			reviewRestarts, _ := cmd.Flags().GetInt("review-restarts")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-			// Resolve cost-per-1K from model pricing table if model is known.
+			// Resolve API key from env (vendor-neutral order).
+			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
+			if apiKey == "" && !dryRun {
+				return fmt.Errorf(
+					"no LLM API key found — set one of: OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY\n" +
+						"  or use --dry-run to register the goal without calling an LLM")
+			}
+
+			// Resolve model: flag > env > provider default.
+			if modelID == "" {
+				modelID = os.Getenv("RADIANT_MODEL")
+			}
+			if modelID == "" {
+				modelID = "claude-sonnet-4-6"
+			}
+			if verifierModelID == "" {
+				verifierModelID = modelID
+			}
+
+			execModel := llm.Model{Model: modelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+			verModel := llm.Model{Model: verifierModelID, APIKey: apiKey, BaseURL: resolvedBaseURL}
+
+			// Resolve cost-per-1K from model pricing table.
 			costPer1K, _ := loop.PriceFor(modelID)
 
-			cfg := loop.BudgetConfig{
-				MaxTokens:   budget,
-				MaxIter:     maxIter,
-				Profile:     loop.BudgetProfile(profile),
-				MaxDuration: maxTime,
-				MaxCostUSD:  maxCost,
-				CostPer1K:   costPer1K,
-			}
-			b := loop.NewBudget(cfg)
-			c := loop.NewCycle(cwd, runID, goal, b)
-
-			_, err := loop.NewTracer(cwd, runID)
-			if err != nil {
-				return fmt.Errorf("init tracer: %w", err)
+			if quorumN == 0 && quorumK > 0 {
+				quorumN = quorumK + 1
 			}
 
-			if err := c.Transition(loop.PhaseDiscover, "loop started"); err != nil {
-				return err
+			runCfg := loop.RunConfig{
+				ExecutorModel: execModel,
+				VerifierModel: verModel,
+				Budget: loop.BudgetConfig{
+					MaxTokens:   budget,
+					MaxIter:     maxIter,
+					Profile:     loop.BudgetProfile(profile),
+					MaxDuration: maxTime,
+					MaxCostUSD:  maxCost,
+					CostPer1K:   costPer1K,
+				},
+				StallPatience: stall,
+				Verifier: loop.VerifierConfig{
+					Quorum: loop.QuorumConfig{K: quorumK, N: quorumN},
+				},
+				Review:           loop.ReviewPanel{MaxRestarts: reviewRestarts},
+				Ground:           ground,
+				MaxGroundCommits: 0, // use GroundingBlock default (10)
 			}
 
-			fmt.Printf("✓ Loop started\n")
-			fmt.Printf("  Run ID: %s\n", runID)
-			fmt.Printf("  Goal:   %s\n", goal)
-			fmt.Printf("  Budget: %s\n", b.Summary())
+			fmt.Printf("✓ Loop starting\n")
+			fmt.Printf("  Run ID:  %s\n", runID)
+			fmt.Printf("  Goal:    %s\n", goal)
+			fmt.Printf("  Model:   %s\n", modelID)
+			if modelID != verifierModelID {
+				fmt.Printf("  Verifier: %s\n", verifierModelID)
+			}
 			if maxTime > 0 {
-				fmt.Printf("  Time limit:  %s\n", maxTime)
+				fmt.Printf("  Max time: %s\n", maxTime)
 			}
 			if maxCost > 0 {
-				fmt.Printf("  Cost limit:  $%.2f\n", maxCost)
+				fmt.Printf("  Max cost: $%.2f\n", maxCost)
 			}
 			if stall > 0 {
-				fmt.Printf("  Stall brake: %d fruitless turns\n", stall)
+				fmt.Printf("  Stall brake: %d identical outputs\n", stall)
 			}
 			if quorumK > 0 {
-				n := quorumN
-				if n <= 0 {
-					n = quorumK + 1
-				}
-				fmt.Printf("  Quorum:      %d-of-%d judges\n", quorumK, n)
+				fmt.Printf("  Quorum: %d-of-%d judges\n", quorumK, quorumN)
 			}
 			if ground {
-				fmt.Printf("  Grounding:   commit-log injection enabled\n")
+				fmt.Printf("  Grounding: enabled\n")
 			}
-			if reviewRestarts > 0 {
-				fmt.Printf("  Review panel: max %d restarts\n", reviewRestarts)
+			fmt.Println()
+
+			if dryRun {
+				fmt.Println("(dry-run: goal registered, no LLM calls made)")
+				return nil
 			}
-			fmt.Printf("\nNext: `radiant loop status` to check progress\n")
-			fmt.Printf("      `radiant trace show %s` to view reasoning trace\n", runID)
+
+			result, err := loop.Run(context.Background(), cwd, runID, goal, runCfg)
+			if err != nil {
+				return fmt.Errorf("loop: %w", err)
+			}
+
+			fmt.Printf("✓ Loop finished\n")
+			fmt.Printf("  Exit:       %s\n", result.ExitReason)
+			fmt.Printf("  Iterations: %d\n", result.Iterations)
+			fmt.Printf("  Elapsed:    %s\n", result.Elapsed.Round(time.Second))
+			fmt.Printf("  Tokens:     %d\n", result.TokensUsed)
+			if result.CostUSD > 0 {
+				fmt.Printf("  Cost:       $%.4f\n", result.CostUSD)
+			}
+			if result.ExitReason == loop.ExitNeedsHuman {
+				fmt.Printf("\nAction required: radiant loop review\n")
+			}
 			return nil
 		},
 	}
@@ -2238,6 +2284,9 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	loopStartCmd.Flags().Int("quorum-n", 0, "Total judges for quorum (default = quorum-k+1)")
 	loopStartCmd.Flags().Bool("ground", false, "Inject recent commit log into each iteration prompt")
 	loopStartCmd.Flags().Int("review-restarts", 0, "Post-convergence review panel max restarts (0 = default 3)")
+	loopStartCmd.Flags().String("verifier-model", "", "Separate model for verification (default = same as --model)")
+	loopStartCmd.Flags().String("base-url", "", "Override LLM base URL (e.g. http://localhost:11434/v1)")
+	loopStartCmd.Flags().Bool("dry-run", false, "Register goal and print config without calling any LLM")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",
@@ -6956,4 +7005,34 @@ func truncateForDisplay(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+// resolveLoopLLMCreds returns the API key and base URL for the autonomous loop,
+// scanning env vars in vendor-neutral order (OpenRouter → OpenAI → Anthropic).
+// baseURLOverride, when non-empty, takes precedence over any derived base URL.
+func resolveLoopLLMCreds(baseURLOverride string) (apiKey, baseURL string) {
+	if baseURLOverride != "" {
+		baseURL = baseURLOverride
+	}
+	switch {
+	case os.Getenv("RADIANT_OPENROUTER_API_KEY") != "":
+		apiKey = os.Getenv("RADIANT_OPENROUTER_API_KEY")
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+	case os.Getenv("OPENROUTER_API_KEY") != "":
+		apiKey = os.Getenv("OPENROUTER_API_KEY")
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+	case os.Getenv("RADIANT_OPENAI_API_KEY") != "":
+		apiKey = os.Getenv("RADIANT_OPENAI_API_KEY")
+	case os.Getenv("OPENAI_API_KEY") != "":
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	case os.Getenv("RADIANT_ANTHROPIC_API_KEY") != "":
+		apiKey = os.Getenv("RADIANT_ANTHROPIC_API_KEY")
+	case os.Getenv("ANTHROPIC_API_KEY") != "":
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	return apiKey, baseURL
 }

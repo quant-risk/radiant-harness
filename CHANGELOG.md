@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-06-27 — Loop Runner Wiring (Sprint 48)
+
+`radiant loop start` now calls `loop.Run()` end-to-end. 19/19 packages green.
+
+### Added — `loopStartCmd` rewrite
+- Calls `loop.Run()` — autonomous loop with real LLM inference
+- `resolveLoopLLMCreds()` — vendor-neutral API key resolution (OpenRouter → OpenAI → Anthropic)
+- Model resolution: `--model` flag > `RADIANT_MODEL` env > `claude-sonnet-4-6` default
+- Prints `RunResult` on completion: exit reason, iterations, elapsed, tokens, cost
+- `ExitNeedsHuman` prompts `radiant loop review` automatically
+- `--verifier-model <id>` — separate model for verification phase
+- `--base-url <url>` — override LLM endpoint (Ollama, local proxies, etc.)
+- `--dry-run` — print config and exit without any LLM calls
+
+---
+
 ## [1.5.0] — 2026-06-27 — Loop Runner: LLM Integration (Sprint 47)
 
 Autonomous loop now calls real LLMs. 19/19 packages green. 21 new tests.
