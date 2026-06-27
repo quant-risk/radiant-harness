@@ -139,6 +139,27 @@ func Detect(projectDir string) (*DetectionResult, error) {
 	}
 	r.Signals = append(r.Signals, importSignals...)
 
+	// Phase 2b: module path scan — go.mod module line encodes project identity
+	modScores, modSignals := scanModulePath(projectDir)
+	for d, score := range modScores {
+		domainScores[d] += score
+	}
+	r.Signals = append(r.Signals, modSignals...)
+
+	// Phase 2c: docs scan — README.md / CLAUDE.md carry explicit domain intent
+	docScores, docSignals := scanDocs(projectDir)
+	for d, score := range docScores {
+		domainScores[d] += score
+	}
+	r.Signals = append(r.Signals, docSignals...)
+
+	// Phase 2d: directory name scan — top-level and internal/ dirs name the domain
+	dirScores, dirSignals := scanDirNames(projectDir)
+	for d, score := range dirScores {
+		domainScores[d] += score
+	}
+	r.Signals = append(r.Signals, dirSignals...)
+
 	// Phase 3: directory structure hints
 	tierSignals := detectTier(projectDir)
 	r.Signals = append(r.Signals, tierSignals.signals...)
@@ -318,6 +339,153 @@ func scanImports(projectDir string) (map[Domain]int, []string) {
 
 // detectActiveSpec looks for a spec directory referenced in state.md or
 // the most-recently-modified spec directory.
+// domainKeywordPatterns maps substrings to domains for use in free-text sources
+// (module paths, README, directory names). These are higher-specificity than
+// import patterns because free text is less noisy.
+var domainKeywordPatterns = map[Domain][]string{
+	DomainFinance: {
+		"quant", "trading", "fintech", "finance", "financial",
+		"credit", "portfolio", "risk-mgmt", "hedging", "actuarial",
+		"aml", "kyc", "compliance", "capital-markets", "settlement",
+		"clearing", "custody", "derivatives", "fixed-income", "equities",
+	},
+	DomainML: {
+		"ml", "machine-learning", "deep-learning", "nlp", "computer-vision",
+		"ai", "inference", "training", "model-serving", "feature-store",
+		"recommendation", "ranking", "classification", "regression",
+	},
+	DomainBlockchain: {
+		"blockchain", "defi", "nft", "smart-contract", "solidity", "web3",
+		"ethereum", "solana", "evm", "protocol",
+	},
+	DomainFrontend: {
+		"frontend", "ui", "ux", "design-system", "webapp", "spa",
+		"dashboard", "component-library",
+	},
+	DomainBackend: {
+		"backend", "api", "microservice", "grpc", "graphql", "rest-api",
+		"server", "service-mesh",
+	},
+	DomainOps: {
+		"devops", "infra", "infrastructure", "platform", "sre", "observability",
+		"monitoring", "deployment", "ci-cd", "gitops",
+	},
+	DomainSystems: {
+		"systems", "kernel", "embedded", "firmware", "driver", "runtime",
+		"allocator", "scheduler", "wasm",
+	},
+	DomainScience: {
+		"bioinformatics", "genomics", "simulation", "physics", "chemistry",
+		"quantum", "scientific",
+	},
+}
+
+// scanModulePath reads the go.mod module declaration and scores domains
+// based on keywords in the module path. Module paths encode project intent
+// explicitly (e.g. "github.com/quant-risk/..." → finance score 20).
+func scanModulePath(projectDir string) (map[Domain]int, []string) {
+	scores := map[Domain]int{}
+	var sigs []string
+
+	data, err := os.ReadFile(filepath.Join(projectDir, "go.mod"))
+	if err != nil {
+		return scores, sigs
+	}
+
+	var modulePath string
+	for _, line := range strings.SplitN(string(data), "\n", 5) {
+		if strings.HasPrefix(line, "module ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				modulePath = strings.ToLower(parts[1])
+			}
+			break
+		}
+	}
+	if modulePath == "" {
+		return scores, sigs
+	}
+
+	for domain, keywords := range domainKeywordPatterns {
+		for _, kw := range keywords {
+			if strings.Contains(modulePath, kw) {
+				scores[domain] += 20
+				sigs = appendUnique(sigs, "module:"+kw)
+				break
+			}
+		}
+	}
+	return scores, sigs
+}
+
+// scanDocs reads README.md and CLAUDE.md (up to 200 lines each) for
+// domain keywords. Documentation is the highest-signal free-text source.
+func scanDocs(projectDir string) (map[Domain]int, []string) {
+	scores := map[Domain]int{}
+	var sigs []string
+
+	candidates := []string{"README.md", "CLAUDE.md", "docs/README.md", "README.rst"}
+	for _, rel := range candidates {
+		data, err := os.ReadFile(filepath.Join(projectDir, rel))
+		if err != nil {
+			continue
+		}
+		lines := strings.SplitN(string(data), "\n", 201)
+		content := strings.ToLower(strings.Join(lines, " "))
+
+		for domain, keywords := range domainKeywordPatterns {
+			for _, kw := range keywords {
+				if strings.Contains(content, kw) {
+					scores[domain] += 8
+					sigs = appendUnique(sigs, "docs:"+kw)
+					break // one match per domain per file
+				}
+			}
+		}
+	}
+	return scores, sigs
+}
+
+// scanDirNames checks top-level and internal/ directory names for domain
+// keywords. Directory names are strong structural signals (e.g. internal/trading/).
+func scanDirNames(projectDir string) (map[Domain]int, []string) {
+	scores := map[Domain]int{}
+	var sigs []string
+
+	scanLevel := func(dir string, weight int) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := strings.ToLower(e.Name())
+			for domain, keywords := range domainKeywordPatterns {
+				for _, kw := range keywords {
+					// Match full dir name or dir containing keyword as segment
+					if name == kw || strings.Contains(name, kw) {
+						scores[domain] += weight
+						rel, _ := filepath.Rel(projectDir, filepath.Join(dir, e.Name()))
+						sigs = appendUnique(sigs, "dir:"+rel)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Top-level dirs (high weight — explicit project structure)
+	scanLevel(projectDir, 12)
+	// internal/ subdirs (medium weight)
+	scanLevel(filepath.Join(projectDir, "internal"), 8)
+	// cmd/ subdirs (medium weight)
+	scanLevel(filepath.Join(projectDir, "cmd"), 8)
+
+	return scores, sigs
+}
+
 func detectActiveSpec(projectDir string) string {
 	// Check state.md for active spec reference
 	stateFile := filepath.Join(projectDir, ".radiant-harness", "state.md")

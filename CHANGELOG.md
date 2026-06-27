@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] — 2026-06-27 — Context Detector: múltiplas fontes de sinal (Sprint 57)
+
+19/19 packages green. 53 testes no context package (↑13).
+
+### Added — `internal/context/detector.go`
+- `domainKeywordPatterns` — termos de negócio/domínio para fontes prose (separado de `domainImportPatterns`)
+- `scanModulePath(projectDir)` — lê `go.mod` module path, score +20 por keyword hit
+- `scanDocs(projectDir)` — lê README.md / CLAUDE.md / docs/README.md (200 linhas), score +8
+- `scanDirNames(projectDir)` — verifica dirs top-level (+12), internal/ (+8), cmd/ (+8)
+- `Detect()` agora executa phases 2b/2c/2d antes de eleger o domínio vencedor
+
+### Added — `internal/context/sprint57_test.go`
+- 13 novos testes cobrindo as três novas fases e multi-source agreement
+
+### Closes
+- GLM 5.2 assessment ponto 2: detector baseado só em imports → resolvido
+
+---
+
 ## [2.4.0] — 2026-06-27 — Fleet Dispatcher: processos reais por worktree (Sprint 56)
 
 19/19 packages green. 36 testes no fleet package (↑8).
