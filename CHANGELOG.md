@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-06-27 — helpers.go extraction (Sprint 54)
+
+19/19 packages green. 651 testes.
+
+### Refactor — `cmd/radiant/`
+- `main.go` reduzido a 36 linhas (entry point puro: root + 10 register calls + Execute)
+- 99 funções helpers movidas para `helpers.go` (4562 linhas, todas compartilhadas)
+- Ponto 1 do GLM 5.2 assessment completamente resolvido
+
+---
+
 ## [2.1.0] — 2026-06-27 — main.go Split + Token Estimation (Sprint 53B)
 
 19/19 packages green. 651 testes. gofmt + goimports clean.
