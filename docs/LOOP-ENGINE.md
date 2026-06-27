@@ -91,13 +91,20 @@ radiant trace list
 
 ## Exit Conditions
 
-| Condition | Exit Reason |
-|-----------|-------------|
-| All tasks verified + persisted | `success` |
-| Token budget exceeded | `budget_exhausted` |
-| Max iterations reached | `budget_exhausted` (iter limit) |
-| 3 consecutive failures | `critical_failure` |
-| User cancellation | `canceled` |
+| Condition | Exit Reason | Status |
+|-----------|-------------|--------|
+| All tasks verified + persisted | `success` | ✅ |
+| Token budget exceeded | `budget_exhausted` | ✅ |
+| Max iterations reached | `budget_exhausted` (iter limit) | ✅ |
+| 3 consecutive failures | `critical_failure` | ✅ |
+| User cancellation | `canceled` | ✅ |
+| **Same call+args repeated K times (stall)** | `no_progress` | 📋 Sprint 44 |
+| **Wall-clock time exceeded** | `time_budget_exhausted` | 📋 Sprint 44 |
+| **Dollar cost exceeded** | `cost_budget_exhausted` | 📋 Sprint 44 |
+| **Human checkpoint reached** | `awaiting_human` | 📋 Sprint 44 |
+
+> Sprint 44 adds the four brakes identified in the June 2026 loop-engineering audit
+> (Akshay Q2 image + Osmani/Cherny/Steinberger playbook). See `docs/SPRINT44-PLAN.md`.
 
 ## Example Run
 

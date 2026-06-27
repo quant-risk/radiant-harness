@@ -280,22 +280,84 @@ A v2.0 resolve os três sem quebrar nada do que funciona hoje.
 | 9 | `make release` produz 6/6 targets clean | S | Sem regressão de cross-compile |
 | 10 | CHANGELOG.md com v1.0.0 entry completa | S | Todas as mudanças desde v0.7.0 documentadas |
 
+**Status**: ✅ Entregue — v1.0.0
+
+---
+
+### Sprint 41 — Ontology / World Model (v1.1.0)
+
+**Tema**: Formalizar o grafo de entidades e relações que o harness conhece.
+
+**Status**: ✅ Entregue — v1.1.0
+
+Entregas: `internal/ontology/` (10 entity kinds, 10 relation kinds, 4 axioms, 22 tests),
+`internal/context/ontology_bridge.go` (anti-drift test), `docs/ONTOLOGY.md`,
+CLI `radiant ontology export/validate/skills`, `radiant boot --world-model`.
+
+---
+
+### Sprint 42 — Worktree Isolation (v1.1.0)
+
+**Tema**: Cada agente paralelo trabalha em checkout isolado real.
+
+**Status**: ✅ Entregue — v1.1.0
+
+Entregas: `internal/worktree/` (Manager sobre `git worktree`, 7 tests),
+`internal/fleet/isolation.go` (ClaimIsolated com rollback em race, 5 tests),
+CLI `radiant worktree add/list/remove/prune`.
+
+---
+
+### Sprint 43 — Schedule Stage (v1.1.0)
+
+**Tema**: Fechar o loop: …→Persist→**Schedule**↺.
+
+**Status**: ✅ Entregue — v1.1.0
+
+Entregas: `internal/schedule/` (Evaluate puro, DetectSignals, LoadState/SaveState
+atômico, 18 tests), `docs/SCHEDULE.md`, CLI `radiant loop schedule`.
+
+---
+
+### Sprint 44 — Loop Hardening: Human Checkpoint + Brakes (v1.2.0)
+
+**Tema**: Fechar os 4 gaps confirmados pela auditoria final das imagens do Twitter/X.
+
+**Status**: 📋 Planejado — ver `docs/SPRINT44-PLAN.md`
+
+| Gap | Fonte | Descrição |
+|-----|-------|-----------|
+| Human checkpoint ("open door") | Playbook Table VI | Loop pausa para aprovação humana numa fase configurável |
+| No-progress brake | Imagem Q2 | Detecta repetição de `(tool, args)` idênticos e halts |
+| Time + cost budget | Imagem Q2 | `MaxDuration` + `MaxCostUSD` como freios duros |
+| Sample review | Playbook | Verificação de comprehension rot por amostragem |
+
+Entregas planejadas: `internal/loop/checkpoint.go`, `internal/loop/brake.go`,
+extend `internal/loop/budget.go`, `internal/loop/pricing.go`,
+CLI `radiant loop review`, flags `--max-time/--max-cost/--checkpoint`.
+20+ novos testes. Version bump → v1.2.0.
+
 ---
 
 ## Sumário de Entregas por Sprint
 
-| Sprint | Versão | Tema | Novos Cmds | Novos Pkgs | Testes Mínimos |
-|--------|--------|------|-----------|-----------|----------------|
-| 33 | v0.8.0 | Context Engine | 2 | `context/` | +15 |
-| 34 | v0.8.1 | Bootstrap Protocol | 3 | `boot/` | +10 |
-| 35 | v0.9.0 | Loop Engine | 4 | `loop/` | +20 |
-| 36 | v0.9.1 | Enhanced Hooks + IDEs | 1 | — | +10 |
-| 37 | v0.9.2 | Token Budget | 3 | — | +10 |
-| 38 | v1.0.0-beta | Self-Improvement | 3 | `improve/` | +10 |
-| 39 | v1.0.0 | Multi-Agent | 3 | `fleet/` | +15 |
-| 40 | v1.0.0-final | Hardening + Docs | 0 | — | +20 |
+| Sprint | Versão | Tema | Novos Cmds | Novos Pkgs | Testes Mínimos | Status |
+|--------|--------|------|-----------|-----------|----------------|--------|
+| 33 | v0.8.0 | Context Engine | 2 | `context/` | +15 | ✅ |
+| 34 | v0.8.1 | Bootstrap Protocol | 3 | `boot/` | +10 | ✅ |
+| 35 | v0.9.0 | Loop Engine | 4 | `loop/` | +20 | ✅ |
+| 36 | v0.9.1 | Enhanced Hooks + IDEs | 1 | — | +10 | ✅ |
+| 37 | v0.9.2 | Token Budget | 3 | — | +10 | ✅ |
+| 38 | v1.0.0-beta | Self-Improvement | 3 | `improve/` | +10 | ✅ |
+| 39 | v1.0.0 | Multi-Agent | 3 | `fleet/` | +15 | ✅ |
+| 40 | v1.0.0-final | Hardening + Docs | 0 | — | +20 | ✅ |
+| 41 | v1.1.0 | Ontology / World Model | 3 | `ontology/` | +22 | ✅ |
+| 42 | v1.1.0 | Worktree Isolation | 4 | `worktree/` | +12 | ✅ |
+| 43 | v1.1.0 | Schedule Stage | 1 | `schedule/` | +18 | ✅ |
+| 44 | v1.2.0 | Loop Hardening | 3 | — | +20 | 📋 |
 
-**Total**: +17 comandos, +5 packages novos, +110 testes novos (de ~324 → ≥434)
+**Total entregue (40–43)**: +8 comandos, +4 packages, +52 testes (total ~350+)  
+**Total v1.2.0**: +3 comandos adicionais, ~20 testes
 
 ---
 
