@@ -321,21 +321,39 @@ atômico, 18 tests), `docs/SCHEDULE.md`, CLI `radiant loop schedule`.
 
 ### Sprint 44 — Loop Hardening: Human Checkpoint + Brakes (v1.2.0)
 
-**Tema**: Fechar os 4 gaps confirmados pela auditoria final das imagens do Twitter/X.
+**Tema**: Fechar os 3 gaps de hard-stop confirmados pelo código de `awesome-loop-engineering`.
 
 **Status**: 📋 Planejado — ver `docs/SPRINT44-PLAN.md`
 
-| Gap | Fonte | Descrição |
-|-----|-------|-----------|
-| Human checkpoint ("open door") | Playbook Table VI | Loop pausa para aprovação humana numa fase configurável |
-| No-progress brake | Imagem Q2 | Detecta repetição de `(tool, args)` idênticos e halts |
-| Time + cost budget | Imagem Q2 | `MaxDuration` + `MaxCostUSD` como freios duros |
-| Sample review | Playbook | Verificação de comprehension rot por amostragem |
+| Gap | Código de referência | Descrição |
+|-----|---------------------|-----------|
+| Human checkpoint (`escalate`) | `engine.py:Verdict.escalate` | Verifier sinaliza `escalate=true`; loop para com `needs-human` e grava inbox |
+| No-progress brake (stall) | `engine.py:no_progress_streak` | N iterações fruitless → status `stalled`; puro, sem wall-clock |
+| Time + cost budget | `budget.py:cost_per_1k_tokens` | `MaxDuration` + `MaxCostUSD` + tabela de preços por provider |
 
-Entregas planejadas: `internal/loop/checkpoint.go`, `internal/loop/brake.go`,
-extend `internal/loop/budget.go`, `internal/loop/pricing.go`,
-CLI `radiant loop review`, flags `--max-time/--max-cost/--checkpoint`.
-20+ novos testes. Version bump → v1.2.0.
+Entregas: `internal/loop/brake.go`, extend `internal/loop/verifier.go` (Escalate),
+extend `internal/loop/budget.go` + `pricing.go`, `radiant loop review`,
+flags `--max-time/--max-cost/--stall-patience`. ≥20 testes. Version bump → v1.2.0.
+
+---
+
+### Sprint 45 — Verifier Hardening: Review Panel + Quorum + Grounding (v1.3.0)
+
+**Tema**: Tornar o verifier honesto — múltiplas lentes, mean geométrica, memória de contexto.
+
+**Status**: 📋 Planejado — ver `docs/SPRINT45-PLAN.md`
+
+| Gap | Código de referência | Descrição |
+|-----|---------------------|-----------|
+| Review panel pós-convergência | `jonny981/loops:loop.ts:config.review()` | Segunda camada roda APÓS convergência; falha reabre loop com `lastReview` |
+| Quorum k-of-n | `jonny981/loops:condition.ts:quorum()` | N juízes paralelos; erro = voto "não"; K devem passar |
+| Geometric mean por dimensão | `jonny981/loops:condition.ts:geometricMean()` | Um eixo zero → score zero; mais honesto que média aritmética |
+| Commit-log grounding | `jonny981/loops:ground.ts:groundingText()` | Injeta últimos N commits no prompt de cada iteração limpa (evita amnésia) |
+| Cláusulas anti-cheat | `awesome-loop-engineering:FIELD-NOTES.md #8` | Verifier detecta e rejeita: tests deletados, stubs, scope widening |
+
+Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum + dimensions + anti-cheat),
+`internal/loop/ground.go`, flags `--quorum-n/--quorum-k/--review-restarts/--ground`.
+≥20 testes. Version bump → v1.3.0.
 
 ---
 
@@ -356,8 +374,12 @@ CLI `radiant loop review`, flags `--max-time/--max-cost/--checkpoint`.
 | 43 | v1.1.0 | Schedule Stage | 1 | `schedule/` | +18 | ✅ |
 | 44 | v1.2.0 | Loop Hardening | 3 | — | +20 | 📋 |
 
+| 44 | v1.2.0 | Loop Hardening (brakes + escalate) | 2 | — | +20 | 📋 |
+| 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | — | +20 | 📋 |
+
 **Total entregue (40–43)**: +8 comandos, +4 packages, +52 testes (total ~350+)  
-**Total v1.2.0**: +3 comandos adicionais, ~20 testes
+**Planejado v1.2.0 (Sprint 44)**: +2 comandos, ~20 testes  
+**Planejado v1.3.0 (Sprint 45)**: +3 comandos, ~20 testes
 
 ---
 

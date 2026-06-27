@@ -4,32 +4,67 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v1.2.0 — Loop Hardening (Sprint 44)
+## [Unreleased] — v1.3.0 — Verifier Hardening (Sprint 45)
 
-Final audit against all loop-engineering source material (Osmani/Cherny/Steinberger
-playbook + Akshay Twitter/X images, June 2026) confirmed four gaps not yet implemented.
-See `docs/SPRINT44-PLAN.md` for full design.
+Code study of `jonny981/loops` (loop.ts, condition.ts, ground.ts) and
+`awesome-loop-engineering` (FIELD-NOTES.md, docs/05) confirmed five verifier gaps.
+See `docs/SPRINT45-PLAN.md` for full design.
 
-### Planned — Human Checkpoint ("The Open Door")
-- `internal/loop/checkpoint.go` — `awaiting-human` loop state; `Inbox` directory
-  (`.radiant-harness/inbox/`) for uncertain findings the agent cannot resolve autonomously
-- `radiant loop review` — list held items; `--approve`/`--reject` resumes or aborts loop
-- `radiant loop start --checkpoint=<phase>` — pause at a named phase for human review
+### Planned — Review Panel (post-convergence slot)
+- `internal/loop/review.go` — second verification layer that runs ONLY after `until`
+  passes; a fail re-opens the loop body with `lastReview` findings threaded to next iter
+- `MaxRestarts` caps the worker↔reviewer standoff independently of `MaxIter`
+- Source: `jonny981/loops/src/core/loop.ts:config.review()`
 
-### Planned — No-Progress Brake (same call + args)
-- `internal/loop/brake.go` — ring-buffer stall detector: halts when last K calls share
-  identical `(tool, sha256(args))`; emits structured `StallReason`
-- Gap confirmed by grep: zero stall/no-progress logic anywhere in codebase
+### Planned — Quorum k-of-n Verifier
+- Extend `internal/loop/verifier.go`: `QuorumK`, `QuorumN` fields; parallel judge goroutines
+- A judge that errors counts as a "no" vote (not a crash); K must pass from N
+- Source: `jonny981/loops/src/core/condition.ts:quorum()`
 
-### Planned — Time + Cost Budget
-- Extend `internal/loop/budget.go` with `MaxDuration time.Duration` and
-  `MaxCostUSD float64` as hard brakes (currently only tokens + iterations enforced)
-- `internal/loop/pricing.go` — static provider→model→cost/1K-token table
-- `radiant loop start --max-time=<d> --max-cost=<$>` flags
+### Planned — Geometric-Mean per Dimension
+- `VerifyDimension []struct{Name string; Score float64}` in `VerifyResult`
+- `geometricMean()`: one zero dimension → overall 0.0 (no hiding a bad dimension in averages)
+- Source: `jonny981/loops/src/core/condition.ts:agentCheck.dimensions`
+
+### Planned — Commit-Log Grounding
+- `internal/loop/ground.go` — `GroundingBlock()` injects recent commits into each fresh
+  context; prevents the agent from re-walking dead ends across iterations
+- Source: `jonny981/loops/src/core/ground.ts:groundingText()`
+
+### Planned — Anti-Cheat Clauses in Verifier
+- Extend `BuildVerifierPrompt()`: explicit checks for test deletion, stub implementations,
+  and scope widening by the maker before any APPROVED verdict
+- Source: `awesome-loop-engineering/FIELD-NOTES.md` Note #8
 
 ### Planned — Tests
-- ≥20 new pure tests; time injected as parameter, no wall-clock reads inside logic
-- Version bump: `1.1.0` → `1.2.0`
+- ≥20 new tests; version bump `1.2.0` → `1.3.0`
+
+---
+
+## [Unreleased] — v1.2.0 — Loop Hardening (Sprint 44)
+
+Code study of `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py` and
+`budget.py` confirmed three hard-stop gaps. See `docs/SPRINT44-PLAN.md` for full design.
+
+### Planned — Human Checkpoint (`escalate` signal)
+- Extend `VerifyResult` with `Escalate bool`; when true, loop stops with `needs-human`
+  (a success state, not failure) and writes `.radiant-harness/inbox/<id>.json`
+- `radiant loop review` — list/approve/reject escalated items
+- Source: `engine.py:Verdict.escalate`
+
+### Planned — No-Progress Brake (stall)
+- `internal/loop/brake.go` — `StallBrake` tracks action hashes; after N fruitless
+  turns halts with `status = "stalled"`; pure (no wall-clock inside logic)
+- Source: `engine.py:no_progress_streak`; also named in Akshay image Q2
+
+### Planned — Time + Cost Budget
+- Extend `internal/loop/budget.go`: `MaxDuration`, `MaxCostUSD`, `CostPer1K`
+- `internal/loop/pricing.go` — static provider→model→$/1K table
+- `radiant loop start --max-time=<d> --max-cost=<$> --stall-patience=<n>` flags
+- Source: `budget.py:cost_per_1k_tokens`; Akshay image Q2 "budget + time — token/$/sec"
+
+### Planned — Tests
+- ≥20 new pure tests; version bump `1.1.0` → `1.2.0`
 
 ---
 

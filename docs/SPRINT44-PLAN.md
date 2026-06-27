@@ -2,95 +2,155 @@
 
 > **Status**: Planned  
 > **Version target**: v1.2.0  
-> **Source**: Loop Engineering audit against Osmani/Cherny/Steinberger playbook + Akshay Twitter images (June 2026)
+> **Sources**: Loop Engineering Playbook (Osmani/Cherny/Steinberger), Akshay Twitter/X images Q2,
+> `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py` (code verified)
 
 ---
 
 ## Background
 
-After building Sprints 41–43 (Ontology, Worktree, Schedule), a final audit against all
-loop-engineering source material — including two Twitter/X images that were missed in the
-initial pass — identified four remaining gaps. These are concrete, named concepts from the
-literature that have zero implementation in the codebase.
+After Sprints 41–43 (Ontology, Worktree, Schedule), an audit against the full loop-engineering
+corpus — playbook, Twitter/X images, and code study of 6 community repos cloned to
+`~/Downloads/forks-github/` — confirmed four gaps with zero implementation in the codebase.
+
+Sprint 44 covers the three highest-priority gaps. The fourth (review panel
+post-convergence) goes to Sprint 45 because it requires a deeper verifier redesign.
 
 ---
 
-## Confirmed Gaps (post-image audit)
+## Confirmed Gaps
 
-### Gap 1 — Human Checkpoint / "The Open Door" (Playbook, highest priority)
+### Gap 1 — Human Checkpoint / `escalate` signal
 
-The Loop Engineering Playbook calls human-in-loop "the most important element" of the
-First-Loop Checklist (Table VI). The loop must be able to pause at a configurable phase
-and wait for human approval before continuing.
+**Source**: `awesome-loop-engineering/examples/runnable/loop_cookbook/verifier.py`
 
-**Missing:**
-- `awaiting-human` loop state
-- `./inbox/` directory for uncertain findings the agent can't resolve autonomously
-- `radiant loop review` command to display + approve/reject held items
-- `PhaseReview` as a named phase in the state machine
-
-**Current state:** loop runs fully autonomous; there is no mechanism to pause for human input.
-
----
-
-### Gap 2 — No-Progress Brake (Akshay image, Q2)
-
-> *"Know when to stop: no-progress — same call & args"*
-
-The loop must detect when the agent is calling the same tool with the same arguments
-repeatedly (stall) and halt rather than burning budget.
-
-**Missing:** zero stall-detection logic. Confirmed by grep: no `no-progress`, `stall`,
-`sameCall`, `repeatArgs` anywhere in the codebase.
-
-**Design:**
-```go
-type CallRecord struct { Tool string; ArgsHash string }
-// RingBuffer of last N calls; if last K are identical → stall
-func DetectStall(history []CallRecord, window int) bool
+```python
+@dataclass
+class Verdict:
+    passed: bool
+    evidence: str = ""
+    tokens: int = 0
+    escalate: bool = False   # ← when True, status = "needs_human", not retry
 ```
 
----
-
-### Gap 3 — Time + Cost Budget Dimensions (Akshay image, Q2)
-
-> *"Know when to stop: budget + time — token/$/sec"*
-
-Current `Budget` struct only tracks tokens and iterations:
-```go
-type Budget struct { MaxTokens int; MaxIter int }
+```python
+# engine.py — the loop checks escalate before deciding to retry:
+if verdict.escalate:
+    status = "needs_human"
+    break
 ```
 
-Missing:
-- Wall-clock time limit per run (`MaxDuration time.Duration`)
-- Dollar-cost ceiling (`MaxCostUSD float64`) derived from provider price tables
-- Both enforced as hard brakes, not advisory limits
+The verifier decides whether to escalate ambiguous or high-risk changes to a human rather
+than retrying. The loop stops with `status = "needs_human"` — a **success state**, not a
+failure. The playbook calls this "the open door."
+
+**Missing in radiant:**
+- `Verdict.Escalate bool` field in `internal/loop/verifier.go`
+- `awaiting-human` loop exit reason in `internal/loop/cycle.go`
+- `./inbox/` directory for items the verifier escalated
+- `radiant loop review` — list/approve/reject escalated items
 
 ---
 
-### Gap 4 — Sample Review (Playbook)
+### Gap 2 — No-Progress Brake (stall)
 
-The playbook describes periodic "comprehension rot" checks: a separate agent reads a
-random sample of prior reasoning traces and flags if the agent's understanding has drifted.
+**Source**: `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py`
 
-**Missing:** no sampling mechanism, no comprehension checker.
+```python
+before = dict(self.workspace)
+self.apply(self.workspace, action)
+made_change = self.workspace != before or bool(action.patch)
+# ...
+no_progress_streak = 0 if made_change else no_progress_streak + 1
+if no_progress_streak >= self.stall_patience:
+    status = "stalled"
+    break
+```
 
-This is lower priority than Gaps 1–3 and can be a sub-deliverable of the fleet layer.
+The loop tracks consecutive iterations with no observable change. After `stall_patience`
+fruitless turns it halts with `status = "stalled"`. The Akshay image names the same
+concept as *"same call & args"* — the harness variant is identical in intent.
+
+**Missing in radiant:** zero stall detection. Confirmed by grep: no `stall`, `noProgress`,
+`progress_streak` anywhere in `internal/loop/`.
+
+**Design for Go:**
+```go
+// internal/loop/brake.go
+type StallBrake struct {
+    Patience int           // consecutive no-change turns before halt; default 3
+    history  []string      // ring of sha256(action) for last N turns
+}
+func (b *StallBrake) Record(actionHash string) (stalled bool)
+func (b *StallBrake) Reset()
+```
+
+The action hash covers the tool name + args (for tool-call loops) or the workspace diff
+(for code loops). Pure function: `stalled` is returned, not read from a clock.
+
+---
+
+### Gap 3 — Time + Cost Budget
+
+**Source**: `awesome-loop-engineering/examples/runnable/loop_cookbook/budget.py`
+
+```python
+@dataclass
+class Budget:
+    max_iterations: int = 25
+    max_tokens: int | None = None
+    cost_per_1k_tokens: float = 0.0   # ← missing in radiant
+    tokens_used: int = 0
+
+    @property
+    def estimated_cost_usd(self) -> float:
+        return round((self.tokens_used / 1000.0) * self.cost_per_1k_tokens, 6)
+```
+
+Current radiant `Budget` struct only has `MaxTokens` and `MaxIter`. Missing:
+- `MaxDuration time.Duration` — wall-clock limit per run
+- `MaxCostUSD float64` — dollar ceiling
+- `CostPer1KTokens float64` — provider price, enables cost tracking
+- `EstimatedCostUSD()` — live cost estimate for `radiant loop status`
+
+`jonny981/loops` `budget.ts` confirms the same: `limit` (tokens) only, no time or cost.
+
+**Design for Go:**
+```go
+// internal/loop/budget.go — extend existing struct
+type Budget struct {
+    MaxTokens    int
+    MaxIter      int
+    MaxDuration  time.Duration  // 0 = unlimited
+    MaxCostUSD   float64        // 0 = unlimited
+    CostPer1K    float64        // provider price per 1K tokens
+}
+
+// internal/loop/pricing.go — static table
+var ProviderPricing = map[string]float64{
+    "claude-opus-4-8":    15.0 / 1000,  // per 1K output tokens
+    "claude-sonnet-4-6":   3.0 / 1000,
+    "claude-haiku-4-5":    0.25 / 1000,
+    "gpt-4o":              5.0 / 1000,
+    "gpt-4o-mini":         0.15 / 1000,
+}
+```
 
 ---
 
 ## Deliverables
 
-| # | Deliverable | Effort | Acceptance |
-|---|-------------|--------|------------|
-| 1 | `internal/loop/checkpoint.go` — `awaiting-human` state, `Inbox` (read/write/list) | M | `radiant loop review` lists held items; approve/reject advances or aborts loop |
-| 2 | `internal/loop/brake.go` — `NoProgressBrake` (stall detector) | S | Halts after K identical `(tool, args-hash)` pairs; emits structured reason |
-| 3 | `internal/loop/budget.go` — extend with `MaxDuration` + `MaxCostUSD` | S | Hard-stops loop when wall-clock or cost exceeds limit; `loop status` shows remaining |
-| 4 | Provider price table (`internal/loop/pricing.go`) | S | Static map of provider→model→cost/1K-tokens; used by cost brake |
-| 5 | `radiant loop review` command | M | List inbox items; `--approve <id>` / `--reject <id>` resumes or aborts loop |
-| 6 | `radiant loop start` flags: `--max-time`, `--max-cost`, `--checkpoint=<phase>` | S | All three new brake dimensions available from CLI |
-| 7 | Tests — checkpoint, stall, time+cost brakes | M | ≥20 new tests, pure (no wall-clock reads inside logic) |
-| 8 | `docs/LOOP-ENGINE.md` update — document all 4 brakes and human checkpoint | S | Table of all exit conditions is complete |
+| # | File | What | Acceptance |
+|---|------|------|------------|
+| 1 | `internal/loop/verifier.go` | Add `Escalate bool` to `VerifyResult`; emit `ExitNeedsHuman` | Verifier returning `escalate=true` stops loop with reason, not retry |
+| 2 | `internal/loop/cycle.go` | Add `ExitNeedsHuman` exit reason; write item to inbox on escalate | `.radiant-harness/inbox/<id>.json` created; loop status shows `needs-human` |
+| 3 | `internal/loop/brake.go` | `StallBrake` — ring buffer, `Patience` policy, `Record()`/`Reset()` | Halts after N fruitless turns; pure (no wall-clock inside) |
+| 4 | `internal/loop/budget.go` | Add `MaxDuration`, `MaxCostUSD`, `CostPer1K`; `EstimatedCostUSD()` | `loop status` shows `$0.042 / $1.00`; hard-stops on breach |
+| 5 | `internal/loop/pricing.go` | Static provider→model→cost/1K table | `radiant loop start --model claude-sonnet-4-6` enables cost brake |
+| 6 | `cmd/radiant/main.go` | `radiant loop review` — list/approve/reject inbox | `--approve <id>` resumes loop; `--reject <id>` aborts |
+| 7 | `cmd/radiant/main.go` | `loop start` flags: `--max-time`, `--max-cost`, `--stall-patience` | Flags pass through to Budget + StallBrake |
+| 8 | `internal/loop/*_test.go` | ≥20 pure tests for all three gaps | `go test ./internal/loop/... -race` green |
+| 9 | `docs/LOOP-ENGINE.md` | Update exit-condition table; document all 7 brakes | No undocumented exit reason |
 
 **Version bump**: `1.1.0` → `1.2.0`
 
@@ -98,34 +158,38 @@ This is lower priority than Gaps 1–3 and can be a sub-deliverable of the fleet
 
 ## Design Principles
 
-- `Evaluate*` functions are **pure**: time and cost arrive as parameters, never read from
-  wall clock inside logic. Same pattern as `schedule.Evaluate`.
-- `Inbox` is just files in `.radiant-harness/inbox/<id>.json` — no database, inspectable
-  with any editor, committed to git if the user wants a review trail.
-- The stall detector uses a ring buffer of `(tool, sha256(args))` pairs; the window and
-  threshold are policy parameters, not hardcoded.
-- Cost brake requires a provider+model to be known at loop start (`--model`); if unknown,
-  cost brake is disabled (not an error).
+- All `Evaluate*` and `Record*` functions are **pure**: time arrives as `now time.Time`,
+  cost is computed from tokens × price, never read from wall clock inside logic.
+  Same pattern as `schedule.Evaluate`.
+- `Inbox` = files in `.radiant-harness/inbox/<id>.json` — no database, git-committable,
+  inspectable with any editor.
+- `StallBrake` uses content hash of the action (workspace diff or tool+args), not
+  iteration count — two different failed actions don't count as "same."
+- Cost brake is disabled (not an error) when `--model` is unknown or not in pricing table.
 
 ---
 
 ## Exit-Condition Table (post-Sprint-44)
 
-| Brake | Trigger | Current | After Sprint 44 |
-|-------|---------|---------|-----------------|
+| Brake | Trigger | v1.1.0 | v1.2.0 |
+|-------|---------|--------|--------|
 | Max iterations | `iter >= MaxIter` | ✅ | ✅ |
 | Token budget | `tokens >= MaxTokens` | ✅ | ✅ |
 | Completion check | verifier PASS | ✅ | ✅ |
-| **No-progress (stall)** | same call+args K times | ❌ | ✅ |
+| Critical failures | 3× consecutive fail | ✅ | ✅ |
+| **No-progress (stall)** | N fruitless turns | ❌ | ✅ |
 | **Wall-clock time** | elapsed >= MaxDuration | ❌ | ✅ |
 | **Dollar cost** | cost >= MaxCostUSD | ❌ | ✅ |
-| **Human checkpoint** | phase == checkpoint | ❌ | ✅ |
+| **Human checkpoint** | verifier escalates | ❌ | ✅ |
+| Review panel | post-convergence panel | ❌ | Sprint 45 |
 
 ---
 
 ## References
 
-- Osmani / Cherny / Steinberger — *Loop Engineering Playbook* (June 2026), Table VI (First-Loop Checklist), §4 "The Open Door"
-- Akshay (@akshay_pachaar) — "Loop Engineering Clearly Explained" (Twitter/X, June 2026), Q2: "Know when to stop"
-- `internal/schedule/schedule.go` — template for pure `Evaluate()` pattern
-- `internal/loop/budget.go` — existing budget struct to extend
+- `awesome-loop-engineering/examples/runnable/loop_cookbook/engine.py` — stall + escalate
+- `awesome-loop-engineering/examples/runnable/loop_cookbook/budget.py` — cost tracking
+- `jonny981/loops/src/core/budget.ts` — token-only budget (confirms our gap)
+- `cobusgreyling/loop-engineering/docs/failure-modes.md` — "Infinite Fix Loop" (stall)
+- Akshay image Q2 — "budget + time — token/$/sec", "no-progress — same call & args"
+- Osmani/Cherny/Steinberger playbook — "The Open Door" (human checkpoint)

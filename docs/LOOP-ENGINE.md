@@ -91,20 +91,49 @@ radiant trace list
 
 ## Exit Conditions
 
-| Condition | Exit Reason | Status |
-|-----------|-------------|--------|
-| All tasks verified + persisted | `success` | ✅ |
-| Token budget exceeded | `budget_exhausted` | ✅ |
-| Max iterations reached | `budget_exhausted` (iter limit) | ✅ |
-| 3 consecutive failures | `critical_failure` | ✅ |
-| User cancellation | `canceled` | ✅ |
-| **Same call+args repeated K times (stall)** | `no_progress` | 📋 Sprint 44 |
-| **Wall-clock time exceeded** | `time_budget_exhausted` | 📋 Sprint 44 |
-| **Dollar cost exceeded** | `cost_budget_exhausted` | 📋 Sprint 44 |
-| **Human checkpoint reached** | `awaiting_human` | 📋 Sprint 44 |
+| Condition | Exit Reason | Version |
+|-----------|-------------|---------|
+| All tasks verified + persisted | `success` | ✅ v1.1.0 |
+| Token budget exceeded | `budget_exhausted` | ✅ v1.1.0 |
+| Max iterations reached | `budget_exhausted` (iter limit) | ✅ v1.1.0 |
+| 3 consecutive failures | `critical_failure` | ✅ v1.1.0 |
+| User cancellation | `canceled` | ✅ v1.1.0 |
+| **No-progress stall** (N fruitless turns) | `stalled` | 📋 v1.2.0 |
+| **Wall-clock time exceeded** | `time_exhausted` | 📋 v1.2.0 |
+| **Dollar cost exceeded** | `cost_exhausted` | 📋 v1.2.0 |
+| **Verifier escalated to human** | `needs_human` | 📋 v1.2.0 |
+| **Review panel failed** (post-convergence) | re-opens loop | 📋 v1.3.0 |
 
-> Sprint 44 adds the four brakes identified in the June 2026 loop-engineering audit
-> (Akshay Q2 image + Osmani/Cherny/Steinberger playbook). See `docs/SPRINT44-PLAN.md`.
+> Sources: `awesome-loop-engineering/engine.py` (stall + escalate), `jonny981/loops/loop.ts`
+> (review panel). See `docs/SPRINT44-PLAN.md` and `docs/SPRINT45-PLAN.md`.
+
+## Planned Components (Sprints 44–45)
+
+### StallBrake (`internal/loop/brake.go`) — v1.2.0
+Tracks action hashes across iterations. After N fruitless turns (no observable change),
+halts with `stalled`. Pure: no wall-clock inside logic. Policy: `stall_patience` (default 3).
+
+### Pricing + Cost Brake (`internal/loop/pricing.go`) — v1.2.0
+Static `provider→model→$/1K-token` table. `Budget.EstimatedCostUSD()` reports live spend.
+`MaxCostUSD` is a hard brake enforced before each iteration.
+
+### Escalate / Inbox (`internal/loop/verifier.go` + cycle) — v1.2.0
+`VerifyResult.Escalate bool` signals the loop to stop with `needs_human` and write the
+finding to `.radiant-harness/inbox/<id>.json`. `radiant loop review` lists/resolves items.
+
+### Review Panel (`internal/loop/review.go`) — v1.3.0
+Post-convergence second layer. Runs after `verifier` passes. A fail re-opens the loop
+body with `lastReview` findings threaded as context. Capped by `MaxRestarts` (default 3),
+independent of `MaxIter`. Pattern from `jonny981/loops:config.review()`.
+
+### Quorum Verifier — v1.3.0
+N parallel judge goroutines; K must pass. A goroutine that errors counts as "no."
+Confidence = mean of passing judges. Prevents a single biased model from rubber-stamping.
+
+### Commit-Log Grounding (`internal/loop/ground.go`) — v1.3.0
+`GroundingBlock()` injects recent branch commits into each iteration's prompt.
+Prevents the agent from re-walking dead ends across fresh-context turns.
+Pattern from `jonny981/loops:ground.ts:groundingText()`.
 
 ## Example Run
 
