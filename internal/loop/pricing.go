@@ -10,14 +10,14 @@ type ModelPricing struct {
 // Source: provider pricing pages as of June 2026.
 var providerPricing = map[string]ModelPricing{
 	// Anthropic
-	"claude-opus-4-8":           {CostPer1KOutput: 0.015},
-	"claude-sonnet-4-6":         {CostPer1KOutput: 0.003},
-	"claude-haiku-4-5":          {CostPer1KOutput: 0.00025},
+	"claude-opus-4-8":   {CostPer1KOutput: 0.015},
+	"claude-sonnet-4-6": {CostPer1KOutput: 0.003},
+	"claude-haiku-4-5":  {CostPer1KOutput: 0.00025},
 
 	// OpenAI
-	"gpt-5":      {CostPer1KOutput: 0.005},
-	"gpt-5-mini": {CostPer1KOutput: 0.00040},
-	"gpt-5-nano": {CostPer1KOutput: 0.00010},
+	"gpt-5":       {CostPer1KOutput: 0.005},
+	"gpt-5-mini":  {CostPer1KOutput: 0.00040},
+	"gpt-5-nano":  {CostPer1KOutput: 0.00010},
 	"gpt-5-codex": {CostPer1KOutput: 0.005},
 
 	// Google
@@ -42,12 +42,12 @@ var providerPricing = map[string]ModelPricing{
 	"kimi-k2-flash": {CostPer1KOutput: 0.00014},
 
 	// MiniMax
-	"minimax-m1":     {CostPer1KOutput: 0.00070},
+	"minimax-m1":      {CostPer1KOutput: 0.00070},
 	"minimax-text-01": {CostPer1KOutput: 0.00028},
 	"abab-7":          {CostPer1KOutput: 0.00014},
 
 	// Qwen
-	"qwen-3-coder-plus":  {CostPer1KOutput: 0.00050},
+	"qwen-3-coder-plus":   {CostPer1KOutput: 0.00050},
 	"qwen-2.5-coder-plus": {CostPer1KOutput: 0.00018},
 
 	// Mistral

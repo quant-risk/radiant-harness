@@ -201,11 +201,11 @@ var PricePerMTokensUSD = map[string]float64{
 	"kimi-k2":       0.55,
 	"kimi-k2-flash": 0.14,
 	// MiniMax
-	"minimax-m1":     0.70,
+	"minimax-m1":      0.70,
 	"minimax-text-01": 0.28,
-	"abab-7":         0.14,
+	"abab-7":          0.14,
 	// Qwen
-	"qwen-3-coder-plus":  0.50,
+	"qwen-3-coder-plus":   0.50,
 	"qwen-2.5-coder-plus": 0.18,
 	// Mistral
 	"mistral-large-2": 2.0,
