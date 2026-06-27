@@ -29,6 +29,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/quant-risk/radiant-harness/internal/skill"
+	"github.com/quant-risk/radiant-harness/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -1807,6 +1808,87 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 	ontologyCmd.AddCommand(ontologyExportCmd, ontologyValidateCmd, ontologySkillsCmd)
 	root.AddCommand(ontologyCmd)
+
+	// ── worktree (Sprint 42) ─────────────────────────────────────────────────
+	worktreeCmd := &cobra.Command{
+		Use:   "worktree",
+		Short: "Manage isolated git worktrees for parallel agents",
+	}
+
+	worktreeAddCmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Create an isolated worktree on its own branch",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			m, err := worktree.NewManager(cwd)
+			if err != nil {
+				return err
+			}
+			wt, err := m.Add(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("✓ worktree created\n  path:   %s\n  branch: %s\n", wt.Path, wt.Branch)
+			return nil
+		},
+	}
+
+	worktreeListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all worktrees",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			m, err := worktree.NewManager(cwd)
+			if err != nil {
+				return err
+			}
+			list, err := m.List()
+			if err != nil {
+				return err
+			}
+			for _, w := range list {
+				branch := w.Branch
+				if branch == "" {
+					branch = "(detached)"
+				}
+				fmt.Printf("  %-50s %s\n", w.Path, branch)
+			}
+			return nil
+		},
+	}
+
+	worktreeRemoveCmd := &cobra.Command{
+		Use:   "remove <path>",
+		Short: "Remove a worktree",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			m, err := worktree.NewManager(cwd)
+			if err != nil {
+				return err
+			}
+			force, _ := cmd.Flags().GetBool("force")
+			return m.Remove(worktree.Worktree{Path: args[0]}, force)
+		},
+	}
+	worktreeRemoveCmd.Flags().Bool("force", false, "Discard uncommitted changes")
+
+	worktreePruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove administrative entries for deleted worktrees",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			m, err := worktree.NewManager(cwd)
+			if err != nil {
+				return err
+			}
+			return m.Prune()
+		},
+	}
+
+	worktreeCmd.AddCommand(worktreeAddCmd, worktreeListCmd, worktreeRemoveCmd, worktreePruneCmd)
+	root.AddCommand(worktreeCmd)
 
 	// ── fleet (Sprint 39) ────────────────────────────────────────────────────
 	fleetCmd := &cobra.Command{
