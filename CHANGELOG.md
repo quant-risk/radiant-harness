@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-06-27 — Fleet Dispatcher: processos reais por worktree (Sprint 56)
+
+19/19 packages green. 36 testes no fleet package (↑8).
+
+### Added — `internal/fleet/dispatch.go`
+- `Dispatcher` — spawna um processo OS por tarefa fleet em worktree git isolado (paralelo via goroutines)
+- `DispatchConfig{Binary, Env, Stdout, Stderr, Timeout}` — configuração do dispatcher
+- `AgentResult{AgentID, TaskID, ExitCode, Err, Elapsed}` — resultado por processo
+- `NewDispatcher(iso, cfg)` — auto-resolve binary via `os.Executable()` se `cfg.Binary` for vazio
+- `RunAll(ctx, extraArgs)` — claim de todas as tarefas pendentes → spawn paralelo → `CompleteTask` + `Release`
+- `spawnAgent(ctx, task, wt, extraArgs)` — `exec.CommandContext` com `RADIANT_WORKTREE_DIR`, `RADIANT_AGENT_ID`, `RADIANT_TASK_ID` no env
+
+### Added — `internal/fleet/dispatch_test.go`
+- 8 novos testes: defaults, zero value, resolve executable, RunAll empty/success/failure/cancel
+- Cleanup automático de branches git via `t.Cleanup` — zero branches órfãs entre runs
+
+### Changed — `internal/fleet/coordinator.go`
+- Comentário atualizado: Coordinator gerencia estado; Dispatcher é a camada de execução real
+
+### Closes
+- GLM 5.2 assessment ponto 3: "Fleet Coordinator does NOT spawn real processes" → resolvido
+
+---
+
 ## [2.3.0] — 2026-06-27 — LLM Planning no loop (Sprint 55)
 
 19/19 packages green. 144 testes no loop package (↑11).

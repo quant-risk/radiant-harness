@@ -39,9 +39,9 @@ type FleetState struct {
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
-// Coordinator orchestrates multi-agent execution.
-// It does NOT spawn real processes — it manages state and provides
-// the scaffolding for LLM-driven agents to coordinate.
+// Coordinator orchestrates multi-agent execution state.
+// Real process spawning is handled by Dispatcher (dispatch.go),
+// which runs one OS process per task in an isolated git worktree.
 type Coordinator struct {
 	store *Store
 	state FleetState
