@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] — 2026-06-27 — Remove cmd_data.go + cmd_integrations.go duplicatas (Sprint 58)
+
+19/19 packages green. Zero regressões.
+
+### Removed
+- `cmd/radiant/cmd_data.go` — todos os 7 comandos (`causal-estimate`, `model`, `predict`,
+  `train`, `evaluate`, `drift`, `profile`) já existiam em `cmd_telemetry.go`; arquivo
+  nunca foi wired em `main.go`
+- `cmd/radiant/cmd_integrations.go` — todos os 8 comandos (`integrations`, `evals`,
+  `release`, `audit`, `mcp`, `security`, `validate-file`, `autodata`) já existiam em
+  `cmd_audit.go`, `cmd_telemetry.go` e `cmd_spec.go`; arquivo nunca foi wired em `main.go`
+
+---
+
 ## [2.5.0] — 2026-06-27 — Context Detector: múltiplas fontes de sinal (Sprint 57)
 
 19/19 packages green. 53 testes no context package (↑13).
