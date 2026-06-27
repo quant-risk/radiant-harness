@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-06-27 — CLI Wiring (Sprint 46)
+
+All Sprint 44–45 internals now exposed via CLI. 19/19 packages green. Build clean.
+
+### Added — `radiant loop start` flags
+- `--max-time <duration>` — wall-clock limit; maps to `BudgetConfig.MaxDuration`
+- `--max-cost <float>` — dollar ceiling; maps to `BudgetConfig.MaxCostUSD`
+- `--model <id>` — resolves `PriceFor(modelID)` to enable cost tracking
+- `--stall-patience <n>` — no-progress brake patience window
+- `--quorum-k <k>` / `--quorum-n <n>` — k-of-n parallel judge quorum
+- `--ground` — enable commit-log grounding via `GroundingBlock()`
+- `--review-restarts <n>` — post-convergence review panel max restarts
+- Active limits printed at startup (time, cost, stall, quorum, grounding)
+
+### Added — `radiant loop review`
+- Lists all `.radiant-harness/inbox/<id>.json` items waiting for human review
+- `--approve <id>` — resolves item; loop can resume
+- `--reject <id>` — resolves item; loop does not resume
+- Calls `loop.ListInboxItems()` / `loop.ResolveInboxItem()` from Sprint 44
+
+---
+
 ## [1.3.0] — 2026-06-27 — Verifier Hardening (Sprint 45)
 
 3 new files, 84 tests in loop package (all -race clean). Full suite green.

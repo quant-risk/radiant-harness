@@ -371,8 +371,10 @@ Entregas: `internal/loop/review.go`, extend `internal/loop/verifier.go` (quorum 
 | 44 | v1.2.0 | Loop Hardening (brakes + escalate) | 2 | `loop/` | +30 | ✅ |
 | 45 | v1.3.0 | Verifier Hardening (review + quorum + grounding) | 3 | `loop/` | +23 | ✅ |
 
-**Total entregue (Sprints 1–45)**: 19 packages, 84 testes no loop package, suite completa green  
-**Versão atual**: v1.3.0
+| 46 | v1.4.0 | CLI Wiring (loop start flags + loop review) | 1 | `cmd/` | 0 | ✅ |
+
+**Total entregue (Sprints 1–46)**: 19 packages, 84 testes no loop package, suite completa green  
+**Versão atual**: v1.4.0
 
 ---
 

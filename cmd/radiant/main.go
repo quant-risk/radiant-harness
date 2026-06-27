@@ -2164,10 +2164,25 @@ and the loop command to start autonomous work. Run this first in any session.`,
 
 			runID := fmt.Sprintf("run-%d", time.Now().Unix())
 
+			maxTime, _ := cmd.Flags().GetDuration("max-time")
+			maxCost, _ := cmd.Flags().GetFloat64("max-cost")
+			modelID, _ := cmd.Flags().GetString("model")
+			stall, _ := cmd.Flags().GetInt("stall-patience")
+			quorumK, _ := cmd.Flags().GetInt("quorum-k")
+			quorumN, _ := cmd.Flags().GetInt("quorum-n")
+			ground, _ := cmd.Flags().GetBool("ground")
+			reviewRestarts, _ := cmd.Flags().GetInt("review-restarts")
+
+			// Resolve cost-per-1K from model pricing table if model is known.
+			costPer1K, _ := loop.PriceFor(modelID)
+
 			cfg := loop.BudgetConfig{
-				MaxTokens: budget,
-				MaxIter:   maxIter,
-				Profile:   loop.BudgetProfile(profile),
+				MaxTokens:   budget,
+				MaxIter:     maxIter,
+				Profile:     loop.BudgetProfile(profile),
+				MaxDuration: maxTime,
+				MaxCostUSD:  maxCost,
+				CostPer1K:   costPer1K,
 			}
 			b := loop.NewBudget(cfg)
 			c := loop.NewCycle(cwd, runID, goal, b)
@@ -2185,6 +2200,28 @@ and the loop command to start autonomous work. Run this first in any session.`,
 			fmt.Printf("  Run ID: %s\n", runID)
 			fmt.Printf("  Goal:   %s\n", goal)
 			fmt.Printf("  Budget: %s\n", b.Summary())
+			if maxTime > 0 {
+				fmt.Printf("  Time limit:  %s\n", maxTime)
+			}
+			if maxCost > 0 {
+				fmt.Printf("  Cost limit:  $%.2f\n", maxCost)
+			}
+			if stall > 0 {
+				fmt.Printf("  Stall brake: %d fruitless turns\n", stall)
+			}
+			if quorumK > 0 {
+				n := quorumN
+				if n <= 0 {
+					n = quorumK + 1
+				}
+				fmt.Printf("  Quorum:      %d-of-%d judges\n", quorumK, n)
+			}
+			if ground {
+				fmt.Printf("  Grounding:   commit-log injection enabled\n")
+			}
+			if reviewRestarts > 0 {
+				fmt.Printf("  Review panel: max %d restarts\n", reviewRestarts)
+			}
 			fmt.Printf("\nNext: `radiant loop status` to check progress\n")
 			fmt.Printf("      `radiant trace show %s` to view reasoning trace\n", runID)
 			return nil
@@ -2193,6 +2230,14 @@ and the loop command to start autonomous work. Run this first in any session.`,
 	loopStartCmd.Flags().Int("budget", 0, "Token budget (0 = use profile default)")
 	loopStartCmd.Flags().Int("max-iter", 0, "Max iterations (0 = use default 20)")
 	loopStartCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
+	loopStartCmd.Flags().Duration("max-time", 0, "Wall-clock time limit per run (e.g. 30m, 2h). 0 = unlimited")
+	loopStartCmd.Flags().Float64("max-cost", 0, "Dollar cost ceiling for the run (e.g. 0.50). 0 = unlimited")
+	loopStartCmd.Flags().String("model", "", "Model ID for cost tracking (e.g. claude-sonnet-4-6)")
+	loopStartCmd.Flags().Int("stall-patience", 0, "No-progress brake: halt after N identical actions (0 = disabled)")
+	loopStartCmd.Flags().Int("quorum-k", 0, "Minimum passing judges for quorum verification (0 = disabled)")
+	loopStartCmd.Flags().Int("quorum-n", 0, "Total judges for quorum (default = quorum-k+1)")
+	loopStartCmd.Flags().Bool("ground", false, "Inject recent commit log into each iteration prompt")
+	loopStartCmd.Flags().Int("review-restarts", 0, "Post-convergence review panel max restarts (0 = default 3)")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",
@@ -2281,7 +2326,63 @@ decision; without it, a RUN decision advances and persists scheduler state.`,
 	loopScheduleCmd.Flags().Duration("min-interval", 0, "Override min interval between runs (e.g. 15m)")
 	loopScheduleCmd.Flags().Int("max-per-day", 0, "Override max runs per day")
 
-	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd)
+	loopReviewCmd := &cobra.Command{
+		Use:   "review",
+		Short: "List and resolve escalated items waiting for human review",
+		Long: `When the verifier sets escalate=true, the loop stops with status needs_human
+and writes an item to .radiant-harness/inbox/. Use this command to list pending
+items and approve or reject each one.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			approveID, _ := cmd.Flags().GetString("approve")
+			rejectID, _ := cmd.Flags().GetString("reject")
+
+			if approveID != "" {
+				if err := loop.ResolveInboxItem(cwd, approveID); err != nil {
+					return err
+				}
+				fmt.Printf("✓ Approved and resolved: %s\n", approveID)
+				fmt.Printf("  Resume the loop with: radiant loop resume\n")
+				return nil
+			}
+			if rejectID != "" {
+				if err := loop.ResolveInboxItem(cwd, rejectID); err != nil {
+					return err
+				}
+				fmt.Printf("✗ Rejected and resolved: %s\n", rejectID)
+				fmt.Printf("  The loop will not resume for this item.\n")
+				return nil
+			}
+
+			items, err := loop.ListInboxItems(cwd)
+			if err != nil {
+				return fmt.Errorf("list inbox: %w", err)
+			}
+			if len(items) == 0 {
+				fmt.Println("Inbox is empty — no items waiting for review.")
+				return nil
+			}
+			fmt.Printf("Pending review (%d item(s)):\n\n", len(items))
+			for _, item := range items {
+				fmt.Printf("  ID:        %s\n", item.ID)
+				fmt.Printf("  Run:       %s  (iter %d)\n", item.RunID, item.Iteration)
+				fmt.Printf("  Goal:      %s\n", item.Goal)
+				fmt.Printf("  Evidence:  %s\n", item.Evidence)
+				for _, issue := range item.Issues {
+					fmt.Printf("  Issue:     %s\n", issue)
+				}
+				fmt.Printf("  Created:   %s\n", item.CreatedAt.Format("2006-01-02 15:04 UTC"))
+				fmt.Println()
+			}
+			fmt.Printf("To approve: radiant loop review --approve <id>\n")
+			fmt.Printf("To reject:  radiant loop review --reject <id>\n")
+			return nil
+		},
+	}
+	loopReviewCmd.Flags().String("approve", "", "Resolve item as approved (resumes loop)")
+	loopReviewCmd.Flags().String("reject", "", "Resolve item as rejected (abandons loop run)")
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd)
 	root.AddCommand(loopCmd)
 
 	// ── trace (Sprint 35) ────────────────────────────────────────────────────
