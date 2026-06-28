@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] — 2026-06-27 — Fleet Status melhorado + fleet summary (Sprint 62)
+
+20/20 packages green com -race. 9 novos testes no fleet package.
+
+### Changed — `internal/fleet/coordinator.go`
+- `FormatStatus`: linha de contadores por status (pending/assigned/done/failed), coluna
+  Worktree/Evidence (worktree para assigned; preview 40 chars de evidence para done),
+  hint "fleet plan" quando tasks = 0
+
+### Added — `internal/fleet/coordinator.go`
+- `FormatSummary(status)` — consolida evidence de tasks done, contagem N/total, lista failed
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `fleet summary <run-id>` — chama `FormatSummary`
+
+### Added — `internal/fleet/sprint62_test.go`
+- 9 testes: contadores, hint, evidence preview, worktree, summary sem done, N/total, evidence, failed, goal
+
+---
+
 ## [2.9.0] — 2026-06-27 — Fleet Plan: decomposição automática de goal em tasks (Sprint 61)
 
 20/20 packages green com -race. 11 novos testes no fleet package.

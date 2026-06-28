@@ -133,27 +133,100 @@ func FormatStatus(status FleetStatus) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Fleet: %s\n", status.RunID))
 	sb.WriteString(fmt.Sprintf("Goal:  %s\n", status.Goal))
-	sb.WriteString(fmt.Sprintf("Agents: %d\n\n", status.AgentCount))
+	sb.WriteString(fmt.Sprintf("Agents: %d\n", status.AgentCount))
 
-	// Task table
-	sb.WriteString(fmt.Sprintf("%-6s %-30s %-10s %-12s\n", "ID", "Title", "Status", "Agent"))
-	sb.WriteString(strings.Repeat("-", 62) + "\n")
+	// Count tasks by status.
+	counts := map[TaskStatus]int{}
 	for _, t := range status.Tasks {
-		title := t.Title
-		if len(title) > 30 {
-			title = title[:27] + "..."
+		counts[t.Status]++
+	}
+	total := len(status.Tasks)
+	sb.WriteString(fmt.Sprintf("Tasks:  %d total", total))
+	if total > 0 {
+		sb.WriteString(fmt.Sprintf(" — %d pending, %d assigned, %d done, %d failed",
+			counts[TaskPending], counts[TaskAssigned], counts[TaskDone], counts[TaskFailed]))
+	}
+	sb.WriteString("\n\n")
+
+	if total == 0 {
+		sb.WriteString("  (no tasks — run `radiant fleet plan <run-id>` first)\n")
+	} else {
+		// Task table with worktree and evidence preview.
+		sb.WriteString(fmt.Sprintf("%-8s %-28s %-10s %-14s %s\n", "ID", "Title", "Status", "Agent", "Worktree/Evidence"))
+		sb.WriteString(strings.Repeat("-", 80) + "\n")
+		for _, t := range status.Tasks {
+			title := t.Title
+			if len(title) > 28 {
+				title = title[:25] + "..."
+			}
+			agent := t.AgentID
+			if agent == "" {
+				agent = "(unassigned)"
+			}
+			extra := t.WorktreeDir
+			if t.Status == TaskDone && t.Evidence != "" {
+				ev := t.Evidence
+				if len(ev) > 40 {
+					ev = ev[:37] + "..."
+				}
+				extra = ev
+			}
+			sb.WriteString(fmt.Sprintf("%-8s %-28s %-10s %-14s %s\n",
+				t.ID, title, t.Status, agent, extra))
 		}
-		agent := t.AgentID
-		if agent == "" {
-			agent = "(unassigned)"
-		}
-		sb.WriteString(fmt.Sprintf("%-6s %-30s %-10s %-12s\n",
-			t.ID, title, t.Status, agent))
 	}
 
 	if len(status.Conflicts) > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(FormatConflicts(status.Conflicts, status.Resolutions))
+	}
+
+	return sb.String()
+}
+
+// FormatSummary renders a consolidated summary of completed task evidence.
+func FormatSummary(status FleetStatus) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Summary — Fleet: %s\n", status.RunID))
+	sb.WriteString(fmt.Sprintf("Goal: %s\n\n", status.Goal))
+
+	var done []Task
+	for _, t := range status.Tasks {
+		if t.Status == TaskDone {
+			done = append(done, t)
+		}
+	}
+
+	if len(done) == 0 {
+		sb.WriteString("No completed tasks yet.\n")
+		return sb.String()
+	}
+
+	sb.WriteString(fmt.Sprintf("%d/%d tasks completed\n\n", len(done), len(status.Tasks)))
+	for _, t := range done {
+		sb.WriteString(fmt.Sprintf("── %s: %s\n", t.ID, t.Title))
+		if t.Evidence != "" {
+			sb.WriteString(fmt.Sprintf("   %s\n", t.Evidence))
+		} else {
+			sb.WriteString("   (no evidence recorded)\n")
+		}
+		if t.WorktreeDir != "" {
+			sb.WriteString(fmt.Sprintf("   worktree: %s\n", t.WorktreeDir))
+		}
+		sb.WriteString("\n")
+	}
+
+	var failed []Task
+	for _, t := range status.Tasks {
+		if t.Status == TaskFailed {
+			failed = append(failed, t)
+		}
+	}
+	if len(failed) > 0 {
+		sb.WriteString(fmt.Sprintf("%d task(s) failed:\n", len(failed)))
+		for _, t := range failed {
+			sb.WriteString(fmt.Sprintf("  ✗ %s: %s\n", t.ID, t.Title))
+		}
 	}
 
 	return sb.String()

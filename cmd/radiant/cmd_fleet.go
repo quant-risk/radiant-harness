@@ -169,6 +169,23 @@ func registerFleetCmds(root *cobra.Command) {
 		},
 	}
 
+	fleetSummaryCmd := &cobra.Command{
+		Use:   "summary <run-id>",
+		Short: "Show consolidated evidence from completed tasks",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+			coord := fleet.NewCoordinator(store, 0)
+			fmt.Print(fleet.FormatSummary(coord.Status()))
+			return nil
+		},
+	}
+
 	// ── fleet plan ───────────────────────────────────────────────────────────
 	fleetPlanCmd := &cobra.Command{
 		Use:   "plan <run-id>",
@@ -325,7 +342,7 @@ so all agents share the same model configuration.`,
 	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
 	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetPlanCmd, fleetDispatchCmd)
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────
