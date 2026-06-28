@@ -13,11 +13,11 @@ import (
 
 func TestTraceCallNilTracer(t *testing.T) {
 	// Must not panic when tr == nil.
-	traceCall(nil, "run-1", PhaseExecute, "executor", "claude-sonnet-4-6", "prompt", "response", 100, nil)
+	traceCall(nil, nil, "run-1", PhaseExecute, "executor", "claude-sonnet-4-6", "prompt", "response", 100, nil)
 }
 
 func TestTraceCallNilTracerWithError(t *testing.T) {
-	traceCall(nil, "run-1", PhaseExecute, "executor", "gpt-4o", "prompt", "", 0, errors.New("timeout"))
+	traceCall(nil, nil, "run-1", PhaseExecute, "executor", "gpt-4o", "prompt", "", 0, errors.New("timeout"))
 }
 
 // ── traceCall with real Tracer ────────────────────────────────────────────────
@@ -28,7 +28,7 @@ func TestTraceCallRecordsOkEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	traceCall(tr, "run-trace-ok", PhaseExecute, "executor", "claude-sonnet-4-6", "my prompt", "my response", 80, nil)
+	traceCall(tr, nil, "run-trace-ok", PhaseExecute, "executor", "claude-sonnet-4-6", "my prompt", "my response", 80, nil)
 	tr.Close()
 
 	events, err := ReadTrace(tr.Path())
@@ -68,7 +68,7 @@ func TestTraceCallRecordsFailedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	traceCall(tr, "run-trace-fail", PhaseVerify, "verifier", "gpt-4o", "prompt", "", 0, errors.New("connection reset"))
+	traceCall(tr, nil, "run-trace-fail", PhaseVerify, "verifier", "gpt-4o", "prompt", "", 0, errors.New("connection reset"))
 	tr.Close()
 
 	events, _ := ReadTrace(tr.Path())
@@ -90,9 +90,9 @@ func TestTraceCallMultipleEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	traceCall(tr, "run-trace-multi", PhaseExecute, "executor", "model-a", "p1", "r1", 40, nil)
-	traceCall(tr, "run-trace-multi", PhaseVerify, "verifier", "model-b", "p2", "r2", 60, nil)
-	traceCall(tr, "run-trace-multi", PhaseVerify, "reviewer", "model-b", "p3", "r3", 50, nil)
+	traceCall(tr, nil, "run-trace-multi", PhaseExecute, "executor", "model-a", "p1", "r1", 40, nil)
+	traceCall(tr, nil, "run-trace-multi", PhaseVerify, "verifier", "model-b", "p2", "r2", 60, nil)
+	traceCall(tr, nil, "run-trace-multi", PhaseVerify, "reviewer", "model-b", "p3", "r3", 50, nil)
 	tr.Close()
 
 	events, _ := ReadTrace(tr.Path())
@@ -107,8 +107,8 @@ func TestTraceCallMultipleEvents(t *testing.T) {
 func TestTraceCallHashDiffersForDifferentPrompts(t *testing.T) {
 	dir := t.TempDir()
 	tr, _ := NewTracer(dir, "run-hash-test")
-	traceCall(tr, "run-hash-test", PhaseExecute, "executor", "m", "prompt-A", "out", 10, nil)
-	traceCall(tr, "run-hash-test", PhaseExecute, "executor", "m", "prompt-B", "out", 10, nil)
+	traceCall(tr, nil, "run-hash-test", PhaseExecute, "executor", "m", "prompt-A", "out", 10, nil)
+	traceCall(tr, nil, "run-hash-test", PhaseExecute, "executor", "m", "prompt-B", "out", 10, nil)
 	tr.Close()
 
 	events, _ := ReadTrace(tr.Path())
@@ -170,7 +170,7 @@ func TestTraceCallTimestamp(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Millisecond)
 	dir := t.TempDir()
 	tr, _ := NewTracer(dir, "run-ts")
-	traceCall(tr, "run-ts", PhaseExecute, "executor", "m", "p", "r", 10, nil)
+	traceCall(tr, nil, "run-ts", PhaseExecute, "executor", "m", "p", "r", 10, nil)
 	tr.Close()
 	after := time.Now().UTC().Add(time.Millisecond)
 

@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0] — 2026-06-27 — Structured JSONL logging wired no loop runner (Sprint 86)
+
+22/22 packages green com -race. 6 novos testes em internal/loop/sprint86_test.go.
+
+### Added — `internal/loop/runner.go`
+- `RunConfig.LogJSON io.Writer` — quando não-nil, cada LLM call emite uma linha JSONL com time, level, event, run_id, phase, agent, model, result, tokens, cost_usd
+- `traceCall` expandido para aceitar `logJSON io.Writer` como segundo parâmetro (nil-safe)
+- Todos os 4 call sites atualizados para passar `cfg.LogJSON`
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `loop start --log-json` — ativa JSONL em stdout (pipes para jq, Datadog, Loki, etc.)
+
+### Fixed — `internal/loop/sprint50_test.go`
+- Atualizado para nova assinatura de `traceCall` (adicionado `nil` como segundo arg)
+
+---
+
 ## [2.32.0] — 2026-06-27 — Config file .radiant.yaml (Sprint 85)
 
 ### Added — `internal/config/config.go`

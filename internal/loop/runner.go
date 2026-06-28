@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -81,6 +83,11 @@ type RunConfig struct {
 	// When the family has no stronger sibling the anchor is used for all phases.
 	// Overrides VerifierModel and PlannerModel when enabled.
 	AutoRoute bool
+
+	// LogJSON is an optional writer that receives one JSONL entry per
+	// iteration event. Use os.Stdout (or a file) to activate --log-json.
+	// nil = no structured logging (default).
+	LogJSON io.Writer
 }
 
 // StreamWriter is the interface for streaming output — satisfied by *os.File,
@@ -101,12 +108,6 @@ type RunResult struct {
 	CostUSD    float64
 }
 
-// Run executes the full autonomous Discover→Plan→Execute→Verify→Persist cycle
-// for a free-form goal. It connects the Cycle state machine to real LLM calls,
-// enforcing all configured brakes at each iteration boundary.
-//
-// This is the central integration point — the thing that makes
-// `radiant loop start` actually call an LLM instead of just managing state.
 // pidPath returns the path of the PID file for a run.
 func pidPath(projectDir, runID string) string {
 	return filepath.Join(projectDir, ".radiant-harness", "pids", runID+".pid")
@@ -145,6 +146,7 @@ func CancelRun(projectDir, runID string) error {
 	return nil
 }
 
+// Run executes the full autonomous Discover→Plan→Execute→Verify→Persist cycle.
 func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*RunResult, error) {
 	started := time.Now()
 
@@ -291,7 +293,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			planPrompt := BuildPlannerPrompt(goal, c.State().Iteration)
 			planResp, planErr := planClient.SimpleChat(ctx, plannerSystemPrompt(), planPrompt)
 			planToks := estimateTokens(planPrompt, planResp)
-			traceCall(tr, runID, PhasePlan, "planner", planModel.Model, planPrompt, planResp, planToks, planErr)
+			traceCall(tr, cfg.LogJSON, runID, PhasePlan, "planner", planModel.Model, planPrompt, planResp, planToks, planErr)
 			if planErr == nil {
 				b.Consume(planToks, PhasePlan)
 				planOutput = planResp
@@ -323,7 +325,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			execOutput, execErr = execClient.SimpleChat(ctx, executorSystemPrompt(projectCtxBlock), execPrompt)
 		}
 		toks := estimateTokens(execPrompt, execOutput)
-		traceCall(tr, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
 		if execErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("executor error: %v", execErr))
 			_ = c.IncrIteration()
@@ -347,7 +349,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg)
 		verResponse, verErr := verClient.SimpleChat(ctx, verifierSystemPrompt(), verPrompt)
 		verToks := estimateTokens(verPrompt, verResponse)
-		traceCall(tr, runID, PhaseVerify, "verifier", verModel.Model, verPrompt, verResponse, verToks, verErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "verifier", verModel.Model, verPrompt, verResponse, verToks, verErr)
 		if verErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("verifier error: %v", verErr))
 			_ = c.IncrIteration()
@@ -378,7 +380,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		reviewPrompt := BuildReviewPrompt(goal, lastVerifyOutput, lastReviewFindings)
 		reviewResponse, reviewErr := verClient.SimpleChat(ctx, reviewerSystemPrompt(), reviewPrompt)
 		revToks := estimateTokens(reviewPrompt, reviewResponse)
-		traceCall(tr, runID, PhaseVerify, "reviewer", verModel.Model, reviewPrompt, reviewResponse, revToks, reviewErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "reviewer", verModel.Model, reviewPrompt, reviewResponse, revToks, reviewErr)
 		if reviewErr == nil {
 			b.Consume(revToks, PhaseVerify)
 			reviewResult := ParseReviewResponse(reviewResponse)
@@ -556,13 +558,9 @@ func simpleChatStream(ctx context.Context, client *llm.Client, systemPrompt, use
 	return sb.String(), err
 }
 
-// traceCall records a single LLM call to the Tracer.
-// It is nil-safe: if tr is nil, it does nothing.
-// errVal drives the result field: nil → "ok", non-nil → "failed".
-func traceCall(tr *Tracer, runID string, phase Phase, agent, model, prompt, response string, tokens int, errVal error) {
-	if tr == nil {
-		return
-	}
+// traceCall records a single LLM call to the Tracer and optionally emits a
+// JSONL entry to logJSON when non-nil.
+func traceCall(tr *Tracer, logJSON io.Writer, runID string, phase Phase, agent, model, prompt, response string, tokens int, errVal error) {
 	result := "ok"
 	evidence := ""
 	if errVal != nil {
@@ -570,17 +568,53 @@ func traceCall(tr *Tracer, runID string, phase Phase, agent, model, prompt, resp
 		evidence = errVal.Error()
 	}
 	h := sha256.Sum256([]byte(prompt))
-	_ = tr.Record(TraceEvent{
+	event := TraceEvent{
 		Timestamp:  time.Now().UTC(),
 		RunID:      runID,
 		Phase:      phase,
 		Action:     "llm_call",
 		Agent:      agent,
 		PromptHash: hex.EncodeToString(h[:4]),
-		TokensIn:   tokens / 2, // rough split: half in, half out
+		TokensIn:   tokens / 2,
 		TokensOut:  tokens / 2,
 		Result:     result,
 		Evidence:   evidence,
 		Meta:       map[string]string{"model": model},
-	})
+	}
+	if tr != nil {
+		_ = tr.Record(event)
+	}
+	if logJSON != nil {
+		type jsonEntry struct {
+			Time    string  `json:"time"`
+			Level   string  `json:"level"`
+			Event   string  `json:"event"`
+			RunID   string  `json:"run_id"`
+			Phase   string  `json:"phase"`
+			Agent   string  `json:"agent,omitempty"`
+			Model   string  `json:"model,omitempty"`
+			Result  string  `json:"result"`
+			Tokens  int     `json:"tokens"`
+			CostUSD float64 `json:"cost_usd,omitempty"`
+		}
+		lvl := "info"
+		if errVal != nil {
+			lvl = "error"
+		}
+		cost, _ := EstimateCost(model, tokens/2, tokens/2)
+		entry := jsonEntry{
+			Time:    event.Timestamp.Format(time.RFC3339),
+			Level:   lvl,
+			Event:   "loop.llm_call",
+			RunID:   runID,
+			Phase:   string(phase),
+			Agent:   agent,
+			Model:   model,
+			Result:  result,
+			Tokens:  tokens,
+			CostUSD: cost,
+		}
+		b, _ := json.Marshal(entry)
+		_, _ = fmt.Fprintf(logJSON, "%s\n", b)
+	}
 }

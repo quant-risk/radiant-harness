@@ -164,6 +164,11 @@ func registerLoopCmds(root *cobra.Command) {
 				webhookURL = cfg.WebhookURL
 			}
 
+			logJSONFlag, _ := cmd.Flags().GetBool("log-json")
+			if logJSONFlag {
+				runCfg.LogJSON = os.Stdout
+			}
+
 			result, err := loop.Run(context.Background(), cwd, runID, goal, runCfg)
 			if err != nil {
 				_ = webhook.Send(context.Background(), webhookURL, webhook.Payload{
@@ -201,6 +206,7 @@ func registerLoopCmds(root *cobra.Command) {
 		},
 	}
 	loopStartCmd.Flags().String("webhook-url", "", "URL to POST a JSON event when the loop finishes")
+	loopStartCmd.Flags().Bool("log-json", false, "Emit structured JSONL to stdout for each LLM call (one entry per line)")
 	loopStartCmd.Flags().Int("budget", 0, "Token budget (0 = use profile default)")
 	loopStartCmd.Flags().Int("max-iter", 0, "Max iterations (0 = use default 20)")
 	loopStartCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
