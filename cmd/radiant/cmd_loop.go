@@ -197,7 +197,8 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("read trace for %q: %w", runID, err)
 				}
-				fmt.Print(loop.FormatProgress(runID, events))
+				modelID, _ := cmd.Flags().GetString("model")
+				fmt.Print(loop.FormatProgress(runID, modelID, events))
 				return nil
 			}
 

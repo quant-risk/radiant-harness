@@ -138,6 +138,10 @@ type TraceInfo struct {
 	LastResult string
 	LastAction string
 	UpdatedAt  time.Time // timestamp of last event
+	TokensIn   int
+	TokensOut  int
+	CostUSD    float64 // 0 when model unknown
+	ModelID    string
 }
 
 // ListTraceInfos returns a summary row per trace, newest-first.
@@ -155,6 +159,16 @@ func ListTraceInfos(projectDir string) ([]TraceInfo, error) {
 			continue
 		}
 		last := events[len(events)-1]
+		var tIn, tOut int
+		var modelID string
+		for _, e := range events {
+			tIn += e.TokensIn
+			tOut += e.TokensOut
+			if e.Meta != nil && e.Meta["model"] != "" {
+				modelID = e.Meta["model"]
+			}
+		}
+		cost, _ := EstimateCost(modelID, tIn, tOut)
 		infos = append(infos, TraceInfo{
 			RunID:      id,
 			EventCount: len(events),
@@ -162,6 +176,10 @@ func ListTraceInfos(projectDir string) ([]TraceInfo, error) {
 			LastResult: last.Result,
 			LastAction: last.Action,
 			UpdatedAt:  last.Timestamp,
+			TokensIn:   tIn,
+			TokensOut:  tOut,
+			CostUSD:    cost,
+			ModelID:    modelID,
 		})
 	}
 	// Newest first (by UpdatedAt; zero times sort last).
@@ -179,8 +197,8 @@ func FormatTraceList(infos []TraceInfo) string {
 		return "No traces found. Start a loop with: radiant loop start \"<goal>\"\n"
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%-36s  %6s  %-10s  %-8s  %s\n", "RUN-ID", "EVENTS", "PHASE", "RESULT", "UPDATED"))
-	sb.WriteString(strings.Repeat("-", 80) + "\n")
+	sb.WriteString(fmt.Sprintf("%-36s  %6s  %-10s  %-8s  %9s  %s\n", "RUN-ID", "EVENTS", "PHASE", "RESULT", "COST", "UPDATED"))
+	sb.WriteString(strings.Repeat("-", 88) + "\n")
 	for _, info := range infos {
 		ts := ""
 		if !info.UpdatedAt.IsZero() {
@@ -190,8 +208,12 @@ func FormatTraceList(infos []TraceInfo) string {
 		if len(runID) > 36 {
 			runID = runID[:33] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("%-36s  %6d  %-10s  %-8s  %s\n",
-			runID, info.EventCount, info.LastPhase, info.LastResult, ts))
+		cost := ""
+		if info.CostUSD > 0 {
+			cost = FormatCost(info.CostUSD)
+		}
+		sb.WriteString(fmt.Sprintf("%-36s  %6d  %-10s  %-8s  %9s  %s\n",
+			runID, info.EventCount, info.LastPhase, info.LastResult, cost, ts))
 	}
 	return sb.String()
 }
@@ -204,9 +226,15 @@ func TracePath(projectDir, runID string) string {
 // FormatProgress renders a compact status summary of a running or completed loop.
 // It derives iteration number, current phase, token totals, and last action from
 // the event stream without needing the live Cycle object.
-func FormatProgress(runID string, events []TraceEvent) string {
+func FormatProgress(runID, modelID string, events []TraceEvent) string {
 	if len(events) == 0 {
 		return fmt.Sprintf("Run %s — no events recorded yet.\n", runID)
+	}
+	// modelID can be read from the first event's Meta if not passed.
+	if modelID == "" {
+		if events[0].Meta != nil {
+			modelID = events[0].Meta["model"]
+		}
 	}
 
 	var (
@@ -245,6 +273,9 @@ func FormatProgress(runID string, events []TraceEvent) string {
 	sb.WriteString(fmt.Sprintf("Iteration: %d\n", iteration))
 	sb.WriteString(fmt.Sprintf("Phase:     %s\n", lastPhase))
 	sb.WriteString(fmt.Sprintf("Tokens:    %d total (%d in / %d out)\n", totalTokens, tokensIn, tokensOut))
+	if cost, ok := EstimateCost(modelID, tokensIn, tokensOut); ok {
+		sb.WriteString(fmt.Sprintf("Cost:      %s\n", FormatCost(cost)))
+	}
 	sb.WriteString(fmt.Sprintf("Events:    %d\n", len(events)))
 	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf("Last action: %s → %s %s\n", lastAction, resultIcon(lastResult), lastResult))

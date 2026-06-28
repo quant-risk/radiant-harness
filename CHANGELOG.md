@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] — 2026-06-27 — Cost tracking em tempo real (Sprint 65)
+
+20/20 packages green com -race. 16 novos testes no loop package.
+
+### Changed — `internal/loop/pricing.go`
+- `ModelPricing` agora tem `CostPer1KInput` além de `CostPer1KOutput`
+- Tabela completa de 32 modelos com preços de input e output (junho 2026)
+- `EstimateCost(modelID, tokensIn, tokensOut) (usd, ok)` — custo total em USD
+- `FormatCost(usd)` — formata "$0.0042" ou "< $0.0001"
+
+### Changed — `internal/loop/trace.go`
+- `FormatProgress(runID, modelID, events)` — exibe linha "Cost: $X.XXXX" quando model conhecido
+- `TraceInfo` ganha `TokensIn`, `TokensOut`, `CostUSD`, `ModelID`
+- `ListTraceInfos` popula custo lendo `Meta["model"]` de cada evento
+- `FormatTraceList` ganha coluna COST
+
+### Changed — `cmd/radiant/cmd_loop.go`
+- `loop status <run-id>` passa `--model` flag para `FormatProgress`
+
+### Added — `internal/loop/sprint65_test.go`
+- 16 testes: EstimateCost (5), FormatCost (4), FormatProgress+model (3), TraceInfo cost (2), FormatTraceList cost (2)
+
+---
+
 ## [2.12.0] — 2026-06-27 — loop list + trace list rica (Sprint 64)
 
 20/20 packages green com -race. 11 novos testes no loop package.
