@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -167,7 +168,96 @@ func registerFleetCmds(root *cobra.Command) {
 		},
 	}
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd)
+	// ── fleet dispatch ───────────────────────────────────────────────────────
+	fleetDispatchCmd := &cobra.Command{
+		Use:   "dispatch <run-id>",
+		Short: "Spawn one agent process per pending task in isolated worktrees",
+		Long: `Dispatch claims all pending tasks from a fleet run and spawns one
+radiant loop process per task in an isolated git worktree. Each agent
+receives the task's DoneWhen criterion as its goal.
+
+Flags like --model and --auto-route are forwarded to every agent subprocess
+so all agents share the same model configuration.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			modelID, _ := cmd.Flags().GetString("model")
+			autoRoute, _ := cmd.Flags().GetBool("auto-route")
+			timeoutMins, _ := cmd.Flags().GetInt("timeout")
+
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+
+			iso, err := fleet.NewIsolator(store, cwd)
+			if err != nil {
+				return fmt.Errorf("init isolator: %w", err)
+			}
+
+			cfg := fleet.DispatchConfig{}
+			if timeoutMins > 0 {
+				cfg.Timeout = time.Duration(timeoutMins) * time.Minute
+			}
+
+			d, err := fleet.NewDispatcher(iso, cfg)
+			if err != nil {
+				return fmt.Errorf("init dispatcher: %w", err)
+			}
+
+			// Build extra args forwarded to each `loop start` subprocess.
+			var extraArgs []string
+			if modelID != "" {
+				extraArgs = append(extraArgs, "--model", modelID)
+			}
+			if autoRoute {
+				extraArgs = append(extraArgs, "--auto-route")
+			}
+
+			snap := store.Snapshot()
+			pending := 0
+			for _, t := range snap.Tasks {
+				if t.Status == fleet.TaskPending {
+					pending++
+				}
+			}
+			fmt.Printf("✓ Dispatching fleet %s\n", runID)
+			fmt.Printf("  Pending tasks: %d\n", pending)
+			if modelID != "" {
+				fmt.Printf("  Model:         %s\n", modelID)
+			}
+			if autoRoute {
+				fmt.Printf("  Auto-route:    enabled\n")
+			}
+			if cfg.Timeout > 0 {
+				fmt.Printf("  Timeout/agent: %v\n", cfg.Timeout)
+			}
+			fmt.Println()
+
+			results, err := d.RunAll(context.Background(), extraArgs)
+			if err != nil {
+				return fmt.Errorf("dispatch: %w", err)
+			}
+
+			success, failed := 0, 0
+			for _, r := range results {
+				if r.ExitCode == 0 && r.Err == nil {
+					success++
+				} else {
+					failed++
+				}
+			}
+			fmt.Printf("✓ Dispatch complete: %d succeeded, %d failed\n", success, failed)
+			fmt.Printf("  Run `radiant fleet status %s` to review results.\n", runID)
+			return nil
+		},
+	}
+	fleetDispatchCmd.Flags().String("model", "", "Model forwarded to each agent (default: agent uses RADIANT_MODEL or claude-sonnet-4-6)")
+	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
+	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
+
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetDispatchCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────

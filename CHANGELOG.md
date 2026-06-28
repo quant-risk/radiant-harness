@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] — 2026-06-27 — Fleet Dispatch com AutoRoute (Sprint 60)
+
+20/20 packages green com -race. 4 novos testes no fleet package.
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `fleet dispatch <run-id>` — spawna um processo por task pendente via `Dispatcher.RunAll()`
+- Flags `--model`, `--auto-route`, `--timeout` forwarded a cada subprocesso como extraArgs
+- Output: contagem de tarefas pendentes, config ativa, resultado final (sucesso/falha)
+
+### Added — `internal/fleet/sprint60_test.go`
+- 4 testes: model forwarded, nil extraArgs, --auto-route forwarded, multi-task (≥2 ocorrências)
+- `captureWriter` com `sync.Mutex` (safe com -race em RunAll paralelo)
+
+---
+
 ## [2.7.0] — 2026-06-27 — AutoRoute integrado no loop runner (Sprint 59)
 
 20/20 packages green com -race. 10 novos testes no loop package.
