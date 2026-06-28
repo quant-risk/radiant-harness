@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
+	"github.com/quant-risk/radiant-harness/internal/config"
 	"github.com/quant-risk/radiant-harness/internal/fleet"
 	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/llm"
@@ -288,6 +290,20 @@ so all agents share the same model configuration.`,
 			modelID, _ := cmd.Flags().GetString("model")
 			autoRoute, _ := cmd.Flags().GetBool("auto-route")
 			timeoutMins, _ := cmd.Flags().GetInt("timeout")
+			concurrency, _ := cmd.Flags().GetInt("concurrency")
+			maxRetries, _ := cmd.Flags().GetInt("max-retries")
+
+			// Apply project config defaults for unset flags.
+			projCfg, _ := config.Load(cwd)
+			if projCfg == nil {
+				projCfg = &config.Config{}
+			}
+			if concurrency == 0 && projCfg.FleetConcurrency > 0 {
+				concurrency = projCfg.FleetConcurrency
+			}
+			if maxRetries == 0 && projCfg.FleetMaxRetries > 0 {
+				maxRetries = projCfg.FleetMaxRetries
+			}
 
 			store, err := fleet.LoadStore(cwd, runID)
 			if err != nil {
@@ -303,6 +319,8 @@ so all agents share the same model configuration.`,
 			if timeoutMins > 0 {
 				cfg.Timeout = time.Duration(timeoutMins) * time.Minute
 			}
+			cfg.MaxConcurrency = concurrency
+			cfg.MaxRetries = maxRetries
 
 			d, err := fleet.NewDispatcher(iso, cfg)
 			if err != nil {
@@ -368,6 +386,8 @@ so all agents share the same model configuration.`,
 	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
 	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
 	fleetDispatchCmd.Flags().String("webhook-url", "", "URL to POST a JSON event when dispatch completes")
+	fleetDispatchCmd.Flags().Int("concurrency", 0, "Max simultaneous agent processes (0 = unlimited)")
+	fleetDispatchCmd.Flags().Int("max-retries", 0, "Auto-retry each task on non-zero exit up to N times with backoff")
 
 	fleetWatchCmd := &cobra.Command{
 		Use:   "watch <run-id>",
@@ -586,7 +606,68 @@ Examples:
 	fleetRetryCmd.Flags().Bool("auto-route", false, "Forward --auto-route to the agent")
 	fleetRetryCmd.Flags().Int("timeout", 0, "Agent timeout in minutes (0 = no timeout)")
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd, fleetWatchCmd, fleetResumeCmd, fleetRetryCmd)
+	// ── fleet cancel (Sprint 78) ──────────────────────────────────────────────
+	fleetCancelCmd := &cobra.Command{
+		Use:   "cancel <run-id> [task-id]",
+		Short: "Send SIGTERM to a running fleet dispatch or specific task process",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			if len(args) == 2 {
+				// Cancel a specific task by its loop run-id (task processes write
+				// their own PID under the task's run-id).
+				if err := loop.CancelRun(cwd, args[1]); err != nil {
+					return err
+				}
+				fmt.Printf("SIGTERM sent to task %q in fleet %q.\n", args[1], runID)
+			} else {
+				// Cancel the fleet-level dispatch process (run-id matches dispatcher).
+				if err := loop.CancelRun(cwd, runID); err != nil {
+					return err
+				}
+				fmt.Printf("SIGTERM sent to fleet %q.\n", runID)
+			}
+			return nil
+		},
+	}
+
+	// ── fleet history (Sprint 81) ─────────────────────────────────────────────
+	fleetHistoryCmd := &cobra.Command{
+		Use:   "history",
+		Short: "List all fleet runs with goal, task counts and updated timestamp",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			asJSON, _ := cmd.Flags().GetBool("json")
+			summaries, err := fleet.ListFleets(cwd)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(summaries)
+			}
+			if len(summaries) == 0 {
+				fmt.Println("No fleet runs found.")
+				return nil
+			}
+			fmt.Printf("%-28s  %-6s  %-6s  %-6s  %s\n", "RUN-ID", "TOTAL", "DONE", "FAILED", "GOAL")
+			fmt.Println(strings.Repeat("─", 80))
+			for _, s := range summaries {
+				goal := s.Goal
+				if len(goal) > 30 {
+					goal = goal[:27] + "…"
+				}
+				fmt.Printf("%-28s  %-6d  %-6d  %-6d  %s\n",
+					s.RunID, s.Total, s.Done, s.Failed, goal)
+			}
+			return nil
+		},
+	}
+	fleetHistoryCmd.Flags().Bool("json", false, "Output as JSON array")
+
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd, fleetWatchCmd, fleetResumeCmd, fleetRetryCmd, fleetCancelCmd, fleetHistoryCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────

@@ -180,6 +180,57 @@ func (s *Store) Snapshot() SharedContext {
 }
 
 // persist writes the store atomically. Caller must hold s.mu.
+// FleetSummary is a lightweight view of a persisted fleet for history listings.
+type FleetSummary struct {
+	RunID     string    `json:"run_id"`
+	Goal      string    `json:"goal"`
+	Total     int       `json:"total"`
+	Done      int       `json:"done"`
+	Failed    int       `json:"failed"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ListFleets returns a summary of all persisted fleets, newest-first.
+func ListFleets(projectDir string) ([]FleetSummary, error) {
+	dir := filepath.Join(projectDir, ".radiant-harness", "fleet")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []FleetSummary
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		runID := e.Name()[:len(e.Name())-5]
+		store, err := LoadStore(projectDir, runID)
+		if err != nil {
+			continue
+		}
+		snap := store.Snapshot()
+		s := FleetSummary{RunID: runID, Goal: snap.Goal, Total: len(snap.Tasks), UpdatedAt: snap.UpdatedAt}
+		for _, t := range snap.Tasks {
+			switch t.Status {
+			case TaskDone:
+				s.Done++
+			case TaskFailed:
+				s.Failed++
+			}
+		}
+		out = append(out, s)
+	}
+	// Sort newest-first by UpdatedAt (insertion sort — typically small N).
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].UpdatedAt.After(out[j-1].UpdatedAt); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) persist() error {
 	data, err := json.MarshalIndent(s.ctx, "", "  ")
 	if err != nil {

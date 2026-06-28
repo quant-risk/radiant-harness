@@ -12,6 +12,16 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/worktree"
 )
 
+// retryBackoff returns the wait duration for attempt n (0-based) using
+// exponential backoff: 2^n seconds, capped at 60s.
+func retryBackoff(n int) time.Duration {
+	d := time.Duration(1<<uint(n)) * time.Second
+	if d > 60*time.Second {
+		d = 60 * time.Second
+	}
+	return d
+}
+
 // DispatchConfig controls how a fleet of agent processes is launched.
 type DispatchConfig struct {
 	// Binary is the path to the radiant executable. Defaults to os.Executable().
@@ -28,6 +38,14 @@ type DispatchConfig struct {
 
 	// Timeout per agent process. 0 = no timeout.
 	Timeout time.Duration
+
+	// MaxConcurrency caps the number of agent processes running simultaneously.
+	// 0 = unlimited (all tasks start in parallel).
+	MaxConcurrency int
+
+	// MaxRetries is the number of automatic retries per task on transient failure
+	// (non-zero exit when the process started successfully). 0 = no retries.
+	MaxRetries int
 }
 
 // AgentResult is the outcome of a single spawned agent process.
@@ -96,11 +114,32 @@ func (d *Dispatcher) RunAll(ctx context.Context, extraArgs []string) ([]AgentRes
 	results := make([]AgentResult, len(tasks))
 	var wg sync.WaitGroup
 
+	// Semaphore limits concurrent agent processes when MaxConcurrency > 0.
+	var sem chan struct{}
+	if d.cfg.MaxConcurrency > 0 {
+		sem = make(chan struct{}, d.cfg.MaxConcurrency)
+	}
+
 	for i, c := range tasks {
 		wg.Add(1)
 		go func(idx int, task *Task, wt worktree.Worktree) {
 			defer wg.Done()
+			if sem != nil {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+			}
 			result := d.spawnAgent(ctx, task, wt, extraArgs)
+
+			// Auto-retry on transient failure (process started but exited non-zero).
+			for attempt := 0; attempt < d.cfg.MaxRetries && result.Err == nil && result.ExitCode != 0; attempt++ {
+				select {
+				case <-ctx.Done():
+					break
+				case <-time.After(retryBackoff(attempt)):
+				}
+				result = d.spawnAgent(ctx, task, wt, extraArgs)
+			}
+
 			results[idx] = result
 
 			// Update task state in the store based on process exit.

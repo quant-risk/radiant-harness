@@ -4,6 +4,94 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.0] — 2026-06-27 — Config file .radiant.yaml (Sprint 85)
+
+### Added — `internal/config/config.go`
+- `Config` struct com yaml/json tags: model, max_iter, profile, webhook_url, fleet_concurrency, fleet_max_retries, auto_route
+- `Load(projectDir)` — lê `.radiant.yaml` ou `.radiant.yml`; retorna `&Config{}` vazio se não existir
+- 6 testes em config_test.go
+
+### Changed
+- `loop start` aplica defaults do config (model, max_iter, profile, auto_route, webhook_url)
+- `fleet dispatch` aplica defaults do config (fleet_concurrency, fleet_max_retries)
+
+---
+
+## [2.31.0] — 2026-06-27 — radiant doctor (Sprint 84)
+
+### Added — `cmd/radiant/cmd_doctor.go`
+- `radiant doctor` — verifica API key, git version, repo atual, worktrees stale, model e binary path
+- Retorna exit code 1 se qualquer check falhar
+
+---
+
+## [2.30.0] — 2026-06-27 — Structured logging JSONL (Sprint 82)
+
+### Added — `internal/slog/slog.go`
+- `Logger` com `Info(Entry)` e `Error(Entry)` — emite JSONL com time, level, event, run_id, phase, tokens, cost_usd, data
+- `New(io.Writer)`, `Discard()`, `Stdout()` construtores
+- 5 testes em slog_test.go
+
+---
+
+## [2.29.0] — 2026-06-27 — Auto-retry com backoff no dispatcher (Sprint 83)
+
+### Added — `internal/fleet/dispatch.go`
+- `DispatchConfig.MaxRetries int` — retry automático por task em falha transiente
+- `retryBackoff(n)` — backoff exponencial 2^n segundos, cap 60s
+- Loop de retry por goroutine antes de marcar task como failed
+
+---
+
+## [2.28.0] — 2026-06-27 — fleet history (Sprint 81)
+
+### Added — `internal/fleet/store.go`
+- `FleetSummary` struct com json tags
+- `ListFleets(projectDir)` — lista fleets newest-first por UpdatedAt
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `radiant fleet history [--json]`
+
+---
+
+## [2.27.0] — 2026-06-27 — loop history (Sprint 80)
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `radiant loop history [--json]` — agrega runs: total, ok, failed, tokens, custo
+
+---
+
+## [2.26.0] — 2026-06-27 — fleet cancel (Sprint 78)
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `radiant fleet cancel <run-id> [task-id]` — SIGTERM ao processo do fleet ou task
+
+---
+
+## [2.25.0] — 2026-06-27 — fleet --concurrency + fleet cancel (Sprint 79)
+
+### Added — `internal/fleet/dispatch.go`
+- `DispatchConfig.MaxConcurrency int` — semáforo que limita goroutines ativas
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `fleet dispatch --concurrency N` e `--max-retries N`
+
+---
+
+## [2.24.0] — 2026-06-27 — loop cancel via PID file (Sprint 77)
+
+### Added — `internal/loop/runner.go`
+- `writePID(projectDir, runID)` — escreve PID em `.radiant-harness/pids/<runID>.pid`
+- `removePID(projectDir, runID)` — limpa no defer do Run
+- `CancelRun(projectDir, runID)` — lê PID file e manda SIGTERM
+- `Run()` agora escreve/remove PID automaticamente
+- 5 testes em sprint77_test.go
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `radiant loop cancel <run-id>`
+
+---
+
 ## [2.23.0] — 2026-06-27 — E2E tests: pipeline fleet completo (Sprint 76)
 
 20/20 packages green com -race. 8 novos testes em internal/fleet/e2e_test.go.

@@ -26,6 +26,7 @@ func main() {
 	registerContextCmds(root)
 	registerFleetCmds(root)
 	registerLoopCmds(root)
+	registerDoctorCmd(root)
 
 	// ── version ──
 	root.SetVersionTemplate("{{.Version}}\n")

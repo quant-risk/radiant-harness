@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/quant-risk/radiant-harness/internal/config"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/schedule"
@@ -29,9 +30,22 @@ func registerLoopCmds(root *cobra.Command) {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			goal := args[0]
+
+			// Load project config — provides defaults for unset flags.
+			cfg, _ := config.Load(cwd)
+			if cfg == nil {
+				cfg = &config.Config{}
+			}
+
 			budget, _ := cmd.Flags().GetInt("budget")
 			maxIter, _ := cmd.Flags().GetInt("max-iter")
+			if maxIter == 0 && cfg.MaxIter > 0 {
+				maxIter = cfg.MaxIter
+			}
 			profile, _ := cmd.Flags().GetString("profile")
+			if profile == "standard" && cfg.Profile != "" {
+				profile = cfg.Profile
+			}
 
 			runID := fmt.Sprintf("run-%d", time.Now().Unix())
 
@@ -60,12 +74,18 @@ func registerLoopCmds(root *cobra.Command) {
 						"  or use --dry-run to register the goal without calling an LLM")
 			}
 
-			// Resolve model: flag > env > provider default.
+			// Resolve model: flag > env > config > provider default.
 			if modelID == "" {
 				modelID = os.Getenv("RADIANT_MODEL")
 			}
+			if modelID == "" && cfg.Model != "" {
+				modelID = cfg.Model
+			}
 			if modelID == "" {
 				modelID = "claude-sonnet-4-6"
+			}
+			if !autoRoute && cfg.AutoRoute {
+				autoRoute = true
 			}
 			if verifierModelID == "" {
 				verifierModelID = modelID
@@ -140,6 +160,9 @@ func registerLoopCmds(root *cobra.Command) {
 			}
 
 			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+			if webhookURL == "" {
+				webhookURL = cfg.WebhookURL
+			}
 
 			result, err := loop.Run(context.Background(), cwd, runID, goal, runCfg)
 			if err != nil {
@@ -598,7 +621,69 @@ Examples:
 	loopDiffCmd.Flags().String("base", "main", "Base branch to diff against")
 	loopDiffCmd.Flags().Bool("stat", false, "Show --stat summary instead of full diff")
 
-	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd, loopExportCmd, loopDiffCmd)
+	// ── loop cancel (Sprint 77) ──────────────────────────────────────────────
+	loopCancelCmd := &cobra.Command{
+		Use:   "cancel <run-id>",
+		Short: "Gracefully stop a running loop by sending SIGTERM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			if err := loop.CancelRun(cwd, runID); err != nil {
+				return err
+			}
+			fmt.Printf("SIGTERM sent to loop %q — it will stop after the current iteration.\n", runID)
+			return nil
+		},
+	}
+
+	// ── loop history (Sprint 80) ─────────────────────────────────────────────
+	loopHistoryCmd := &cobra.Command{
+		Use:   "history",
+		Short: "Show aggregate stats for past loop runs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			asJSON, _ := cmd.Flags().GetBool("json")
+			infos, err := loop.ListTraceInfos(cwd)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(infos)
+			}
+			if len(infos) == 0 {
+				fmt.Println("No loop runs found.")
+				return nil
+			}
+			var totalCost float64
+			var totalTokens int
+			ok, failed := 0, 0
+			for _, i := range infos {
+				totalCost += i.CostUSD
+				totalTokens += i.TokensIn + i.TokensOut
+				if i.LastResult == "ok" {
+					ok++
+				} else if i.LastResult == "failed" {
+					failed++
+				}
+			}
+			fmt.Printf("Loop history — %d run(s)\n", len(infos))
+			fmt.Printf("  Success:      %d\n", ok)
+			fmt.Printf("  Failed:       %d\n", failed)
+			fmt.Printf("  Total tokens: %d\n", totalTokens)
+			if totalCost > 0 {
+				fmt.Printf("  Total cost:   $%.4f\n", totalCost)
+			}
+			fmt.Println()
+			fmt.Print(loop.FormatTraceList(infos))
+			return nil
+		},
+	}
+	loopHistoryCmd.Flags().Bool("json", false, "Output as JSON array")
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd, loopExportCmd, loopDiffCmd, loopCancelCmd, loopHistoryCmd)
 	root.AddCommand(loopCmd)
 
 	// ── trace (Sprint 35) ────────────────────────────────────────────────────

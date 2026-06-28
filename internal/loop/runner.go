@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -104,8 +107,50 @@ type RunResult struct {
 //
 // This is the central integration point — the thing that makes
 // `radiant loop start` actually call an LLM instead of just managing state.
+// pidPath returns the path of the PID file for a run.
+func pidPath(projectDir, runID string) string {
+	return filepath.Join(projectDir, ".radiant-harness", "pids", runID+".pid")
+}
+
+// writePID writes the current process PID to a file so `loop cancel` can find it.
+func writePID(projectDir, runID string) error {
+	p := pidPath(projectDir, runID)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// removePID cleans up the PID file after the run completes.
+func removePID(projectDir, runID string) { _ = os.Remove(pidPath(projectDir, runID)) }
+
+// CancelRun sends SIGTERM to the process running the given run-id.
+// Returns an error if the PID file is not found or the process cannot be signaled.
+func CancelRun(projectDir, runID string) error {
+	data, err := os.ReadFile(pidPath(projectDir, runID))
+	if err != nil {
+		return fmt.Errorf("no PID file for run %q — is it running? (%w)", runID, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return fmt.Errorf("invalid PID file for run %q: %w", runID, err)
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process %d: %w", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("signal PID %d: %w", pid, err)
+	}
+	return nil
+}
+
 func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*RunResult, error) {
 	started := time.Now()
+
+	// Write PID so `loop cancel` can signal this process.
+	_ = writePID(projectDir, runID)
+	defer removePID(projectDir, runID)
 
 	// Build budget and cycle.
 	b := NewBudget(cfg.Budget)
