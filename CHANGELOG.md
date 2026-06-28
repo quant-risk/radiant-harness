@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-06-27 — Model Routing Engine + correções de validação (Sprint 58-val)
+
+20/20 packages green com -race. Repo limpo.
+
+### Added — `internal/routing/` (sessão anterior, integrado nesta validação)
+- `capability.go` — `DetectAgent(projectDir)`: detecta qual agente hospeda a sessão
+  (radiant loop, Claude Code, OpenCode, Cursor, Copilot, Windsurf, Codex, Gemini, Hermes)
+  e retorna a `Strategy` de roteamento adequada
+- `matrix.go` — tabela de capacidades por agente × fase (Research/Plan/Implement)
+- `resolver.go` — `Resolve(anchor, agent, phases)`: resolve modelo por fase com fallback
+- `emitter.go` — formata plano de roteamento para exibição no CLI
+- `routing.go` — tipos e constantes do pacote (`AgentID`, `Strategy`, `Phase`)
+
+### Fixed — bugs encontrados na validação
+- `internal/routing/capability.go`: `~/.hermes` verificado no passo 3 (antes de
+  .cursor/, .github/copilot-instructions.md, .windsurf/) — na dev machine causava
+  cursor/copilot/windsurf sempre retornarem "hermes"; movido para passo 9
+- `internal/llm/routing.go`: `strings.HasPrefix("gpt-5")` no bloco TierTop
+  capturava `gpt-5-mini` e `gpt-5-nano`; corrigido para `presetName == "gpt-5"`
+- `internal/context/detector.go`: `"platform"` em `DomainOps` gerava
+  falso-positivo em "Trading Platform" → substituído por `"ops-platform"`
+- `internal/llm/routing_test.go` + `client_test.go`: nomes de preset atualizados
+  (`claude-sonnet-4.5` → `claude-sonnet-4-6`, `claude-opus-4.1` → `claude-opus-4-8`),
+  tiers corrigidos para refletir `routing.go` atual, `grok-2` removido
+
+---
+
 ## [2.5.1] — 2026-06-27 — Remove cmd_data.go + cmd_integrations.go duplicatas (Sprint 58)
 
 19/19 packages green. Zero regressões.
