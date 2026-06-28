@@ -17,8 +17,10 @@ import (
 	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/config"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/quant-risk/radiant-harness/internal/skill"
 )
@@ -2981,17 +2983,16 @@ func renderSecurityReport(scope string, findings []securityFinding, errors, warn
 }
 
 // mcpRunFull implements the radiant_run MCP tool.
-// `loop start` is synchronous — it blocks until the loop finishes.
-// So the flow is simply: start (blocks) → export → return.
+// Calls loop.Run() directly in-process — no exec.Command, no PATH dependency.
 func mcpRunFull(args json.RawMessage) mcpResponse {
 	var a struct {
-		Goal      string `json:"goal"`
-		Profile   string `json:"profile"`
-		Model     string `json:"model"`
-		MaxIter   int    `json:"max_iter"`
-		MaxCost   string `json:"max_cost"`
-		MaxTime   string `json:"max_time"`
-		AutoRoute bool   `json:"auto_route"`
+		Goal      string  `json:"goal"`
+		Profile   string  `json:"profile"`
+		Model     string  `json:"model"`
+		MaxIter   int     `json:"max_iter"`
+		MaxCost   float64 `json:"max_cost"`
+		MaxTime   string  `json:"max_time"`
+		AutoRoute bool    `json:"auto_route"`
 	}
 	_ = json.Unmarshal(args, &a)
 	if a.Goal == "" {
@@ -3001,55 +3002,91 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 		a.Profile = "standard"
 	}
 
-	// ── 1. start (blocks until loop finishes) ─────────────────────────────
-	startArgv := []string{"loop", "start", a.Goal, "--profile=" + a.Profile}
-	if a.Model != "" {
-		startArgv = append(startArgv, "--model="+a.Model)
+	cwd, _ := os.Getwd()
+
+	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		cfg = &config.Config{}
 	}
-	if a.MaxIter > 0 {
-		startArgv = append(startArgv, "--max-iter="+strconv.Itoa(a.MaxIter))
+
+	apiKey, baseURL := resolveLoopLLMCreds("")
+
+	modelID := a.Model
+	if modelID == "" {
+		modelID = os.Getenv("RADIANT_MODEL")
 	}
-	if a.MaxCost != "" {
-		startArgv = append(startArgv, "--max-cost="+a.MaxCost)
+	if modelID == "" && cfg.Model != "" {
+		modelID = cfg.Model
 	}
+	if modelID == "" {
+		modelID = "claude-sonnet-4-6"
+	}
+
+	autoRoute := a.AutoRoute || cfg.AutoRoute
+
+	m := llm.Model{Model: modelID, APIKey: apiKey, BaseURL: baseURL}
+	costPer1K, _ := loop.PriceFor(modelID)
+
+	maxIter := a.MaxIter
+	if maxIter == 0 && cfg.MaxIter > 0 {
+		maxIter = cfg.MaxIter
+	}
+
+	var maxDuration time.Duration
 	if a.MaxTime != "" {
-		startArgv = append(startArgv, "--max-time="+a.MaxTime)
-	}
-	if a.AutoRoute {
-		startArgv = append(startArgv, "--auto-route")
+		maxDuration, _ = time.ParseDuration(a.MaxTime)
 	}
 
-	startOut, err := exec.Command("radiant", startArgv...).CombinedOutput()
+	runID := fmt.Sprintf("run-%d", time.Now().Unix())
+
+	runCfg := loop.RunConfig{
+		ExecutorModel: m,
+		VerifierModel: m,
+		PlannerModel:  m,
+		Budget: loop.BudgetConfig{
+			MaxIter:     maxIter,
+			Profile:     loop.BudgetProfile(a.Profile),
+			MaxDuration: maxDuration,
+			MaxCostUSD:  a.MaxCost,
+			CostPer1K:   costPer1K,
+		},
+		AutoRoute: autoRoute,
+	}
+
+	result, err := loop.Run(context.Background(), cwd, runID, a.Goal, runCfg)
+
+	// Build response text.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Run ID: %s\nGoal: %s\nModel: %s\n\n", runID, a.Goal, modelID))
 	if err != nil {
-		return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
-			"content": []map[string]string{{"type": "text", "text": "loop start failed:\n" + string(startOut)}},
-			"isError": true,
-		}}
-	}
-
-	// Extract run-id from output line "  Run ID:  <id>" (format from cmd_loop.go).
-	runID := ""
-	for _, line := range strings.Split(string(startOut), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Run ID:") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 3 {
-				runID = parts[2]
-				break
-			}
+		sb.WriteString(fmt.Sprintf("Loop failed: %v\n", err))
+	} else {
+		sb.WriteString(fmt.Sprintf("Exit: %s\nIterations: %d\nElapsed: %s\nTokens: %d\n",
+			result.ExitReason, result.Iterations,
+			result.Elapsed.Round(time.Second), result.TokensUsed))
+		if result.CostUSD > 0 {
+			sb.WriteString(fmt.Sprintf("Cost: $%.4f\n", result.CostUSD))
 		}
 	}
 
-	// ── 2. export trace ────────────────────────────────────────────────────
-	exportArgv := []string{"loop", "export"}
-	if runID != "" {
-		exportArgv = append(exportArgv, runID)
+	// Export trace directly from the trace file.
+	infos, _ := loop.ListTraceInfos(cwd)
+	for _, info := range infos {
+		if info.RunID == runID {
+			events, readErr := loop.ReadTrace(filepath.Join(cwd, ".radiant-harness", "traces", runID+".jsonl"))
+			if readErr == nil {
+				exp := loop.ExportTrace(runID, modelID, events)
+				sb.WriteString("\n---\n\n")
+				sb.WriteString(loop.ExportTraceMarkdown(exp))
+			}
+			break
+		}
 	}
-	exportOut, _ := exec.Command("radiant", exportArgv...).CombinedOutput()
 
-	result := fmt.Sprintf("%s\n\n### Trace\n%s", string(startOut), string(exportOut))
+	isErr := err != nil
 	return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
-		"content": []map[string]string{{"type": "text", "text": result}},
+		"content": []map[string]string{{"type": "text", "text": sb.String()}},
+		"isError": isErr,
 	}}
 }
 
