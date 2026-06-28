@@ -132,16 +132,16 @@ func ListTraces(projectDir string) ([]string, error) {
 
 // TraceInfo summarises a single trace file without loading all events.
 type TraceInfo struct {
-	RunID      string
-	EventCount int
-	LastPhase  Phase
-	LastResult string
-	LastAction string
-	UpdatedAt  time.Time // timestamp of last event
-	TokensIn   int
-	TokensOut  int
-	CostUSD    float64 // 0 when model unknown
-	ModelID    string
+	RunID      string    `json:"run_id"`
+	EventCount int       `json:"event_count"`
+	LastPhase  Phase     `json:"last_phase,omitempty"`
+	LastResult string    `json:"last_result,omitempty"`
+	LastAction string    `json:"last_action,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	TokensIn   int       `json:"tokens_in"`
+	TokensOut  int       `json:"tokens_out"`
+	CostUSD    float64   `json:"cost_usd"`
+	ModelID    string    `json:"model_id,omitempty"`
 }
 
 // ListTraceInfos returns a summary row per trace, newest-first.

@@ -8,14 +8,14 @@ import (
 
 // FleetStatus describes the overall state of a multi-agent run.
 type FleetStatus struct {
-	RunID       string
-	Goal        string
-	AgentCount  int
-	Tasks       []Task
-	Conflicts   []Conflict
-	Resolutions []Resolution
-	StartedAt   time.Time
-	UpdatedAt   time.Time
+	RunID       string       `json:"run_id"`
+	Goal        string       `json:"goal"`
+	AgentCount  int          `json:"agent_count"`
+	Tasks       []Task       `json:"tasks"`
+	Conflicts   []Conflict   `json:"conflicts,omitempty"`
+	Resolutions []Resolution `json:"resolutions,omitempty"`
+	StartedAt   time.Time    `json:"started_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // AgentRecord tracks a single agent in the fleet.

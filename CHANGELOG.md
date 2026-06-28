@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] — 2026-06-27 — JSON output: fleet status/summary + loop status (Sprint 68)
+
+20/20 packages green com -race. 4 novos testes em internal/fleet/sprint68_test.go.
+
+### Added
+- `radiant fleet status <run-id> --json` — emite FleetStatus como JSON indentado
+- `radiant fleet summary <run-id> --json` — emite FleetStatus completo como JSON (client faz a sumarização)
+- `radiant loop status [run-id] --json` — emite TraceInfo (ou CycleState) como JSON
+- `FleetStatus` fields: json tags snake_case (`run_id`, `goal`, `agent_count`, `tasks`, ...)
+- `TraceInfo` fields: json tags snake_case (`run_id`, `event_count`, `last_phase`, `cost_usd`, ...)
+
+---
+
 ## [2.15.0] — 2026-06-27 — Integração MCP: loop tools (Sprint 67)
 
 20/20 packages green com -race. 8 novos testes no cmd/radiant package.

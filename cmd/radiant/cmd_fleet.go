@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,15 +160,23 @@ func registerFleetCmds(root *cobra.Command) {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			runID := args[0]
+			asJSON, _ := cmd.Flags().GetBool("json")
 			store, err := fleet.LoadStore(cwd, runID)
 			if err != nil {
 				return fmt.Errorf("load fleet %q: %w", runID, err)
 			}
 			coord := fleet.NewCoordinator(store, 0)
-			fmt.Print(fleet.FormatStatus(coord.Status()))
+			status := coord.Status()
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(status)
+			}
+			fmt.Print(fleet.FormatStatus(status))
 			return nil
 		},
 	}
+	fleetStatusCmd.Flags().Bool("json", false, "Output as JSON")
 
 	fleetSummaryCmd := &cobra.Command{
 		Use:   "summary <run-id>",
@@ -176,15 +185,23 @@ func registerFleetCmds(root *cobra.Command) {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			runID := args[0]
+			asJSON, _ := cmd.Flags().GetBool("json")
 			store, err := fleet.LoadStore(cwd, runID)
 			if err != nil {
 				return fmt.Errorf("load fleet %q: %w", runID, err)
 			}
 			coord := fleet.NewCoordinator(store, 0)
-			fmt.Print(fleet.FormatSummary(coord.Status()))
+			status := coord.Status()
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(status)
+			}
+			fmt.Print(fleet.FormatSummary(status))
 			return nil
 		},
 	}
+	fleetSummaryCmd.Flags().Bool("json", false, "Output as JSON")
 
 	// ── fleet plan ───────────────────────────────────────────────────────────
 	fleetPlanCmd := &cobra.Command{

@@ -189,6 +189,7 @@ Examples:
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
+			asJSON, _ := cmd.Flags().GetBool("json")
 
 			if len(args) == 1 {
 				runID := args[0]
@@ -198,6 +199,24 @@ Examples:
 					return fmt.Errorf("read trace for %q: %w", runID, err)
 				}
 				modelID, _ := cmd.Flags().GetString("model")
+				if asJSON {
+					infos, _ := loop.ListTraceInfos(cwd)
+					for _, info := range infos {
+						if info.RunID == runID {
+							enc := json.NewEncoder(os.Stdout)
+							enc.SetIndent("", "  ")
+							return enc.Encode(info)
+						}
+					}
+					// Fallback: synthesise from events inline.
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					return enc.Encode(map[string]interface{}{
+						"run_id":      runID,
+						"model":       modelID,
+						"event_count": len(events),
+					})
+				}
 				fmt.Print(loop.FormatProgress(runID, modelID, events))
 				return nil
 			}
@@ -206,6 +225,11 @@ Examples:
 			if err != nil {
 				fmt.Println("No active loop. Start one with: radiant loop start \"<goal>\"")
 				return nil
+			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(c.State())
 			}
 			fmt.Print(loop.FormatStatus(c.State()))
 			return nil
@@ -451,6 +475,7 @@ items and approve or reject each one.`,
 		},
 	}
 	loopListCmd.Flags().Bool("plain", false, "Output bare run IDs only (one per line)")
+	loopStatusCmd.Flags().Bool("json", false, "Output as JSON")
 
 	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd)
 	root.AddCommand(loopCmd)
