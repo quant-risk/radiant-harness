@@ -37,10 +37,24 @@ type SamplingBackend struct {
 	maxTokens int
 	out       io.Writer
 
-	mu      sync.Mutex // serializes writes to enc/out
+	muPtr   *sync.Mutex  // external mutex shared with the MCP write loop (set via SetWriteMu)
+	mu      sync.Mutex   // fallback mutex used when muPtr is nil
 	enc     *json.Encoder
 	pending sync.Map // map[int64]chan samplingResult
 	nextID  atomic.Int64
+}
+
+// SetWriteMu replaces the internal write mutex with an external one shared
+// with the caller's encoder. This ensures that sampling/createMessage requests
+// and regular JSON-RPC responses never interleave on the same io.Writer.
+// Must be called before the first Chat() call.
+func (sb *SamplingBackend) SetWriteMu(mu *sync.Mutex) { sb.muPtr = mu }
+
+func (sb *SamplingBackend) writeMu() *sync.Mutex {
+	if sb.muPtr != nil {
+		return sb.muPtr
+	}
+	return &sb.mu
 }
 
 // NewSamplingBackend creates a SamplingBackend from the given options.
@@ -158,9 +172,10 @@ func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatR
 		}
 	}
 
-	sb.mu.Lock()
+	mu := sb.writeMu()
+	mu.Lock()
 	err := sb.enc.Encode(req)
-	sb.mu.Unlock()
+	mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("sampling: write request: %w", err)
 	}

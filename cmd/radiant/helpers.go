@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
@@ -1430,7 +1431,21 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool) error {
 		}},
 	}
 
+	var encMu sync.Mutex
 	enc := json.NewEncoder(out)
+	encode := func(v mcpResponse) {
+		encMu.Lock()
+		_ = enc.Encode(v)
+		encMu.Unlock()
+	}
+
+	// In sampling mode the SamplingBackend also writes to `out`. Give it the
+	// same mutex so its sampling/createMessage requests and our tool responses
+	// never interleave on the wire.
+	if samplingMode {
+		d.sampling.SetWriteMu(&encMu)
+	}
+
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -1446,11 +1461,21 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool) error {
 		}
 		var req mcpRequest
 		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32700, Message: "parse error"}})
+			encode(mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32700, Message: "parse error"}})
 			continue
 		}
-		resp := handleMCPRequest(req, tools, d)
-		_ = enc.Encode(resp)
+		// In sampling mode, tool calls that invoke loop.Run() (e.g. radiant_run)
+		// must run in a separate goroutine — loop.Run() blocks waiting for
+		// sampling/createMessage responses that arrive on this same stdin reader.
+		// Running synchronously would deadlock: the read loop waits for loop.Run()
+		// to return, and loop.Run() waits for responses the read loop would process.
+		if samplingMode && req.Method == "tools/call" {
+			go func(req mcpRequest) {
+				encode(handleMCPRequest(req, tools, d))
+			}(req)
+			continue
+		}
+		encode(handleMCPRequest(req, tools, d))
 	}
 	return scanner.Err()
 }
