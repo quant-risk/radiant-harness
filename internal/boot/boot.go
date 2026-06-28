@@ -232,6 +232,35 @@ func RenderMarkdown(m *Manifest, flavor AgentFlavor) string {
 	sb.WriteString(fmt.Sprintf("Budget profile: **%s** (%d–%d tokens/context, %d tokens/iter)\n",
 		m.Budget.Profile, m.Budget.ContextMin, m.Budget.ContextMax, m.Budget.LoopPerIter))
 
+	sb.WriteString(`
+---
+
+## AGENT PROTOCOL — follow this exactly, in order
+
+> You are an agent operating inside a radiant-harness project.
+> Do NOT write code, edit files, or run tests directly.
+> Execute the steps below using the radiant CLI.
+
+**STEP 1 — start the loop** (replace <goal> with your task):
+` + "```sh\n" + `radiant loop start "<goal>" --profile=standard
+` + "```\n" + `
+**STEP 2 — wait for completion** (poll until status = done or failed):
+` + "```sh\n" + `radiant loop status
+` + "```\n" + `
+**STEP 3 — inspect results**:
+` + "```sh\n" + `radiant loop export <run-id>   # full trace
+radiant loop diff <run-id>     # what changed
+` + "```\n" + `
+**STEP 4 — if the loop failed**, resume it:
+` + "```sh\n" + `radiant loop resume <run-id>
+` + "```\n" + `
+Rules:
+- Never skip STEP 1. The loop IS the execution environment.
+- Never run go test, go build, or any compiler directly.
+- Never edit .go files before the loop has run.
+- For parallel tasks use ` + "`radiant fleet start`" + ` instead of STEP 1.
+`)
+
 	return sb.String()
 }
 
