@@ -69,6 +69,15 @@ type RunConfig struct {
 	// PlannerModel is the LLM used for planning. Zero value → falls back to
 	// ExecutorModel. A cheaper/faster model (e.g. haiku) is often sufficient.
 	PlannerModel llm.Model
+
+	// AutoRoute — when true, derives per-phase models from ExecutorModel's
+	// preset family using llm.AutoRoute:
+	//   Research/Verify → top-tier sibling (e.g. opus when anchor is sonnet)
+	//   Plan            → mid-tier (anchor or sibling)
+	//   Execute         → anchor (unchanged)
+	// When the family has no stronger sibling the anchor is used for all phases.
+	// Overrides VerifierModel and PlannerModel when enabled.
+	AutoRoute bool
 }
 
 // StreamWriter is the interface for streaming output — satisfied by *os.File,
@@ -133,16 +142,41 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 	}
 
 	// Build LLM clients.
-	execClient := llm.NewClient(cfg.ExecutorModel)
+	// When AutoRoute is enabled, derive per-phase models from the anchor's
+	// preset family. Explicit VerifierModel / PlannerModel take precedence
+	// only when AutoRoute is false.
+	execModel := cfg.ExecutorModel
 	verModel := cfg.VerifierModel
-	if verModel.Model == "" {
-		verModel = cfg.ExecutorModel
-	}
-	verClient := llm.NewClient(verModel)
 	planModel := cfg.PlannerModel
-	if planModel.Model == "" {
-		planModel = cfg.ExecutorModel
+
+	if cfg.AutoRoute {
+		anchor := cfg.ExecutorModel.Model
+		if routed := llm.AutoRoute(anchor, llm.PhaseResearch); routed != anchor {
+			verModel = llm.Model{
+				Model:   routed,
+				APIKey:  cfg.ExecutorModel.APIKey,
+				BaseURL: cfg.ExecutorModel.BaseURL,
+			}
+		}
+		if routed := llm.AutoRoute(anchor, llm.PhasePlan); routed != anchor {
+			planModel = llm.Model{
+				Model:   routed,
+				APIKey:  cfg.ExecutorModel.APIKey,
+				BaseURL: cfg.ExecutorModel.BaseURL,
+			}
+		}
+		// Execute always stays on the anchor model.
 	}
+
+	if verModel.Model == "" {
+		verModel = execModel
+	}
+	if planModel.Model == "" {
+		planModel = execModel
+	}
+
+	execClient := llm.NewClient(execModel)
+	verClient := llm.NewClient(verModel)
 	planClient := llm.NewClient(planModel)
 
 	// Verifier config defaults.

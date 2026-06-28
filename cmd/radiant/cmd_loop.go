@@ -48,6 +48,7 @@ func registerLoopCmds(root *cobra.Command) {
 			contextBudget, _ := cmd.Flags().GetInt("context-budget")
 			stream, _ := cmd.Flags().GetBool("stream")
 			plan, _ := cmd.Flags().GetBool("plan")
+			autoRoute, _ := cmd.Flags().GetBool("auto-route")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			// Resolve API key from env (vendor-neutral order).
@@ -105,6 +106,7 @@ func registerLoopCmds(root *cobra.Command) {
 				ContextBudgetTokens: contextBudget,
 				Stream:              stream,
 				Plan:                plan,
+				AutoRoute:           autoRoute,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -173,6 +175,7 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().Bool("stream", false, "Stream executor output to stdout chunk by chunk (verifier stays non-streaming)")
 	loopStartCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal before each executor call")
 	loopStartCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model; a cheaper model like haiku is often sufficient)")
+	loopStartCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family (research→top-tier, plan→mid, execute→anchor)")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status",
@@ -212,6 +215,7 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 			plannerModelID, _ := cmd.Flags().GetString("planner-model")
 			baseURL, _ := cmd.Flags().GetString("base-url")
 			plan, _ := cmd.Flags().GetBool("plan")
+			autoRoute, _ := cmd.Flags().GetBool("auto-route")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
@@ -251,7 +255,8 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 					MaxCostUSD: snap.MaxCostUSD,
 					CostPer1K:  costPer1K,
 				},
-				Plan: plan,
+				Plan:      plan,
+				AutoRoute: autoRoute,
 			}
 
 			fmt.Printf("✓ Resuming loop %s\n", state.RunID)
@@ -289,6 +294,7 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 	loopResumeCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model)")
 	loopResumeCmd.Flags().String("base-url", "", "Override LLM base URL")
 	loopResumeCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal")
+	loopResumeCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family")
 	loopResumeCmd.Flags().Bool("dry-run", false, "Inspect persisted state without calling any LLM")
 
 	loopScheduleCmd := &cobra.Command{

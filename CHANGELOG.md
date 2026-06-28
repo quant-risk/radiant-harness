@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-06-27 — AutoRoute integrado no loop runner (Sprint 59)
+
+20/20 packages green com -race. 10 novos testes no loop package.
+
+### Added — `internal/loop/runner.go`
+- `RunConfig.AutoRoute bool` — quando `true`, deriva modelos por fase do anchor:
+  research/verify → TierTop, plan → TierMid, execute → anchor
+- Fail-safe: família desconhecida ou sem sibling mais forte → anchor em todas as fases
+- `VerifierModel` e `PlannerModel` explícitos ainda funcionam quando `AutoRoute=false`
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `--auto-route` flag em `loop start` e `loop resume`
+
+### Added — `internal/loop/sprint59_test.go`
+- 10 testes: default false, derivação por família (claude/opus), fail-safe unknown,
+  propagação de APIKey/BaseURL, `Run()` fail-open sem API key
+
+---
+
 ## [2.6.0] — 2026-06-27 — Model Routing Engine + correções de validação (Sprint 58-val)
 
 20/20 packages green com -race. Repo limpo.
