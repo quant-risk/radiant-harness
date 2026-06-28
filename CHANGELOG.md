@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0] — 2026-06-27 — loop list + trace list rica (Sprint 64)
+
+20/20 packages green com -race. 11 novos testes no loop package.
+
+### Added — `internal/loop/trace.go`
+- `TraceInfo` struct — resumo por run: EventCount, LastPhase, LastResult, LastAction, UpdatedAt
+- `ListTraceInfos(projectDir)` — newest-first por UpdatedAt
+- `FormatTraceList(infos)` — tabela RUN-ID / EVENTS / PHASE / RESULT / UPDATED
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `loop list [--plain]` — novo subcomando; `--plain` retorna IDs brutos
+
+### Changed — `cmd/radiant/cmd_loop.go`
+- `trace list` usa `FormatTraceList` por padrão; `--plain` preserva comportamento anterior
+
+### Added — `internal/loop/sprint64_test.go`
+- 11 testes: ListTraceInfos (4), FormatTraceList (7)
+
+---
+
 ## [2.11.0] — 2026-06-27 — loop status com trace progress (Sprint 63)
 
 20/20 packages green com -race. 13 novos testes no loop package.

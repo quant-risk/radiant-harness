@@ -130,6 +130,72 @@ func ListTraces(projectDir string) ([]string, error) {
 	return ids, nil
 }
 
+// TraceInfo summarises a single trace file without loading all events.
+type TraceInfo struct {
+	RunID      string
+	EventCount int
+	LastPhase  Phase
+	LastResult string
+	LastAction string
+	UpdatedAt  time.Time // timestamp of last event
+}
+
+// ListTraceInfos returns a summary row per trace, newest-first.
+func ListTraceInfos(projectDir string) ([]TraceInfo, error) {
+	ids, err := ListTraces(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]TraceInfo, 0, len(ids))
+	for _, id := range ids {
+		path := TracePath(projectDir, id)
+		events, err := ReadTrace(path)
+		if err != nil || len(events) == 0 {
+			infos = append(infos, TraceInfo{RunID: id})
+			continue
+		}
+		last := events[len(events)-1]
+		infos = append(infos, TraceInfo{
+			RunID:      id,
+			EventCount: len(events),
+			LastPhase:  last.Phase,
+			LastResult: last.Result,
+			LastAction: last.Action,
+			UpdatedAt:  last.Timestamp,
+		})
+	}
+	// Newest first (by UpdatedAt; zero times sort last).
+	for i := 1; i < len(infos); i++ {
+		for j := i; j > 0 && infos[j].UpdatedAt.After(infos[j-1].UpdatedAt); j-- {
+			infos[j], infos[j-1] = infos[j-1], infos[j]
+		}
+	}
+	return infos, nil
+}
+
+// FormatTraceList renders a compact table of trace infos.
+func FormatTraceList(infos []TraceInfo) string {
+	if len(infos) == 0 {
+		return "No traces found. Start a loop with: radiant loop start \"<goal>\"\n"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%-36s  %6s  %-10s  %-8s  %s\n", "RUN-ID", "EVENTS", "PHASE", "RESULT", "UPDATED"))
+	sb.WriteString(strings.Repeat("-", 80) + "\n")
+	for _, info := range infos {
+		ts := ""
+		if !info.UpdatedAt.IsZero() {
+			ts = info.UpdatedAt.Format("2006-01-02 15:04")
+		}
+		runID := info.RunID
+		if len(runID) > 36 {
+			runID = runID[:33] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("%-36s  %6d  %-10s  %-8s  %s\n",
+			runID, info.EventCount, info.LastPhase, info.LastResult, ts))
+	}
+	return sb.String()
+}
+
 // TracePath returns the expected JSONL file path for a given runID.
 func TracePath(projectDir, runID string) string {
 	return filepath.Join(projectDir, ".radiant-harness", "traces", runID+".jsonl")

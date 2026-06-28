@@ -425,7 +425,33 @@ items and approve or reject each one.`,
 	loopReviewCmd.Flags().String("approve", "", "Resolve item as approved (resumes loop)")
 	loopReviewCmd.Flags().String("reject", "", "Resolve item as rejected (abandons loop run)")
 
-	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd)
+	loopListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all loop runs with event count, phase and last result",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			plain, _ := cmd.Flags().GetBool("plain")
+			if plain {
+				ids, err := loop.ListTraces(cwd)
+				if err != nil {
+					return err
+				}
+				for _, id := range ids {
+					fmt.Println(id)
+				}
+				return nil
+			}
+			infos, err := loop.ListTraceInfos(cwd)
+			if err != nil {
+				return err
+			}
+			fmt.Print(loop.FormatTraceList(infos))
+			return nil
+		},
+	}
+	loopListCmd.Flags().Bool("plain", false, "Output bare run IDs only (one per line)")
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd)
 	root.AddCommand(loopCmd)
 
 	// ── trace (Sprint 35) ────────────────────────────────────────────────────
@@ -464,23 +490,29 @@ items and approve or reject each one.`,
 
 	traceListCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all trace run IDs",
+		Short: "List all trace runs with event count, phase and last result",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
-			ids, err := loop.ListTraces(cwd)
+			plain, _ := cmd.Flags().GetBool("plain")
+			if plain {
+				ids, err := loop.ListTraces(cwd)
+				if err != nil {
+					return err
+				}
+				for _, id := range ids {
+					fmt.Println(id)
+				}
+				return nil
+			}
+			infos, err := loop.ListTraceInfos(cwd)
 			if err != nil {
 				return err
 			}
-			if len(ids) == 0 {
-				fmt.Println("No traces found. Start a loop with: radiant loop start \"<goal>\"")
-				return nil
-			}
-			for _, id := range ids {
-				fmt.Println(id)
-			}
+			fmt.Print(loop.FormatTraceList(infos))
 			return nil
 		},
 	}
+	traceListCmd.Flags().Bool("plain", false, "Output bare run IDs only (one per line)")
 
 	traceCmd.AddCommand(traceShowCmd, traceListCmd)
 	root.AddCommand(traceCmd)
