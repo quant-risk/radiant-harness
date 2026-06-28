@@ -1,269 +1,140 @@
 # radiant-harness
 
 > A vendor-neutral autonomous development harness for any LLM.
-> Shipped as a single binary — works with Claude Code, Cursor,
-> Codex, Copilot, Gemini CLI, and Windsurf.
+> Shipped as a single binary — works with Claude Code, Cursor, Codex, Copilot, Gemini CLI, Windsurf, Hermes, and any MCP-compatible agent.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-298_pass-green.svg)](CHANGELOG.md)
-[![Cross-compile](https://img.shields.io/badge/cross--compile-6_of_6-blueviolet.svg)](CHANGELOG.md)
-[![Roadmap](https://img.shields.io/badge/next-v1.2.0_loop_hardening-orange.svg)](docs/SPRINT44-PLAN.md)
+[![Version](https://img.shields.io/badge/version-2.34.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-22_packages_green-brightgreen.svg)](CHANGELOG.md)
+[![MCP](https://img.shields.io/badge/MCP-radiant__run-purple.svg)](AGENTS.md)
 
 ---
 
-## What it is (v2.0)
+## What it is
 
-`radiant` is a CLI harness for **autonomous LLM-driven development**. It solves four problems:
+`radiant` is a CLI harness for **autonomous LLM-driven development**. One binary, zero external dependencies at runtime.
 
-1. **Token bloat** — instead of loading all 60 skills at session start (~55K tokens), the Context Engine detects your project domain and loads 3–10 skills (~300 tokens). **99% reduction**.
-2. **No feedback loop** — the Loop Engine runs a crash-safe Discover→Plan→Execute→Verify→Persist cycle. The verifier is always a separate agent call; the executor never grades its own work.
-3. **Static instructions** — the Self-Improvement Engine analyzes failure traces, proposes SKILL.md patches, and applies them only when improvement ≥ 5pp.
-4. **Single-agent bottleneck** — the Fleet layer coordinates Planner + Implementer + Verifier + Summarizer agents with conflict-safe shared state.
+**Core engines:**
 
-Works with any OpenAI-compatible API. No vendor lock-in.
+| Engine | What it does |
+|--------|-------------|
+| **Loop Engine** | Crash-safe `Discover→Plan→Execute→Verify→Persist` cycle. Verifier is always a separate LLM call. |
+| **Fleet Engine** | Parallel multi-agent dispatch with conflict-safe shared state, concurrency cap, and auto-retry. |
+| **Context Engine** | Detects project domain and lazy-loads 3–10 relevant skills (~300 tokens vs 55K for all 60). |
+| **MCP Server** | Exposes the full harness as MCP tools — any MCP-compatible agent calls `radiant_run` and gets results back. |
+
+Works with any OpenAI-compatible API (Claude, GPT-4o, Gemini, Mistral, OpenRouter, local models).
 
 ---
 
-## Quick Start (v2.0) — zero to autonomous loop in 5 minutes
+## Quickstart — 3 minutes to first autonomous run
+
+### Option A: compile from source
 
 ```bash
-# 1. Install
+git clone https://github.com/quant-risk/radiant-harness.git
+cd radiant-harness
+go build -o radiant ./cmd/radiant
+./radiant doctor
+```
+
+### Option B: install via go
+
+```bash
 go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
-
-# 2. Initialize a project
-mkdir my-project && cd my-project
-radiant init . --all --yes
-
-# 3. Detect your project domain (optional — shown for transparency)
-radiant context detect
-
-# 4. Generate the minimal context file (~300 tokens)
-radiant context assemble
-
-# 5. Boot — emit a <500-token manifest any LLM can read
-radiant boot
-
-# 6. Start the autonomous loop
-radiant loop start "add rate limiting to the /api/users endpoint"
-
-# 7. Watch progress
-radiant loop status
-radiant trace show <run-id>
 ```
 
-That's it. The loop runs Discover→Plan→Execute→Verify→Persist automatically.
-It writes a checkpoint after each phase so it can resume after interruption.
-
----
-
-## IDE Setup
+### Option C: use the pre-built binary
 
 ```bash
-# Generate native files for your IDE(s)
-radiant views --agent=claude     # .claude/settings.json + skills
-radiant views --agent=cursor     # .cursor/rules/*.mdc
-radiant views --agent=copilot    # .github/copilot-instructions.md
-radiant views --agent=gemini     # GEMINI.md + .gemini/commands/
-radiant views --agent=windsurf   # .windsurfrules
-radiant views --agent=codex      # AGENTS.md
+# macOS arm64 (Apple Silicon)
+curl -L https://github.com/quant-risk/radiant-harness/releases/latest/download/radiant-darwin-arm64 -o radiant
+chmod +x radiant && sudo mv radiant /usr/local/bin/
+```
 
-# Or all at once
-radiant views --agent=all --force
+### First run
 
-# Preview changes before writing
-radiant views --agent=cursor --diff
+```bash
+export ANTHROPIC_API_KEY=sk-...   # or OPENROUTER_API_KEY / OPENAI_API_KEY
+
+radiant doctor                    # verify environment
+radiant boot                      # read project manifest + AGENT PROTOCOL
+
+radiant loop start "add rate limiting to /api/users" --profile=standard
+radiant loop status               # monitor
+radiant loop export <run-id>      # full trace
 ```
 
 ---
 
-## Command Reference
+## Using radiant as a sub-agent (MCP)
 
-### Context & Boot
-```bash
-radiant boot                              # ≤500-token entry point for any LLM
-radiant context detect [--json]           # detect domain + tier
-radiant context assemble [--budget=N]     # build .radiant-harness/CONTEXT.md
-radiant context compress --budget=2000    # compress to fit budget
-radiant context summarize --phase=<name>  # compress a completed phase
+This is the primary way to use radiant from any coding agent (Claude Code, Hermes, Cursor, etc.).
+
+### One-time setup
+
+Add to your agent's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "radiant": {
+      "command": "/path/to/radiant",
+      "args": ["mcp-serve"]
+    }
+  }
+}
 ```
 
-### Loop Engine
-```bash
-radiant loop start "<goal>" [--profile=lean|standard|thorough]
-                            [--max-time=<duration>]    # wall-clock brake (v1.2.0)
-                            [--max-cost=<$>]           # dollar brake (v1.2.0)
-                            [--stall-patience=<n>]     # no-progress brake (v1.2.0)
-                            [--quorum-n=<n>]           # parallel judges (v1.3.0)
-                            [--quorum-k=<k>]           # votes needed (v1.3.0)
-                            [--ground]                 # inject commit log (v1.3.0)
-radiant loop status
-radiant loop resume
-radiant loop review [--approve <id>] [--reject <id>]  # human checkpoint (v1.2.0)
-radiant loop schedule [--check] [--gate-failing]      # decide whether to re-run
-radiant trace show <run-id> [--json]
-radiant trace list
+**Claude Code** — add to `.claude/settings.json`:
+```json
+{
+  "mcpServers": {
+    "radiant": { "command": "radiant", "args": ["mcp-serve"] }
+  }
+}
 ```
 
-### Ontology (world model)
-```bash
-radiant ontology export [--compact]   # ~300-token world model for any LLM
-radiant ontology validate             # check axioms
-radiant ontology skills <domain>      # skills that govern a domain
-radiant boot --world-model            # boot manifest + world model
+### Usage after setup
+
+The agent calls ONE tool. No extra prompt engineering needed.
+
+```
+radiant_run({ goal: "add input validation to POST /api/users" })
 ```
 
-### Worktree Isolation
-```bash
-radiant worktree add <name>           # isolated checkout for a parallel agent
-radiant worktree list
-radiant worktree remove <path> [--force]
-radiant worktree prune
+The harness runs the full loop in-process (no PATH dependency), blocks until done, and returns the complete trace. The agent delivers the result to you.
+
+**Available MCP tools:**
+
+| Tool | What it does |
+|------|-------------|
+| `radiant_run` | **Full loop in one call** — start + execute + export. Blocks until done. |
+| `radiant_loop_start` | Start a loop (non-blocking from MCP perspective, runs synchronously) |
+| `radiant_loop_status` | Get progress of a run |
+| `radiant_loop_list` | List all runs |
+
+### Prompt to any agent
+
+Once the MCP server is registered:
+
+```
+Read the project context and use radiant-harness to: <your goal>
 ```
 
-### Token Budget
-```bash
-radiant budget estimate [spec-file] [--profile=standard]
-radiant budget report <run-id>
-```
+Or even simpler — the agent reads `AGENTS.md` at session start and knows to call `radiant_run` automatically.
 
-### Multi-Agent Fleet
-```bash
-radiant fleet start "<goal>" [--agents=N]
-radiant fleet status <run-id>
-```
+---
 
-### Self-Improvement
-```bash
-radiant improve --from-traces [--skill=<id>] [--dry-run] [--apply]
-radiant improve history
-```
+## Loop Engine
 
-### IDE Views
-```bash
-radiant views --agent=<id> [--force] [--diff]
-```
-
-### Classic SDD workflow (still works)
-```bash
-radiant init . --all --yes
-radiant product "API observability for small dev teams"
-radiant spec "JWT auth so users stay logged in across restarts"
-
-# 4. Run the implementation (the LLM does this)
-radiant run specs/0001-jwt-auth --model <your-model>
-
-# 5. Validate after implementation
-radiant validate specs/0001-jwt-auth --gates
-
-# 6. Audit + measure fidelity
-radiant audit
-radiant evals
-
-# 7. Cut a release
-radiant release v0.1.0
-```
-
-## Day-1 workflow (project setup)
-
-| Step | Command | What it produces |
-|------|---------|------------------|
-| 1 | `radiant init .` | `.radiant-harness/skills/`, `AGENTS.md`, `state.md`, native views |
-| 2 | `radiant product "..."` | `docs/product/inception.md` + `personas.md` |
-| 3 | `radiant spec "..."` | `specs/0001-<slug>/spec.md` + `tasks.md` |
-| 4 | `radiant run specs/0001-<slug>/` | implementation (LLM-driven) |
-| 5 | `radiant validate specs/0001-<slug>/ --gates` | UAT report |
-| 6 | `radiant audit` | project-wide conformity check |
-| 7 | `radiant evals` | AC→test coverage metrics |
-| 8 | `radiant release v0.1.0` | version bump + tests + cross-compile + tag |
-
-## Upgrade workflow (existing project)
-
-```bash
-# 1. Pull the new binary
-go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
-
-# 2. Refresh bundled skills + AGENTS.md (preserves user's docs)
-radiant update
-
-# 3. Regenerate native views for the new bundled skills
-radiant views --agent=claude,cursor --force
-
-# 4. Audit the agentic layer
-radiant camada-agentica --fix
-
-# 5. Measure fidelity after the upgrade
-radiant evals
-```
-
-## Commands (18 total)
-
-| Command | Version | Purpose |
-|---------|---------|---------|
-| `init` | 0.2.0+ | Scaffold the SDD pipeline |
-| `config` | 0.2.0+ | Configure LLM provider/model |
-| `run` | 0.2.0+ | Execute a spec end-to-end (LLM-driven) |
-| `models` | 0.2.0+ | List model presets |
-| `validate` | 0.2.0+ | Static spec→code→tests UAT |
-| `eval` | 0.2.0+ | Latency/cost benchmark for one prompt × N runs |
-| `bench` | 0.2.0+ | Compare against other frameworks |
-| `doctor` | 0.2.0+ | Local environment diagnostic |
-| `state` | 0.4.2 | Show current session state |
-| `handoff` | 0.4.2 | Pause + write session state atomically |
-| `spec` | 0.4.2 | Create spec.md + tasks.md from flag inputs |
-| `skills list` / `skills validate` | 0.4.0 | Manage skills |
-| `adr` | 0.4.3 | Create an Architecture Decision Record (Nygard) |
-| `update` | 0.4.3 | Refresh bundled skills + AGENTS.md |
-| `diagramar` | 0.4.3 | C4 Mermaid templates |
-| `product` | 0.4.4 | Lean Inception scaffold |
-| `integrations list` | 0.4.5 | Read-only MCP listing |
-| `views` | 0.4.6 | Native agent views on demand |
-| `review-pr` | 0.4.7 | PR review scaffold |
-| `setup-ci` | 0.4.8 | CI workflow generator |
-| `camada-agentica` | 0.4.9 | Agentic layer audit |
-| `evals` | 0.5.0 | AC→test coverage metrics |
-| `release` | 0.5.1 | Cut a release |
-| `audit` | 0.6.0 | Project layout audit |
-| `mcp serve` | 0.6.0 | MCP server (stdio) |
-
-## Skills (60 bundled)
-
-The CLI ships 60 vendor-neutral skills in `.radiant-harness/skills/`.
-In v2.0, skills are lazy-loaded: only 3–10 relevant to your project
-are included in context (see [docs/CONTEXT-ENGINE.md](docs/CONTEXT-ENGINE.md)).
-
-**Core methodology (always loaded):** `nova-feature`, `nova-product`, `kickoff`, `clarificar`
-
-**Quality:** `validar`, `auditar`, `metricas`, `evals`, `revisar-pr`
-
-**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`, `handoff`, `roadmap`
-
-**Finance & Risk:** `finance`, `credit-risk`, `credit-portfolio`, `market-risk`,
-`liquidity-risk`, `operational-risk`, `model-risk`, `stress-test`, `regulatory`,
-`actuarial`, `actuarial-solvency`, `accounting`, `controlling`, `tax`, `valuation`,
-`aml-kyc`, `fraud-detection`, `capital-markets`
-
-**ML & Data:** `ml`, `deep-learning`, `reinforcement-learning`, `causal`, `causal-ml`,
-`bayesian`, `stats`, `econometrics`, `synthetic-data`, `evals`, `data`
-
-**Engineering:** `api`, `cli`, `security`, `setup-ci`, `integracoes`, `update`, `incident`
-
-**Domain:** `frontend`, `mobile`, `iot`, `game`, `blockchain`, `marketing`
-
-**Science:** `biology`, `chemistry`, `physics`, `quantum-physics`, `quantum-ml`
-
-Each skill is plain Markdown + YAML frontmatter — any LLM can
-consume them. The open spec is at [docs/SKILL-SCHEMA.md](docs/SKILL-SCHEMA.md).
-
-## Loop Engine — How it works
-
-The Loop Engine runs a crash-safe state machine: `idle → discover → plan → execute → verify → persist → done`.
+Crash-safe state machine: `idle → discover → plan → execute → verify → persist → done`
 
 ```
 radiant loop start "add rate limiting to /api/users"
 
   iteration 1
-  ├─ discover  → domain: backend, relevant skills: [api, security]
+  ├─ discover  → domain: backend, skills: [api, security]
   ├─ plan      → decompose into tasks
   ├─ execute   → write internal/api/ratelimit.go
   ├─ verify    → REJECTED: missing tests        ← separate agent, never self-grades
@@ -271,83 +142,170 @@ radiant loop start "add rate limiting to /api/users"
   └─ verify    → APPROVED: score 0.92
      persist   → checkpoint + JSONL trace
      done      → exit reason: success
-
-$ radiant loop status
-  phase: done | iter: 2/20 | tokens: 3420/50000 | status: ok
 ```
 
-**Exit brakes (v1.1.0):** max-iterations, token-budget, critical-failures, user-cancel  
-**Exit brakes (v1.2.0, planned):** stall (no-progress), wall-clock time, dollar cost, human escalation  
-**Verifier hardening (v1.3.0, planned):** quorum k-of-n judges, geometric-mean by dimension, post-convergence review panel, commit-log grounding, anti-cheat clauses
+**Guards:** `--max-iter`, `--max-cost`, `--max-time`, `--stall-patience`
 
-See [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) for the full exit-condition table.
+**Structured logging:** `--log-json` emits JSONL per LLM call to stdout.
+
+**Full command reference:**
+
+```bash
+radiant loop start "<goal>" [--profile=lean|standard|thorough]
+                            [--model=<id>]
+                            [--max-iter=N]
+                            [--max-cost=2.00]
+                            [--max-time=10m]
+                            [--auto-route]
+                            [--log-json]
+                            [--webhook-url=<url>]
+radiant loop status [<run-id>] [--json]
+radiant loop list
+radiant loop history [--json]
+radiant loop resume <run-id>
+radiant loop cancel <run-id>
+radiant loop export <run-id> [--format=json|md]
+radiant loop diff <run-id> [--base=main] [--stat]
+```
+
+---
+
+## Fleet Engine
+
+Parallel multi-agent dispatch for goals that decompose into independent sub-tasks.
+
+```bash
+radiant fleet start "<goal>"
+radiant fleet status <run-id> [--json]
+radiant fleet summary <run-id> [--json]
+radiant fleet history [--json]
+radiant fleet resume <run-id>
+radiant fleet retry <run-id> <task-id>
+radiant fleet cancel <run-id>
+radiant fleet dispatch --concurrency=4 --max-retries=2
+```
+
+**Config defaults** (`.radiant.yaml`):
+
+```yaml
+model: claude-sonnet-4-6
+max_iter: 20
+profile: standard
+webhook_url: ""
+fleet_concurrency: 4
+fleet_max_retries: 2
+auto_route: true
+```
+
+---
+
+## Other commands
+
+### Context & Boot
+```bash
+radiant boot                              # ≤500-token manifest + AGENT PROTOCOL
+radiant boot --world-model               # + compact ontology
+radiant context detect [--json]
+radiant context assemble [--budget=N]
+radiant context compress --budget=2000
+```
+
+### Diagnostics
+```bash
+radiant doctor                            # API key, git, model, worktrees
+```
+
+### Webhooks
+```bash
+radiant loop start "<goal>" --webhook-url=https://...
+# fires: loop.done / loop.failed / fleet.task.done / fleet.done
+```
+
+### Worktrees
+```bash
+radiant worktree add <name>
+radiant worktree list
+radiant worktree remove <path>
+radiant worktree prune
+```
+
+### Agent views (native files per IDE)
+```bash
+radiant views --agent=claude     # .claude/settings.json + skills
+radiant views --agent=cursor     # .cursor/rules/*.mdc
+radiant views --agent=copilot    # .github/copilot-instructions.md
+radiant views --agent=gemini     # GEMINI.md
+radiant views --agent=windsurf   # .windsurfrules
+radiant views --agent=codex      # AGENTS.md
+radiant views --agent=all --force
+```
+
+### Classic SDD workflow
+```bash
+radiant init . --all --yes
+radiant product "..."
+radiant spec "..."
+radiant run specs/0001-<slug>
+radiant validate specs/0001-<slug> --gates
+radiant audit
+radiant release v0.1.0
+```
 
 ---
 
 ## Architecture
 
-`radiant` is structured as:
-
 ```
-cmd/radiant/main.go          ← CLI entrypoint (cobra commands)
-internal/loop/               ← Loop Engine (cycle, budget, verifier, trace)
-internal/context/            ← Context Engine (domain detect, skill selector)
-internal/ontology/           ← world model (domains, axioms, dependencies)
-internal/worktree/           ← git worktree isolation for parallel agents
-internal/schedule/           ← loop scheduler (gate-failing, backoff)
-internal/improve/            ← Self-Improvement Engine (weakness mining)
-internal/fleet/              ← Multi-agent fleet coordinator
-internal/skill/              ← skill schema validator + bundle loader
-internal/scaffold/           ← scaffold + native agent view generation
-internal/engine/             ← SDD execution engine (planner/implementer/validator)
-internal/harness/            ← quality gates + policy enforcement
-internal/llm/                ← OpenAI + Anthropic + OpenRouter clients
-internal/policy/             ← command allowlist + token estimator
-internal/spec/               ← spec + task + ADR parsing
-internal/quality/            ← fidelity scoring + drift detection
-internal/benchmark/          ← cross-framework benchmark harness
+cmd/radiant/          ← CLI entrypoint (cobra) + MCP server
+internal/loop/        ← Loop Engine: cycle, budget, verifier, tracer, PID, JSONL log
+internal/fleet/       ← Fleet Engine: planner, dispatcher, store, E2E tests
+internal/context/     ← Context Engine: domain detect, skill selector
+internal/config/      ← .radiant.yaml project config
+internal/webhook/     ← fire-and-forget HTTP POST webhooks
+internal/slog/        ← structured JSONL logger
+internal/boot/        ← boot manifest + AGENT PROTOCOL renderer
+internal/ontology/    ← world model (domains, axioms)
+internal/worktree/    ← git worktree isolation
+internal/scaffold/    ← native agent view generation
+internal/llm/         ← OpenAI / Anthropic / OpenRouter clients
+internal/skill/       ← skill schema + bundle (60 skills, go:embed)
+internal/engine/      ← SDD execution engine
+internal/harness/     ← quality gates + policy enforcement
+internal/spec/        ← spec + task + ADR parsing
 ```
 
-The CLI binary embeds skills via `//go:embed` — no external dependencies at install time.
+Single binary, no external runtime dependencies. Skills embedded via `//go:embed`.
 
-## Quality
+---
 
-Every commit passes the same battery:
+## Skills (60 bundled)
 
-- `go build ./...` clean
-- `go vet ./...` clean
-- `gofmt -l .` clean
-- `CGO_ENABLED=0 go test ./... -count=1 -race` all green (298 tests)
-- `make release` cross-compiles 6/6 targets
+Lazy-loaded — only 3–10 loaded per session based on domain detection.
 
-See `docs/METHODOLOGY-MERGE-FINAL.md` for the full history.
+**Core:** `nova-feature`, `nova-product`, `kickoff`, `clarificar`  
+**Quality:** `validar`, `auditar`, `metricas`, `evals`, `revisar-pr`  
+**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`, `handoff`, `roadmap`  
+**Finance & Risk:** `finance`, `credit-risk`, `market-risk`, `liquidity-risk`, `operational-risk`, `model-risk`, `stress-test`, `regulatory`, `actuarial`, `accounting`, `controlling`, `valuation`, `aml-kyc`, `fraud-detection`, `capital-markets`  
+**ML & Data:** `ml`, `deep-learning`, `reinforcement-learning`, `causal`, `bayesian`, `stats`, `econometrics`, `synthetic-data`, `data`  
+**Engineering:** `api`, `cli`, `security`, `setup-ci`, `integracoes`, `update`, `incident`  
+**Domain:** `frontend`, `mobile`, `iot`, `game`, `blockchain`, `marketing`  
+**Science:** `biology`, `chemistry`, `physics`, `quantum-physics`, `quantum-ml`
 
-## Examples
-
-The `internal/scaffold/templates/examples/pulse/` directory has a
-worked example project ("Pulse — feedback collector") that
-demonstrates every command end-to-end.
+---
 
 ## Documentation
 
 | Doc | What it covers |
-|-----|---------------|
-| [`docs/ROADMAP-V2.md`](docs/ROADMAP-V2.md) | Sprint plan through v1.3.0 |
-| [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) | Loop state machine, exit conditions, components |
-| [`docs/SPRINT44-PLAN.md`](docs/SPRINT44-PLAN.md) | v1.2.0 — stall brake, cost budget, human escalation |
-| [`docs/SPRINT45-PLAN.md`](docs/SPRINT45-PLAN.md) | v1.3.0 — quorum, geo-mean, review panel, grounding |
-| [`docs/SKILL-SCHEMA.md`](docs/SKILL-SCHEMA.md) | Open MIT spec for the skill format |
-| [`docs/CONTEXT-ENGINE.md`](docs/CONTEXT-ENGINE.md) | Domain detection + lazy-loading logic |
-| [`docs/HARNESS-PLAN.md`](docs/HARNESS-PLAN.md) | Methodology merge plan |
-| [`CHANGELOG.md`](CHANGELOG.md) | Full version history |
+|-----|----------------|
+| [`AGENTS.md`](AGENTS.md) | Full agent onboarding — commands, profiles, rules |
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code specific instructions |
+| [`docs/AGENT-SYSTEM-PROMPT.md`](docs/AGENT-SYSTEM-PROMPT.md) | System prompt template for external agents (Hermes, mimo, etc.) |
+| [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) | Loop state machine, exit conditions |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full architecture deep-dive |
+| [`CHANGELOG.md`](CHANGELOG.md) | Version history |
+
+---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-Open an issue or PR at
-[github.com/quant-risk/radiant-harness](https://github.com/quant-risk/radiant-harness).
-The CLI is built around the open skill schema; new skills can be
-authored in any repo and consumed by `radiant` without recompilation.

@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.0] — 2026-06-28 — MCP radiant_run + agent onboarding
+
+### Added — `cmd/radiant/helpers.go`
+- `radiant_run` MCP tool: executa o harness completo em uma única chamada bloqueante (start → loop.Run() in-process → export trace). Sem exec.Command, sem dependência de PATH.
+- `mcpRunFull()`: chama `loop.Run()`, `config.Load()`, `loop.ExportTrace()` e `loop.ExportTraceMarkdown()` diretamente em-processo.
+
+### Added — `AGENTS.md` (raiz)
+- Guia de onboarding para agentes: lido automaticamente por Codex, Hermes, Cursor e maioria dos frameworks. Contém comandos, perfis, regras e quick reference completo.
+
+### Added — `CLAUDE.md` (raiz)
+- Instrução compacta para Claude Code: lida automaticamente no início de cada sessão.
+
+### Added — `docs/AGENT-SYSTEM-PROMPT.md`
+- Template de system prompt para agentes externos que não carregam AGENTS.md automaticamente (Hermes, mimo, OpenRouter, LM Studio, Ollama, OpenAI Assistants).
+
+### Changed — `internal/boot/boot.go`
+- `RenderMarkdown` agora emite bloco `## AGENT PROTOCOL` com 4 passos imperativose regras. O output de `radiant boot` é suficiente para qualquer LLM executar o harness corretamente.
+
+### Fixed — `cmd/radiant/helpers.go`
+- `radiant_run` v1 usava `exec.Command` (dependia de PATH) e tinha poll loop unreachable (loop start é síncrono). Reescrito para chamadas in-process.
+
+### Setup para usar radiant como sub-agente
+
+```json
+// .claude/settings.json
+{
+  "mcpServers": {
+    "radiant": { "command": "/path/to/radiant", "args": ["mcp-serve"] }
+  }
+}
+```
+
+Prompt mínimo após setup: `"use radiant-harness para: <goal>"`
+
+---
+
 ## [2.33.0] — 2026-06-27 — Structured JSONL logging wired no loop runner (Sprint 86)
 
 22/22 packages green com -race. 6 novos testes em internal/loop/sprint86_test.go.
