@@ -103,3 +103,36 @@ func TestMCPLoopStartSchema_HasGoalRequired(t *testing.T) {
 		t.Errorf("expected 'auto_route' field in schema: %s", raw)
 	}
 }
+
+// ── radiant_run tool ─────────────────────────────────────────────────────────
+
+func TestMCPToolsList_IncludesRadiantRun(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
+	in := strings.NewReader(input)
+	var out strings.Builder
+	_ = runMCPServe(in, &out)
+	if !strings.Contains(out.String(), "radiant_run") {
+		t.Errorf("tools/list missing radiant_run; got: %s", out.String())
+	}
+}
+
+func TestCallMCPTool_RadiantRun_RequiresGoal(t *testing.T) {
+	resp := callMCPTool("radiant_run", json.RawMessage(`{}`))
+	if resp.Error == nil {
+		t.Error("expected JSON-RPC error when goal is missing")
+	}
+	if resp.Error != nil && resp.Error.Code != -32602 {
+		t.Errorf("expected code -32602, got %d", resp.Error.Code)
+	}
+}
+
+func TestCallMCPTool_RadiantRun_Schema_HasGoal(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
+	in := strings.NewReader(input)
+	var out strings.Builder
+	_ = runMCPServe(in, &out)
+	raw := out.String()
+	if !strings.Contains(raw, `"goal"`) {
+		t.Errorf("radiant_run schema missing 'goal' property; got: %s", raw)
+	}
+}

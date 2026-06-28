@@ -1380,6 +1380,19 @@ func runMCPServe(in io.Reader, out io.Writer) error {
 				"plain": {Type: "boolean", Description: "Return bare run IDs only"},
 			},
 		}},
+		{Name: "radiant_run", Description: "Run the full harness loop for a goal: start → poll until done → export trace. Blocks until complete. Returns the full execution trace.", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"goal":      {Type: "string", Description: "The goal to achieve (required)"},
+				"profile":   {Type: "string", Description: "Execution profile: lean | standard | thorough (default: standard)"},
+				"model":     {Type: "string", Description: "Model ID override (e.g. claude-sonnet-4-6)"},
+				"max_iter":  {Type: "number", Description: "Max iterations (default 20)"},
+				"max_cost":  {Type: "string", Description: "Dollar cap, e.g. '2.00'"},
+				"max_time":  {Type: "string", Description: "Wall-clock cap, e.g. '10m'"},
+				"auto_route": {Type: "boolean", Description: "Enable model auto-routing by phase"},
+			},
+			Required: []string{"goal"},
+		}},
 	}
 
 	enc := json.NewEncoder(out)
@@ -2967,6 +2980,116 @@ func renderSecurityReport(scope string, findings []securityFinding, errors, warn
 	return b.String()
 }
 
+// mcpRunFull implements the radiant_run MCP tool: start loop → poll until
+// terminal → export trace. Blocks until the loop finishes or fails.
+func mcpRunFull(args json.RawMessage) mcpResponse {
+	var a struct {
+		Goal      string `json:"goal"`
+		Profile   string `json:"profile"`
+		Model     string `json:"model"`
+		MaxIter   int    `json:"max_iter"`
+		MaxCost   string `json:"max_cost"`
+		MaxTime   string `json:"max_time"`
+		AutoRoute bool   `json:"auto_route"`
+	}
+	_ = json.Unmarshal(args, &a)
+	if a.Goal == "" {
+		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "radiant_run: goal is required"}}
+	}
+	if a.Profile == "" {
+		a.Profile = "standard"
+	}
+
+	// ── 1. start ──────────────────────────────────────────────────────────
+	startArgv := []string{"loop", "start", a.Goal, "--profile=" + a.Profile}
+	if a.Model != "" {
+		startArgv = append(startArgv, "--model="+a.Model)
+	}
+	if a.MaxIter > 0 {
+		startArgv = append(startArgv, "--max-iter="+strconv.Itoa(a.MaxIter))
+	}
+	if a.MaxCost != "" {
+		startArgv = append(startArgv, "--max-cost="+a.MaxCost)
+	}
+	if a.MaxTime != "" {
+		startArgv = append(startArgv, "--max-time="+a.MaxTime)
+	}
+	if a.AutoRoute {
+		startArgv = append(startArgv, "--auto-route")
+	}
+
+	startOut, err := exec.Command("radiant", startArgv...).CombinedOutput()
+	if err != nil {
+		return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
+			"content": []map[string]string{{"type": "text", "text": "loop start failed:\n" + string(startOut)}},
+			"isError": true,
+		}}
+	}
+
+	// Extract run-id from start output (line "run-id: <id>" or first token).
+	runID := ""
+	for _, line := range strings.Split(string(startOut), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "run-id:") || strings.HasPrefix(line, "run_id:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				runID = parts[1]
+				break
+			}
+		}
+	}
+
+	// ── 2. poll until terminal ─────────────────────────────────────────────
+	const pollInterval = 5 * time.Second
+	const maxPoll = 360 // 30 min ceiling
+	var lastStatus string
+	for i := 0; i < maxPoll; i++ {
+		time.Sleep(pollInterval)
+		statusArgv := []string{"loop", "status", "--json"}
+		if runID != "" {
+			statusArgv = append(statusArgv, runID)
+		}
+		statusOut, _ := exec.Command("radiant", statusArgv...).CombinedOutput()
+		lastStatus = string(statusOut)
+
+		// Parse minimal JSON to check terminal state.
+		var st struct {
+			LastResult string `json:"last_result"`
+			LastAction string `json:"last_action"`
+		}
+		if err2 := json.Unmarshal(statusOut, &st); err2 == nil {
+			switch st.LastResult {
+			case "done", "success", "failed", "error", "cancelled":
+				goto done
+			}
+			if st.LastAction == "persist" || st.LastAction == "done" {
+				goto done
+			}
+		}
+		// Fallback: plain-text terminal signals.
+		if strings.Contains(lastStatus, "status: done") ||
+			strings.Contains(lastStatus, "status: failed") ||
+			strings.Contains(lastStatus, "loop complete") {
+			goto done
+		}
+	}
+done:
+
+	// ── 3. export trace ────────────────────────────────────────────────────
+	exportArgv := []string{"loop", "export"}
+	if runID != "" {
+		exportArgv = append(exportArgv, runID)
+	}
+	exportOut, _ := exec.Command("radiant", exportArgv...).CombinedOutput()
+
+	result := fmt.Sprintf("## Loop complete\n\nRun ID: %s\n\n### Status\n%s\n\n### Trace\n%s",
+		runID, lastStatus, string(exportOut))
+
+	return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
+		"content": []map[string]string{{"type": "text", "text": result}},
+	}}
+}
+
 // callMCPTool dispatches a tools/call request to the matching
 // radiant CLI command. Returns the stdout as a content array.
 func callMCPTool(name string, args json.RawMessage) mcpResponse {
@@ -3072,6 +3195,8 @@ func callMCPTool(name string, args json.RawMessage) mcpResponse {
 		if a.Plain {
 			argv = append(argv, "--plain")
 		}
+	case "radiant_run":
+		return mcpRunFull(args)
 	default:
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 	}
