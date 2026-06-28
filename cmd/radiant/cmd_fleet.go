@@ -13,6 +13,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
+	"github.com/quant-risk/radiant-harness/internal/webhook"
 	"github.com/quant-risk/radiant-harness/internal/worktree"
 	"github.com/spf13/cobra"
 )
@@ -337,6 +338,8 @@ so all agents share the same model configuration.`,
 			}
 			fmt.Println()
 
+			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+
 			results, err := d.RunAll(context.Background(), extraArgs)
 			if err != nil {
 				return fmt.Errorf("dispatch: %w", err)
@@ -352,12 +355,19 @@ so all agents share the same model configuration.`,
 			}
 			fmt.Printf("✓ Dispatch complete: %d succeeded, %d failed\n", success, failed)
 			fmt.Printf("  Run `radiant fleet status %s` to review results.\n", runID)
+
+			_ = webhook.Send(context.Background(), webhookURL, webhook.Payload{
+				Event: webhook.EventFleetDone,
+				RunID: runID,
+				Data:  map[string]any{"succeeded": success, "failed": failed},
+			})
 			return nil
 		},
 	}
 	fleetDispatchCmd.Flags().String("model", "", "Model forwarded to each agent (default: agent uses RADIANT_MODEL or claude-sonnet-4-6)")
 	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
 	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
+	fleetDispatchCmd.Flags().String("webhook-url", "", "URL to POST a JSON event when dispatch completes")
 
 	fleetWatchCmd := &cobra.Command{
 		Use:   "watch <run-id>",
@@ -423,7 +433,160 @@ Examples:
 	}
 	fleetWatchCmd.Flags().Int("interval", 10, "Polling interval in seconds")
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd, fleetWatchCmd)
+	// ── fleet resume (Sprint 69) ─────────────────────────────────────────────
+	fleetResumeCmd := &cobra.Command{
+		Use:   "resume <run-id>",
+		Short: "Re-dispatch all failed tasks without touching done ones",
+		Long: `Resume resets every task in status=failed back to pending and re-runs
+the dispatcher for those tasks only. Tasks that already completed successfully
+are untouched.
+
+Examples:
+  radiant fleet resume fleet-1234567890
+  radiant fleet resume fleet-1234567890 --model claude-sonnet-4-6`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			modelID, _ := cmd.Flags().GetString("model")
+			autoRoute, _ := cmd.Flags().GetBool("auto-route")
+			timeoutMins, _ := cmd.Flags().GetInt("timeout")
+
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+
+			// Count failed tasks first.
+			snap := store.Snapshot()
+			var failedCount int
+			for _, t := range snap.Tasks {
+				if t.Status == fleet.TaskFailed {
+					failedCount++
+				}
+			}
+			if failedCount == 0 {
+				fmt.Println("No failed tasks to resume.")
+				return nil
+			}
+			fmt.Printf("Resuming %d failed task(s) for fleet %q…\n", failedCount, runID)
+
+			iso, err := fleet.NewIsolator(store, cwd)
+			if err != nil {
+				return err
+			}
+			cfg := fleet.DispatchConfig{}
+			if timeoutMins > 0 {
+				cfg.Timeout = time.Duration(timeoutMins) * time.Minute
+			}
+			d, err := fleet.NewDispatcher(iso, cfg)
+			if err != nil {
+				return err
+			}
+
+			var extraArgs []string
+			if modelID != "" {
+				extraArgs = append(extraArgs, "--model", modelID)
+			}
+			if autoRoute {
+				extraArgs = append(extraArgs, "--auto-route")
+			}
+
+			results, err := d.ResumeAll(cmd.Context(), extraArgs)
+			if err != nil {
+				return err
+			}
+			var nOK, nFail int
+			for _, r := range results {
+				if r.Err == nil && r.ExitCode == 0 {
+					nOK++
+				} else {
+					nFail++
+				}
+			}
+			fmt.Printf("Done — %d succeeded, %d still failed.\n", nOK, nFail)
+			return nil
+		},
+	}
+	fleetResumeCmd.Flags().String("model", "", "Model forwarded to each agent")
+	fleetResumeCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent")
+	fleetResumeCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
+
+	// ── fleet retry (Sprint 74) ───────────────────────────────────────────────
+	fleetRetryCmd := &cobra.Command{
+		Use:   "retry <run-id> <task-id>",
+		Short: "Reset and re-dispatch a single task by ID",
+		Long: `Retry resets one specific task (by ID) from failed or done back to
+pending, then dispatches only that task. Useful to re-run a single failing
+subtask with a different model or flags without touching the rest of the fleet.
+
+Examples:
+  radiant fleet retry fleet-1234567890 task-02
+  radiant fleet retry fleet-1234567890 task-02 --model claude-opus-4-8`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID, taskID := args[0], args[1]
+			modelID, _ := cmd.Flags().GetString("model")
+			autoRoute, _ := cmd.Flags().GetBool("auto-route")
+			timeoutMins, _ := cmd.Flags().GetInt("timeout")
+
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+			if err := store.ResetTask(taskID); err != nil {
+				return fmt.Errorf("reset task %q: %w", taskID, err)
+			}
+			fmt.Printf("Task %q reset to pending — dispatching…\n", taskID)
+
+			iso, err := fleet.NewIsolator(store, cwd)
+			if err != nil {
+				return err
+			}
+			cfg := fleet.DispatchConfig{}
+			if timeoutMins > 0 {
+				cfg.Timeout = time.Duration(timeoutMins) * time.Minute
+			}
+			d, err := fleet.NewDispatcher(iso, cfg)
+			if err != nil {
+				return err
+			}
+
+			var extraArgs []string
+			if modelID != "" {
+				extraArgs = append(extraArgs, "--model", modelID)
+			}
+			if autoRoute {
+				extraArgs = append(extraArgs, "--auto-route")
+			}
+
+			results, err := d.RunAll(cmd.Context(), extraArgs)
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				fmt.Println("No tasks dispatched (nothing was pending).")
+				return nil
+			}
+			r := results[0]
+			if r.Err == nil && r.ExitCode == 0 {
+				fmt.Printf("Task %q completed successfully in %v.\n", taskID, r.Elapsed.Round(time.Millisecond))
+			} else {
+				msg := fmt.Sprintf("exit %d", r.ExitCode)
+				if r.Err != nil {
+					msg = r.Err.Error()
+				}
+				fmt.Printf("Task %q failed: %s\n", taskID, msg)
+			}
+			return nil
+		},
+	}
+	fleetRetryCmd.Flags().String("model", "", "Model forwarded to the agent")
+	fleetRetryCmd.Flags().Bool("auto-route", false, "Forward --auto-route to the agent")
+	fleetRetryCmd.Flags().Int("timeout", 0, "Agent timeout in minutes (0 = no timeout)")
+
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd, fleetWatchCmd, fleetResumeCmd, fleetRetryCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────

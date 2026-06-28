@@ -120,6 +120,22 @@ func (d *Dispatcher) RunAll(ctx context.Context, extraArgs []string) ([]AgentRes
 	return results, nil
 }
 
+// ResumeAll re-dispatches all failed tasks, leaving done/pending tasks untouched.
+// It resets each failed task back to pending, then calls RunAll so the normal
+// claim-isolate-spawn path handles them.
+func (d *Dispatcher) ResumeAll(ctx context.Context, extraArgs []string) ([]AgentResult, error) {
+	// Reset failed tasks to pending so RunAll can claim them.
+	snap := d.iso.store.Snapshot()
+	for _, t := range snap.Tasks {
+		if t.Status == TaskFailed {
+			if err := d.iso.store.ResetTask(t.ID); err != nil {
+				return nil, fmt.Errorf("reset task %q: %w", t.ID, err)
+			}
+		}
+	}
+	return d.RunAll(ctx, extraArgs)
+}
+
 // spawnAgent runs a single agent process for the given task in its worktree.
 func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Worktree, extraArgs []string) AgentResult {
 	started := time.Now()

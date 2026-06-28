@@ -315,6 +315,74 @@ func FormatTrace(events []TraceEvent) string {
 	return sb.String()
 }
 
+// TraceExport is a structured representation of a complete run, suitable for
+// saving as JSON or rendering as Markdown for audit or hand-off.
+type TraceExport struct {
+	RunID      string       `json:"run_id"`
+	ModelID    string       `json:"model_id,omitempty"`
+	EventCount int          `json:"event_count"`
+	TokensIn   int          `json:"tokens_in"`
+	TokensOut  int          `json:"tokens_out"`
+	CostUSD    float64      `json:"cost_usd,omitempty"`
+	StartedAt  time.Time    `json:"started_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+	Events     []TraceEvent `json:"events"`
+}
+
+// ExportTrace builds a TraceExport from a raw event slice. modelID is used
+// for cost estimation and may be empty.
+func ExportTrace(runID, modelID string, events []TraceEvent) TraceExport {
+	exp := TraceExport{
+		RunID:      runID,
+		ModelID:    modelID,
+		EventCount: len(events),
+		Events:     events,
+	}
+	for _, e := range events {
+		exp.TokensIn += e.TokensIn
+		exp.TokensOut += e.TokensOut
+		if exp.StartedAt.IsZero() {
+			exp.StartedAt = e.Timestamp
+		}
+		exp.UpdatedAt = e.Timestamp
+	}
+	if modelID != "" {
+		if cost, ok := EstimateCost(modelID, exp.TokensIn, exp.TokensOut); ok {
+			exp.CostUSD = cost
+		}
+	}
+	return exp
+}
+
+// ExportTraceMarkdown renders a TraceExport as a Markdown document.
+func ExportTraceMarkdown(exp TraceExport) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# Loop Run: %s\n\n", exp.RunID))
+	if exp.ModelID != "" {
+		sb.WriteString(fmt.Sprintf("**Model:** %s  \n", exp.ModelID))
+	}
+	sb.WriteString(fmt.Sprintf("**Events:** %d  \n", exp.EventCount))
+	sb.WriteString(fmt.Sprintf("**Tokens:** %d in / %d out  \n", exp.TokensIn, exp.TokensOut))
+	if exp.CostUSD > 0 {
+		sb.WriteString(fmt.Sprintf("**Cost:** %s  \n", FormatCost(exp.CostUSD)))
+	}
+	if !exp.StartedAt.IsZero() {
+		sb.WriteString(fmt.Sprintf("**Started:** %s  \n", exp.StartedAt.Format(time.RFC3339)))
+		sb.WriteString(fmt.Sprintf("**Finished:** %s  \n", exp.UpdatedAt.Format(time.RFC3339)))
+	}
+	sb.WriteString("\n## Events\n\n")
+	for _, e := range exp.Events {
+		icon := resultIcon(e.Result)
+		sb.WriteString(fmt.Sprintf("- `%s` **[%s]** %s %s — %s",
+			e.Timestamp.Format("15:04:05"), e.Phase, icon, e.Action, e.Result))
+		if e.Evidence != "" {
+			sb.WriteString(fmt.Sprintf(": %s", e.Evidence))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func resultIcon(result string) string {
 	switch result {
 	case "ok":

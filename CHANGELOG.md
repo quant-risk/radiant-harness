@@ -4,6 +4,79 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0] — 2026-06-27 — E2E tests: pipeline fleet completo (Sprint 76)
+
+20/20 packages green com -race. 8 novos testes em internal/fleet/e2e_test.go.
+
+### Added — `internal/fleet/e2e_test.go`
+- 8 testes E2E: start→plan→dispatch(mock)→status→summary, ResetTask, JSON round-trip, watch termination, persistência em disco, UpdatedAt timing
+
+---
+
+## [2.22.0] — 2026-06-27 — fleet retry: re-dispatch de task individual (Sprint 74)
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `radiant fleet retry <run-id> <task-id> [--model] [--auto-route] [--timeout]`
+
+---
+
+## [2.21.0] — 2026-06-27 — Webhooks de evento (Sprint 73)
+
+### Added — `internal/webhook/webhook.go`
+- `Send(ctx, url, Payload)` — HTTP POST fire-and-forget, timeout 10s
+- Eventos: `loop.done`, `loop.failed`, `fleet.task.done`, `fleet.task.failed`, `fleet.done`
+- 6 testes em webhook_test.go incluindo timeout, 500, task_id, auto-timestamp
+
+### Changed
+- `radiant loop start` — flag `--webhook-url` posta evento ao terminar
+- `radiant fleet dispatch` — flag `--webhook-url` posta evento ao completar
+
+---
+
+## [2.20.0] — 2026-06-27 — loop diff: git diff vs base branch (Sprint 72)
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `radiant loop diff <run-id> [--base main] [--stat]`
+- Fallback para eventos do trace quando o branch não existe mais
+
+### Added — `cmd/radiant/helpers.go`
+- `runGitInDir(dir, args...)` helper
+
+---
+
+## [2.19.0] — 2026-06-27 — loop export: JSON e Markdown (Sprint 70)
+
+### Added — `internal/loop/trace.go`
+- `TraceExport` struct com json tags
+- `ExportTrace(runID, modelID, events)` — agrega tokens, custo, timestamps
+- `ExportTraceMarkdown(exp)` — documento Markdown com header e eventos
+- 10 novos testes em sprint70_test.go
+
+### Added — `cmd/radiant/cmd_loop.go`
+- `radiant loop export <run-id> [--format json|md] [--model <id>]`
+
+---
+
+## [2.18.0] — 2026-06-27 — fleet resume + ResetTask (Sprint 69)
+
+### Added — `internal/fleet/store.go`
+- `ResetTask(taskID)` — reseta task failed → pending, limpa evidence/agentID
+
+### Added — `internal/fleet/dispatch.go`
+- `Dispatcher.ResumeAll(ctx, extraArgs)` — reseta tasks failed e chama RunAll
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `radiant fleet resume <run-id> [--model] [--auto-route] [--timeout]`
+
+---
+
+## [2.17.0] — 2026-06-27 — Sprint 71: --task-timeout já existia via --timeout no dispatch
+
+Sprint 71 foi absorvida pelo Sprint 60 (o flag --timeout por-agent já estava implementado
+no DispatchConfig.Timeout e exposto via `fleet dispatch --timeout`). Não havia lacuna real.
+
+---
+
 ## [2.16.0] — 2026-06-27 — JSON output: fleet status/summary + loop status (Sprint 68)
 
 20/20 packages green com -race. 4 novos testes em internal/fleet/sprint68_test.go.

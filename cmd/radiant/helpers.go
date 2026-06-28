@@ -1151,6 +1151,14 @@ func runGit(args ...string) (string, error) {
 	return string(out), err
 }
 
+// runGitInDir runs git in the given directory.
+func runGitInDir(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // runGoStep runs a `go` subcommand (build/vet) with the project env.
 func runGoStep(label, sub string, args ...string) error {
 	cmd := exec.Command("go", append([]string{sub}, args...)...)

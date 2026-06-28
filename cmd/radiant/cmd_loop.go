@@ -11,6 +11,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/schedule"
+	"github.com/quant-risk/radiant-harness/internal/webhook"
 	"github.com/spf13/cobra"
 )
 
@@ -138,8 +139,15 @@ func registerLoopCmds(root *cobra.Command) {
 				return nil
 			}
 
+			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+
 			result, err := loop.Run(context.Background(), cwd, runID, goal, runCfg)
 			if err != nil {
+				_ = webhook.Send(context.Background(), webhookURL, webhook.Payload{
+					Event: webhook.EventLoopFailed,
+					RunID: runID,
+					Data:  map[string]any{"error": err.Error(), "goal": goal},
+				})
 				return fmt.Errorf("loop: %w", err)
 			}
 
@@ -154,9 +162,22 @@ func registerLoopCmds(root *cobra.Command) {
 			if result.ExitReason == loop.ExitNeedsHuman {
 				fmt.Printf("\nAction required: radiant loop review\n")
 			}
+
+			_ = webhook.Send(context.Background(), webhookURL, webhook.Payload{
+				Event: webhook.EventLoopDone,
+				RunID: runID,
+				Data: map[string]any{
+					"goal":       goal,
+					"exit":       string(result.ExitReason),
+					"iterations": result.Iterations,
+					"tokens":     result.TokensUsed,
+					"cost_usd":   result.CostUSD,
+				},
+			})
 			return nil
 		},
 	}
+	loopStartCmd.Flags().String("webhook-url", "", "URL to POST a JSON event when the loop finishes")
 	loopStartCmd.Flags().Int("budget", 0, "Token budget (0 = use profile default)")
 	loopStartCmd.Flags().Int("max-iter", 0, "Max iterations (0 = use default 20)")
 	loopStartCmd.Flags().String("profile", "standard", "Budget profile: lean|standard|thorough")
@@ -477,7 +498,107 @@ items and approve or reject each one.`,
 	loopListCmd.Flags().Bool("plain", false, "Output bare run IDs only (one per line)")
 	loopStatusCmd.Flags().Bool("json", false, "Output as JSON")
 
-	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd)
+	// ── loop export (Sprint 70) ──────────────────────────────────────────────
+	loopExportCmd := &cobra.Command{
+		Use:   "export <run-id>",
+		Short: "Export a loop run as JSON or Markdown",
+		Long: `Export reads the JSONL trace for the given run and emits a structured
+document — JSON by default, Markdown with --format=md.
+
+Examples:
+  radiant loop export my-run-2026-06-27
+  radiant loop export my-run-2026-06-27 --format md > report.md
+  radiant loop export my-run-2026-06-27 --model claude-sonnet-4-6`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			modelID, _ := cmd.Flags().GetString("model")
+			format, _ := cmd.Flags().GetString("format")
+
+			path := loop.TracePath(cwd, runID)
+			events, err := loop.ReadTrace(path)
+			if err != nil {
+				return fmt.Errorf("read trace %q: %w", runID, err)
+			}
+			exp := loop.ExportTrace(runID, modelID, events)
+
+			switch format {
+			case "md", "markdown":
+				fmt.Print(loop.ExportTraceMarkdown(exp))
+			default:
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(exp)
+			}
+			return nil
+		},
+	}
+	loopExportCmd.Flags().String("format", "json", "Output format: json or md")
+	loopExportCmd.Flags().String("model", "", "Model ID for cost estimation")
+
+	// ── loop diff (Sprint 72) ────────────────────────────────────────────────
+	loopDiffCmd := &cobra.Command{
+		Use:   "diff <run-id>",
+		Short: "Show files changed during a loop run (git diff vs base branch)",
+		Long: `Diff runs git diff between the loop's branch and the base branch (default: main).
+The loop dispatcher creates a branch named after the run-id in its worktree.
+If the branch was pruned, diff falls back to listing trace events that recorded
+file modifications.
+
+Examples:
+  radiant loop diff my-run-2026-06-27
+  radiant loop diff my-run-2026-06-27 --base main
+  radiant loop diff my-run-2026-06-27 --stat`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			base, _ := cmd.Flags().GetString("base")
+			statOnly, _ := cmd.Flags().GetBool("stat")
+			if base == "" {
+				base = "main"
+			}
+
+			// Try git diff against the run branch.
+			gitArgs := []string{"diff", base + "..." + runID}
+			if statOnly {
+				gitArgs = []string{"diff", "--stat", base + "..." + runID}
+			}
+			out, err := runGitInDir(cwd, gitArgs...)
+			if err == nil {
+				if out == "" {
+					fmt.Printf("No changes between %s and %s.\n", base, runID)
+				} else {
+					fmt.Print(out)
+				}
+				return nil
+			}
+
+			// Branch not found — fall back to trace events.
+			path := loop.TracePath(cwd, runID)
+			events, readErr := loop.ReadTrace(path)
+			if readErr != nil {
+				return fmt.Errorf("branch %q not found and trace unreadable: %w", runID, readErr)
+			}
+			fmt.Printf("Branch %q not found; files referenced in trace:\n", runID)
+			seen := map[string]bool{}
+			for _, e := range events {
+				if e.Evidence != "" && !seen[e.Evidence] {
+					seen[e.Evidence] = true
+					fmt.Printf("  %s\n", e.Evidence)
+				}
+			}
+			if len(seen) == 0 {
+				fmt.Println("  (no file references in trace)")
+			}
+			return nil
+		},
+	}
+	loopDiffCmd.Flags().String("base", "main", "Base branch to diff against")
+	loopDiffCmd.Flags().Bool("stat", false, "Show --stat summary instead of full diff")
+
+	loopCmd.AddCommand(loopStartCmd, loopStatusCmd, loopResumeCmd, loopScheduleCmd, loopReviewCmd, loopListCmd, loopExportCmd, loopDiffCmd)
 	root.AddCommand(loopCmd)
 
 	// ── trace (Sprint 35) ────────────────────────────────────────────────────

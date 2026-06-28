@@ -132,6 +132,24 @@ func (s *Store) CompleteTask(taskID, evidence string, success bool) error {
 	return fmt.Errorf("task %q not found", taskID)
 }
 
+// ResetTask resets a failed task back to pending so it can be re-dispatched.
+func (s *Store) ResetTask(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.ctx.Tasks {
+		if s.ctx.Tasks[i].ID == taskID {
+			s.ctx.Tasks[i].Status = TaskPending
+			s.ctx.Tasks[i].Evidence = ""
+			s.ctx.Tasks[i].AgentID = ""
+			s.ctx.Tasks[i].WorktreeDir = ""
+			s.ctx.Tasks[i].UpdatedAt = time.Now().UTC()
+			s.ctx.UpdatedAt = time.Now().UTC()
+			return s.persist()
+		}
+	}
+	return fmt.Errorf("task %q not found", taskID)
+}
+
 // SetMeta sets a metadata key in the shared context.
 func (s *Store) SetMeta(key, value string) error {
 	s.mu.Lock()

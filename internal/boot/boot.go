@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	ctx "github.com/quant-risk/radiant-harness/internal/context"
+	"github.com/quant-risk/radiant-harness/internal/routing"
 )
 
 // AgentFlavor controls which IDE/agent the manifest is tailored for.
@@ -41,14 +42,15 @@ type Options struct {
 
 // Manifest is the structured representation of a boot manifest.
 type Manifest struct {
-	Version     string      `json:"version"`
-	Project     ProjectInfo `json:"project"`
-	Skills      []string    `json:"recommended_skills"`
-	Commands    []string    `json:"available_commands"`
-	Loop        LoopInfo    `json:"loop"`
-	Budget      BudgetInfo  `json:"budget_estimate"`
-	ContextFile string      `json:"context_file"`
-	ActiveSpec  string      `json:"active_spec,omitempty"`
+	Version     string       `json:"version"`
+	Project     ProjectInfo  `json:"project"`
+	Skills      []string     `json:"recommended_skills"`
+	Commands    []string     `json:"available_commands"`
+	Loop        LoopInfo     `json:"loop"`
+	Budget      BudgetInfo   `json:"budget_estimate"`
+	ContextFile string       `json:"context_file"`
+	ActiveSpec  string       `json:"active_spec,omitempty"`
+	Routing     *RoutingInfo `json:"routing,omitempty"`
 }
 
 // ProjectInfo summarizes the project.
@@ -71,6 +73,23 @@ type BudgetInfo struct {
 	ContextMin  int    `json:"context_min_tokens"`
 	ContextMax  int    `json:"context_max_tokens"`
 	LoopPerIter int    `json:"loop_per_iteration_tokens"`
+}
+
+// RoutingInfo describes the detected model routing plan.
+// Populated when a routing-capable agent is detected.
+type RoutingInfo struct {
+	Agent    string                  `json:"agent,omitempty"`
+	Strategy string                  `json:"strategy,omitempty"`
+	Anchor   string                  `json:"anchor,omitempty"`
+	Family   string                  `json:"family,omitempty"`
+	Phases   map[string]RoutingPhase `json:"phases,omitempty"`
+}
+
+// RoutingPhase is one phase's model in the boot manifest.
+type RoutingPhase struct {
+	Model string `json:"model"`
+	Tier  string `json:"tier"`
+	Via   string `json:"via"`
 }
 
 var budgetProfiles = map[string]BudgetInfo{
@@ -136,6 +155,30 @@ func Generate(projectDir string, opts Options) (*Manifest, error) {
 		Budget:      budget,
 		ContextFile: contextFile,
 		ActiveSpec:  detection.ActiveSpec,
+	}
+
+	// Populate routing info from the routing package.
+	anchor := inferAnchor(detection)
+	rAgent, rStrategy := routing.DetectAgent(projectDir)
+	if anchor != "" && rStrategy != "" {
+		plan := routing.Resolve(anchor, rAgent, rStrategy)
+		if plan != nil {
+			phases := make(map[string]RoutingPhase, len(plan.Phases))
+			for _, pr := range plan.Phases {
+				phases[pr.Phase] = RoutingPhase{
+					Model: pr.Model,
+					Tier:  pr.Tier,
+					Via:   pr.Via,
+				}
+			}
+			m.Routing = &RoutingInfo{
+				Agent:    string(plan.Agent),
+				Strategy: string(plan.Strategy),
+				Anchor:   plan.Anchor,
+				Family:   plan.Family,
+				Phases:   phases,
+			}
+		}
 	}
 
 	return m, nil
@@ -214,4 +257,10 @@ func coreCommands(detection *ctx.DetectionResult) []string {
 		cmds = append(cmds, "radiant validate "+detection.ActiveSpec)
 	}
 	return cmds
+}
+
+// inferAnchor picks a sensible default anchor model.
+// Future: read from .radiant-harness/config; for now use a balanced default.
+func inferAnchor(detection *ctx.DetectionResult) string {
+	return "claude-sonnet-4-6"
 }

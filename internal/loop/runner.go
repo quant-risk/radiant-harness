@@ -175,6 +175,12 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		planModel = execModel
 	}
 
+	// When no executor model is specified at all, default to a sensible
+	// mid-tier anchor. The routing engine picks the family's mid model.
+	if execModel.Model == "" {
+		execModel = llm.Model{Model: "claude-sonnet-4-6"}
+	}
+
 	execClient := llm.NewClient(execModel)
 	verClient := llm.NewClient(verModel)
 	planClient := llm.NewClient(planModel)

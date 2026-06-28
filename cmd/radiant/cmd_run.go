@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/quality"
+	"github.com/quant-risk/radiant-harness/internal/routing"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/spf13/cobra"
 )
@@ -437,6 +439,75 @@ func registerRunCmds(root *cobra.Command) {
 		},
 	}
 	root.AddCommand(modelsCmd)
+
+	// ── models route ──
+	var routeAgent, routeAnchor string
+	var routeDryRun, routeApply, routeJSON bool
+
+	modelsRouteCmd := &cobra.Command{
+		Use:   "route",
+		Short: "Show or apply agent-aware model routing for this project",
+		Long: `Detects which agent is hosting this session and computes the optimal
+model for each development phase (research, plan, implement, verify, summarize).
+
+Use --dry-run (default) to preview, --apply to write config files,
+or --json for machine-readable output.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectDir := "."
+
+			// Resolve anchor: flag > first detected family mid-tier > default.
+			anchor := routeAnchor
+			if anchor == "" {
+				anchor = "claude-sonnet-4-6"
+			}
+
+			// Resolve agent: flag > auto-detect.
+			agentID := routing.AgentID(routeAgent)
+			strategy := routing.StrategySingleModelAdvisory
+			if routeAgent != "" {
+				strategy = routing.AgentStrategy(agentID)
+			} else {
+				agentID, strategy = routing.DetectAgent(projectDir)
+			}
+
+			plan := routing.Resolve(anchor, agentID, strategy)
+
+			if routeJSON {
+				data, err := json.MarshalIndent(plan, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			fmt.Print(routing.FormatPlan(plan))
+
+			if routeApply {
+				written, err := routing.Emit(projectDir, plan)
+				if err != nil {
+					return fmt.Errorf("emit routing: %w", err)
+				}
+				if len(written) > 0 {
+					fmt.Println()
+					for _, f := range written {
+						rel, _ := filepath.Rel(projectDir, f)
+						fmt.Printf("  ✓ Written: %s\n", rel)
+					}
+				} else {
+					fmt.Println("\n  (no files to write — direct_api strategy routes at runtime)")
+				}
+			}
+			return nil
+		},
+	}
+	modelsRouteCmd.Flags().StringVar(&routeAgent, "agent", "", "agent ID (claude, codex, gemini, cursor, copilot, windsurf, hermes, opencode)")
+	modelsRouteCmd.Flags().StringVar(&routeAnchor, "anchor", "", "anchor model preset (default: claude-sonnet-4-6)")
+	modelsRouteCmd.Flags().BoolVar(&routeDryRun, "dry-run", true, "show plan without writing files (default)")
+	modelsRouteCmd.Flags().BoolVar(&routeApply, "apply", false, "write routing config files")
+	modelsRouteCmd.Flags().BoolVar(&routeJSON, "json", false, "output as JSON")
+	modelsCmd.AddCommand(modelsRouteCmd)
 
 	// ── eval ──
 	var evalModel string
