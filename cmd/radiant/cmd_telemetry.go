@@ -295,5 +295,4 @@ func registerTelemetryCmds(root *cobra.Command) {
 	telemetryExportCmd.Flags().String("output", "", "output file path (default: stdout)")
 	telemetryExportCmd.Flags().String("since", "", "filter events to >= YYYY-MM-DD (inclusive); empty = no filter")
 	telemetryCmd.AddCommand(telemetryExportCmd)
-	root.AddCommand(telemetryCmd)
 }

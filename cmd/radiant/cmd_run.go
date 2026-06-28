@@ -379,23 +379,6 @@ func registerRunCmds(root *cobra.Command) {
 	benchCmd.Flags().StringVar(&benchOutput, "output", "", "save JSON results to this path")
 	root.AddCommand(benchCmd)
 
-	// ── doctor ──
-	doctorCmd := &cobra.Command{
-		Use:   "doctor",
-		Short: "Diagnose the local environment for radiant-harness",
-		Long: "Checks PATH, agents, LLM providers, gates, and the .radiant-harness\n" +
-			"directory. Useful before running `radiant run` to surface missing\n" +
-			"tools or misconfigured API keys.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root := "."
-			if len(args) > 0 {
-				root = args[0]
-			}
-			return runDoctor(root)
-		},
-	}
-	root.AddCommand(doctorCmd)
-
 	// ── config ──
 	var configProvider string
 	var configModel string

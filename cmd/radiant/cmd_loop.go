@@ -754,11 +754,4 @@ Examples:
 
 	traceCmd.AddCommand(traceShowCmd, traceListCmd)
 	root.AddCommand(traceCmd)
-
-	// ── version ──
-	root.SetVersionTemplate("{{.Version}}\n")
-
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
 }
