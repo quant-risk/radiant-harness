@@ -2980,8 +2980,9 @@ func renderSecurityReport(scope string, findings []securityFinding, errors, warn
 	return b.String()
 }
 
-// mcpRunFull implements the radiant_run MCP tool: start loop → poll until
-// terminal → export trace. Blocks until the loop finishes or fails.
+// mcpRunFull implements the radiant_run MCP tool.
+// `loop start` is synchronous — it blocks until the loop finishes.
+// So the flow is simply: start (blocks) → export → return.
 func mcpRunFull(args json.RawMessage) mcpResponse {
 	var a struct {
 		Goal      string `json:"goal"`
@@ -3000,7 +3001,7 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 		a.Profile = "standard"
 	}
 
-	// ── 1. start ──────────────────────────────────────────────────────────
+	// ── 1. start (blocks until loop finishes) ─────────────────────────────
 	startArgv := []string{"loop", "start", a.Goal, "--profile=" + a.Profile}
 	if a.Model != "" {
 		startArgv = append(startArgv, "--model="+a.Model)
@@ -3026,65 +3027,27 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 		}}
 	}
 
-	// Extract run-id from start output (line "run-id: <id>" or first token).
+	// Extract run-id from output line "  Run ID:  <id>" (format from cmd_loop.go).
 	runID := ""
 	for _, line := range strings.Split(string(startOut), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "run-id:") || strings.HasPrefix(line, "run_id:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				runID = parts[1]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Run ID:") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 3 {
+				runID = parts[2]
 				break
 			}
 		}
 	}
 
-	// ── 2. poll until terminal ─────────────────────────────────────────────
-	const pollInterval = 5 * time.Second
-	const maxPoll = 360 // 30 min ceiling
-	var lastStatus string
-	for i := 0; i < maxPoll; i++ {
-		time.Sleep(pollInterval)
-		statusArgv := []string{"loop", "status", "--json"}
-		if runID != "" {
-			statusArgv = append(statusArgv, runID)
-		}
-		statusOut, _ := exec.Command("radiant", statusArgv...).CombinedOutput()
-		lastStatus = string(statusOut)
-
-		// Parse minimal JSON to check terminal state.
-		var st struct {
-			LastResult string `json:"last_result"`
-			LastAction string `json:"last_action"`
-		}
-		if err2 := json.Unmarshal(statusOut, &st); err2 == nil {
-			switch st.LastResult {
-			case "done", "success", "failed", "error", "cancelled":
-				goto done
-			}
-			if st.LastAction == "persist" || st.LastAction == "done" {
-				goto done
-			}
-		}
-		// Fallback: plain-text terminal signals.
-		if strings.Contains(lastStatus, "status: done") ||
-			strings.Contains(lastStatus, "status: failed") ||
-			strings.Contains(lastStatus, "loop complete") {
-			goto done
-		}
-	}
-done:
-
-	// ── 3. export trace ────────────────────────────────────────────────────
+	// ── 2. export trace ────────────────────────────────────────────────────
 	exportArgv := []string{"loop", "export"}
 	if runID != "" {
 		exportArgv = append(exportArgv, runID)
 	}
 	exportOut, _ := exec.Command("radiant", exportArgv...).CombinedOutput()
 
-	result := fmt.Sprintf("## Loop complete\n\nRun ID: %s\n\n### Status\n%s\n\n### Trace\n%s",
-		runID, lastStatus, string(exportOut))
-
+	result := fmt.Sprintf("%s\n\n### Trace\n%s", string(startOut), string(exportOut))
 	return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
 		"content": []map[string]string{{"type": "text", "text": result}},
 	}}
