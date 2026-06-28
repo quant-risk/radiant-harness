@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] — 2026-06-27 — Fleet Plan: decomposição automática de goal em tasks (Sprint 61)
+
+20/20 packages green com -race. 11 novos testes no fleet package.
+
+### Added — `internal/fleet/planner.go`
+- `Plan(ctx, goal, client)` — heurística (research→implement→verify) com fallback automático
+- `PlannerClient` interface — desacopla de `*llm.Client` para testabilidade
+- LLM path: prompt estruturado, JSON parsing, strip de markdown fences, skip de entradas incompletas
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `fleet plan <run-id>` — lê goal do store, chama `fleet.Plan()`, persiste tasks
+- Flags `--model` (LLM opcional) e `--api-key`
+
+### Added — `internal/fleet/planner_test.go`
+- 11 testes: heurística (6), fallback LLM→heurística (1), LLM sucesso (4)
+
+---
+
 ## [2.8.0] — 2026-06-27 — Fleet Dispatch com AutoRoute (Sprint 60)
 
 20/20 packages green com -race. 4 novos testes no fleet package.

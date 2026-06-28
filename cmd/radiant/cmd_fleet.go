@@ -10,6 +10,7 @@ import (
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/fleet"
 	"github.com/quant-risk/radiant-harness/internal/improve"
+	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
 	"github.com/quant-risk/radiant-harness/internal/worktree"
 	"github.com/spf13/cobra"
@@ -168,6 +169,73 @@ func registerFleetCmds(root *cobra.Command) {
 		},
 	}
 
+	// ── fleet plan ───────────────────────────────────────────────────────────
+	fleetPlanCmd := &cobra.Command{
+		Use:   "plan <run-id>",
+		Short: "Decompose the fleet goal into tasks (heuristic or LLM-assisted)",
+		Long: `Plan reads the goal from an existing fleet run and decomposes it into
+2–6 independently-executable tasks, writing them to the store.
+
+When --model is provided the LLM is asked to produce the task list.
+Without --model (or on LLM failure) a deterministic 3-task skeleton is
+used: research → implement → verify.
+
+Run plan before dispatch:
+  radiant fleet start "goal" --agents 3
+  radiant fleet plan   <run-id> --model claude-sonnet-4-6
+  radiant fleet dispatch <run-id> --model claude-sonnet-4-6 --auto-route`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			modelID, _ := cmd.Flags().GetString("model")
+
+			store, err := fleet.LoadStore(cwd, runID)
+			if err != nil {
+				return fmt.Errorf("load fleet %q: %w", runID, err)
+			}
+
+			snap := store.Snapshot()
+			goal := snap.Goal
+			if goal == "" {
+				return fmt.Errorf("fleet run %q has no goal stored", runID)
+			}
+
+			var client fleet.PlannerClient
+			if modelID != "" {
+				apiKey, _ := cmd.Flags().GetString("api-key")
+				client = llm.NewClient(llm.Model{Model: modelID, APIKey: apiKey})
+			}
+
+			fmt.Printf("Planning fleet %s\n  Goal: %s\n", runID, goal)
+			if client != nil {
+				fmt.Printf("  Model: %s\n", modelID)
+			} else {
+				fmt.Printf("  Mode: heuristic (no model specified)\n")
+			}
+			fmt.Println()
+
+			tasks, err := fleet.Plan(cmd.Context(), goal, client)
+			if err != nil {
+				return fmt.Errorf("plan: %w", err)
+			}
+
+			if err := store.SetTasks(tasks); err != nil {
+				return fmt.Errorf("save tasks: %w", err)
+			}
+
+			fmt.Printf("✓ %d tasks written\n\n", len(tasks))
+			for _, t := range tasks {
+				fmt.Printf("  [%s] %s\n", t.ID, t.Title)
+				fmt.Printf("        done when: %s\n", t.DoneWhen)
+			}
+			fmt.Printf("\nNext: `radiant fleet dispatch %s`\n", runID)
+			return nil
+		},
+	}
+	fleetPlanCmd.Flags().String("model", "", "LLM model for decomposition (optional; heuristic used when omitted)")
+	fleetPlanCmd.Flags().String("api-key", "", "API key for the model (reads from env if omitted)")
+
 	// ── fleet dispatch ───────────────────────────────────────────────────────
 	fleetDispatchCmd := &cobra.Command{
 		Use:   "dispatch <run-id>",
@@ -257,7 +325,7 @@ so all agents share the same model configuration.`,
 	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
 	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetDispatchCmd)
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetPlanCmd, fleetDispatchCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────
