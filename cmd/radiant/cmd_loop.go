@@ -178,10 +178,29 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family (research→top-tier, plan→mid, execute→anchor)")
 
 	loopStatusCmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show the current loop state",
+		Use:   "status [run-id]",
+		Short: "Show loop progress — live state or trace summary for a run-id",
+		Long: `Without a run-id, shows the current active loop state.
+With a run-id, reads the JSONL trace and shows iteration, phase, token totals, and last action.
+
+Examples:
+  radiant loop status                       # active loop
+  radiant loop status my-run-2026-06-27     # trace summary`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
+
+			if len(args) == 1 {
+				runID := args[0]
+				path := loop.TracePath(cwd, runID)
+				events, err := loop.ReadTrace(path)
+				if err != nil {
+					return fmt.Errorf("read trace for %q: %w", runID, err)
+				}
+				fmt.Print(loop.FormatProgress(runID, events))
+				return nil
+			}
+
 			c, err := loop.LoadCycle(cwd)
 			if err != nil {
 				fmt.Println("No active loop. Start one with: radiant loop start \"<goal>\"")

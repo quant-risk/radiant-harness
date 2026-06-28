@@ -130,6 +130,68 @@ func ListTraces(projectDir string) ([]string, error) {
 	return ids, nil
 }
 
+// TracePath returns the expected JSONL file path for a given runID.
+func TracePath(projectDir, runID string) string {
+	return filepath.Join(projectDir, ".radiant-harness", "traces", runID+".jsonl")
+}
+
+// FormatProgress renders a compact status summary of a running or completed loop.
+// It derives iteration number, current phase, token totals, and last action from
+// the event stream without needing the live Cycle object.
+func FormatProgress(runID string, events []TraceEvent) string {
+	if len(events) == 0 {
+		return fmt.Sprintf("Run %s — no events recorded yet.\n", runID)
+	}
+
+	var (
+		tokensIn, tokensOut int
+		iteration           int
+		lastPhase           Phase
+		lastAction          string
+		lastResult          string
+		lastEvidence        string
+		firstTS             = events[0].Timestamp
+		lastTS              = events[len(events)-1].Timestamp
+	)
+
+	for _, e := range events {
+		tokensIn += e.TokensIn
+		tokensOut += e.TokensOut
+		if e.Phase == PhaseDiscover {
+			iteration++
+		}
+		lastPhase = e.Phase
+		lastAction = e.Action
+		lastResult = e.Result
+		lastEvidence = e.Evidence
+	}
+	if iteration == 0 {
+		iteration = 1
+	}
+
+	elapsed := lastTS.Sub(firstTS).Round(time.Second)
+	totalTokens := tokensIn + tokensOut
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Run:      %s\n", runID))
+	sb.WriteString(fmt.Sprintf("Elapsed:  %s  (%s → %s)\n",
+		elapsed, firstTS.Format("15:04:05"), lastTS.Format("15:04:05")))
+	sb.WriteString(fmt.Sprintf("Iteration: %d\n", iteration))
+	sb.WriteString(fmt.Sprintf("Phase:     %s\n", lastPhase))
+	sb.WriteString(fmt.Sprintf("Tokens:    %d total (%d in / %d out)\n", totalTokens, tokensIn, tokensOut))
+	sb.WriteString(fmt.Sprintf("Events:    %d\n", len(events)))
+	sb.WriteString("\n")
+	sb.WriteString(fmt.Sprintf("Last action: %s → %s %s\n", lastAction, resultIcon(lastResult), lastResult))
+	if lastEvidence != "" {
+		ev := lastEvidence
+		if len(ev) > 80 {
+			ev = ev[:77] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("Evidence:    %s\n", ev))
+	}
+	return sb.String()
+}
+
 // FormatTrace renders a trace as human-readable text.
 func FormatTrace(events []TraceEvent) string {
 	if len(events) == 0 {

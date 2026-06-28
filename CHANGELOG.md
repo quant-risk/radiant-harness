@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] — 2026-06-27 — loop status com trace progress (Sprint 63)
+
+20/20 packages green com -race. 13 novos testes no loop package.
+
+### Added — `internal/loop/trace.go`
+- `TracePath(projectDir, runID)` — caminho canônico do JSONL trace
+- `FormatProgress(runID, events)` — resumo compacto: iteração, fase, tokens, elapsed, last action, evidence
+
+### Changed — `cmd/radiant/cmd_loop.go`
+- `loop status [run-id]` — sem run-id: comportamento anterior; com run-id: lê trace e mostra FormatProgress
+
+### Added — `internal/loop/sprint63_test.go`
+- 13 testes: TracePath formato/unicidade, FormatProgress (9 casos), round-trip trace→progress
+
+---
+
 ## [2.10.0] — 2026-06-27 — Fleet Status melhorado + fleet summary (Sprint 62)
 
 20/20 packages green com -race. 9 novos testes no fleet package.
