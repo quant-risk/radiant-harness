@@ -1673,7 +1673,7 @@ func TestHandleMCPRequestInitialize(t *testing.T) {
 		{Name: "radiant_spec", Description: "test"},
 	}
 	req := mcpRequest{JSONRPC: "2.0", ID: 1, Method: "initialize"}
-	resp := handleMCPRequest(req, tools)
+	resp := handleMCPRequest(req, tools, nil)
 	if resp.Error != nil {
 		t.Fatalf("initialize should not error; got %+v", resp.Error)
 	}
@@ -1688,7 +1688,7 @@ func TestHandleMCPRequestToolsList(t *testing.T) {
 		{Name: "radiant_adr", Description: "ADR"},
 	}
 	req := mcpRequest{JSONRPC: "2.0", ID: 2, Method: "tools/list"}
-	resp := handleMCPRequest(req, tools)
+	resp := handleMCPRequest(req, tools, nil)
 	if resp.Error != nil {
 		t.Fatalf("tools/list should not error; got %+v", resp.Error)
 	}
@@ -1704,7 +1704,7 @@ func TestHandleMCPRequestToolsList(t *testing.T) {
 
 func TestHandleMCPRequestUnknownMethod(t *testing.T) {
 	req := mcpRequest{JSONRPC: "2.0", ID: 3, Method: "no/such/method"}
-	resp := handleMCPRequest(req, nil)
+	resp := handleMCPRequest(req, nil, nil)
 	if resp.Error == nil {
 		t.Fatal("unknown method should error")
 	}
@@ -1720,7 +1720,7 @@ func TestHandleMCPRequestToolsCallInvalidParams(t *testing.T) {
 		Method:  "tools/call",
 		Params:  json.RawMessage(`{not valid json`),
 	}
-	resp := handleMCPRequest(req, nil)
+	resp := handleMCPRequest(req, nil, nil)
 	if resp.Error == nil {
 		t.Fatal("invalid params should error")
 	}
@@ -1730,7 +1730,7 @@ func TestHandleMCPRequestToolsCallInvalidParams(t *testing.T) {
 }
 
 func TestCallMCPToolUnknownTool(t *testing.T) {
-	resp := callMCPTool("does_not_exist", json.RawMessage(`{}`))
+	resp := callMCPTool("does_not_exist", json.RawMessage(`{}`), nil)
 	if resp.Error == nil {
 		t.Fatal("unknown tool should error")
 	}
@@ -1759,7 +1759,7 @@ func TestMCPServeHandlesEOF(t *testing.T) {
 	// Send empty input — should return without error.
 	in := strings.NewReader("")
 	out := &strings.Builder{}
-	if err := runMCPServe(in, out); err != nil {
+	if err := runMCPServe(in, out, false); err != nil {
 		t.Errorf("runMCPServe with empty input should not error; got %v", err)
 	}
 }
@@ -1767,7 +1767,7 @@ func TestMCPServeHandlesEOF(t *testing.T) {
 func TestMCPServeHandlesInitializeFromStdin(t *testing.T) {
 	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}` + "\n")
 	out := &strings.Builder{}
-	if err := runMCPServe(in, out); err != nil {
+	if err := runMCPServe(in, out, false); err != nil {
 		t.Fatalf("runMCPServe: %v", err)
 	}
 	if !strings.Contains(out.String(), "radiant-harness") {
@@ -1781,7 +1781,7 @@ func TestMCPServeHandlesInitializeFromStdin(t *testing.T) {
 func TestMCPServeHandlesMalformedJSON(t *testing.T) {
 	in := strings.NewReader(`{broken json` + "\n")
 	out := &strings.Builder{}
-	if err := runMCPServe(in, out); err != nil {
+	if err := runMCPServe(in, out, false); err != nil {
 		t.Fatalf("runMCPServe: %v", err)
 	}
 	if !strings.Contains(out.String(), "parse error") {

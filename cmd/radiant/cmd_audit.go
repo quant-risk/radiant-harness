@@ -119,17 +119,25 @@ func registerAuditCmds(root *cobra.Command) {
 	//
 	// Reads newline-delimited JSON-RPC from stdin; writes
 	// responses to stdout.
+	//
+	// --sampling: when set, the server uses MCP sampling/createMessage
+	// to request LLM inference from the calling agent (Claude Code,
+	// Hermes, etc.) instead of using its own API key. No API key
+	// required in this mode.
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "MCP server commands",
 	}
+	var mcpSamplingFlag bool
 	mcpServeCmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the MCP server (stdio transport)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPServe(os.Stdin, os.Stdout)
+			return runMCPServe(os.Stdin, os.Stdout, mcpSamplingFlag)
 		},
 	}
+	mcpServeCmd.Flags().BoolVar(&mcpSamplingFlag, "sampling", false,
+		"Use MCP sampling/createMessage — the calling agent provides LLM inference (no API key needed)")
 	mcpCmd.AddCommand(mcpServeCmd)
 	root.AddCommand(mcpCmd)
 

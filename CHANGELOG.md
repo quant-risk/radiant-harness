@@ -4,6 +4,51 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.0] — 2026-06-28 — Dual-mode MCP backend: HTTP + MCP Sampling
+
+### Added — `internal/llm/backend.go`
+- Interface `Backend` com `Chat`, `ChatStream` e `ModelID` — abstração que desacopla o loop do transporte LLM.
+- `HTTPBackend`: wrapper fino sobre o `Client` existente. Preserva toda a lógica de retry/backoff/429.
+- Compile-time checks: `var _ Backend = (*HTTPBackend)(nil)` e `(*SamplingBackend)(nil)`.
+
+### Added — `internal/llm/sampling.go`
+- `SamplingBackend`: implementa `Backend` via protocolo MCP `sampling/createMessage` (spec §6.5).
+- Quando o harness precisa de uma completion, emite um JSON-RPC request de volta ao cliente MCP e bloqueia até a resposta. O cliente (Claude Code, Hermes, Cursor, etc.) executa a inferência com suas próprias credenciais — **nenhuma API key necessária no processo do harness**.
+- `Dispatch(raw []byte)`: roteia responses do cliente para o `Chat()` pendente via `sync.Map` — sem locks no caminho quente.
+- `IsSamplingResponse(raw []byte)`: heurística para o read loop distinguir responses de requests.
+- Messages com role `system` colapsadas no primeiro `user` message com prefixo `[SYSTEM]` (MCP sampling não tem role system nativo).
+- Suporte a `modelPreferences.hints` para sugestão de modelo ao cliente.
+
+### Changed — `internal/loop/runner.go`
+- `RunConfig.Backend llm.Backend` — campo opcional. Quando não-nil, todas as fases (planner, executor, verifier, reviewer) usam este backend em vez de clientes HTTP.
+- `resolveBackends()` — função interna que retorna 3 backends + 3 model IDs: usa `Backend` quando fornecido, constrói `HTTPBackend` por fase caso contrário. Compatibilidade total com código existente (zero-value `nil` → comportamento anterior).
+
+### Changed — `cmd/radiant/helpers.go`
+- **Elimina global `activeSamplingBackend`** — substituída por `mcpDispatcher`, struct criado uma vez por sessão MCP em `runMCPServe` e passado explicitamente pela cadeia de dispatch.
+- `mcpDispatcher.backend()` retorna `llm.Backend` (interface), nunca o tipo concreto — `mcpRunFull` não sabe se está em modo HTTP ou sampling.
+- Cadeia limpa: `runMCPServe → handleMCPRequest(d) → callMCPTool(d) → mcpRunFull(backend)`.
+- `mcpRunFull(args, backend)` despacha para `mcpRunWithBackend` (sampling) ou `mcpRunHTTP` (normal) com base em `backend != nil`.
+- `runMCPServe` aceita `samplingMode bool` — quando true, cria `SamplingBackend` e roteia responses JSON-RPC via `IsSamplingResponse` + `Dispatch`.
+
+### Added — `cmd/radiant/cmd_audit.go`
+- Flag `--sampling` em `radiant mcp-serve`: `radiant mcp-serve --sampling` ativa o modo sub-agente (sem API key, usa o agente chamador como LLM).
+
+### Added — testes
+- `internal/llm/backend_test.go` — 5 testes: interface checks, `ModelID` default/hint, `HTTPBackend` preserva model.
+- `internal/llm/sampling_test.go` — 8 testes com `-race`: `SendsRequest`, `ReturnsResponse`, `ContextCancel`, `Dispatch_UnknownID`, `Dispatch_MalformedJSON`, `ConcurrentRequests` (10 goroutines), `SystemMessageCollapse`, `IsSamplingResponse` (6 subcasos).
+- `cmd/radiant/sprint_sampling_test.go` — 6 testes: `ToolsListWorks`, `RoutesToSampling`, `DispatchesResponse`, `MixedRequestsAndResponses`, `NilDispatcher`, `HTTPFallback`.
+
+### Result
+- `go test ./... -race` verde em todos os 22 pacotes.
+- `go vet ./...` limpo.
+- Dois modos, um binário:
+  ```
+  radiant mcp-serve            # Modo A: API key própria (HTTP)
+  radiant mcp-serve --sampling # Modo B: agente chamador fornece a inferência
+  ```
+
+## [2.35.0] — 2026-06-28 — install.sh + radiant setup-mcp
+
 ## [2.34.0] — 2026-06-28 — MCP radiant_run + agent onboarding
 
 ### Added — `cmd/radiant/helpers.go`

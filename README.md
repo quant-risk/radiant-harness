@@ -4,7 +4,7 @@
 > Shipped as a single binary — works with Claude Code, Cursor, Codex, Copilot, Gemini CLI, Windsurf, Hermes, and any MCP-compatible agent.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.34.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.36.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-22_packages_green-brightgreen.svg)](CHANGELOG.md)
 [![MCP](https://img.shields.io/badge/MCP-radiant__run-purple.svg)](AGENTS.md)
 
@@ -86,11 +86,40 @@ Add to your agent's MCP config:
 }
 ```
 
-**Claude Code** — add to `.claude/settings.json`:
+Or use the auto-detection command:
+
+```bash
+radiant setup-mcp   # detects Claude Code, Cursor, Windsurf, Zed, VSCode automatically
+```
+
+### Two operating modes
+
+| Mode | Command | How it works |
+|------|---------|-------------|
+| **HTTP mode** (default) | `radiant mcp-serve` | Harness makes its own LLM calls using an API key from the environment |
+| **Sampling mode** | `radiant mcp-serve --sampling` | Harness uses the calling agent as its LLM — no API key needed |
+
+**Sampling mode** is the recommended mode for Claude Code, Hermes, Cursor, and any other MCP-compatible agent. The harness "possesses" the agent: every LLM call in the loop (planner, executor, verifier) is dispatched back to the calling agent via `sampling/createMessage`. The harness controls the state machine and orchestration; the agent provides the intelligence.
+
+```
+User → Agent → radiant_run({ goal })
+                  ↓
+              harness loop
+                  ├─ DISCOVER → sampling/createMessage → Agent reasons → discovery
+                  ├─ PLAN     → sampling/createMessage → Agent plans   → plan
+                  ├─ EXECUTE  → sampling/createMessage → Agent codes   → code
+                  └─ VERIFY   → sampling/createMessage → Agent checks  → verdict
+                  ↓
+              returns full trace to Agent → User
+```
+
+### Claude Code setup (sampling mode)
+
 ```json
+// .claude/settings.json
 {
   "mcpServers": {
-    "radiant": { "command": "radiant", "args": ["mcp-serve"] }
+    "radiant": { "command": "radiant", "args": ["mcp-serve", "--sampling"] }
   }
 }
 ```
@@ -103,14 +132,14 @@ The agent calls ONE tool. No extra prompt engineering needed.
 radiant_run({ goal: "add input validation to POST /api/users" })
 ```
 
-The harness runs the full loop in-process (no PATH dependency), blocks until done, and returns the complete trace. The agent delivers the result to you.
+The harness runs the full loop, blocks until done, and returns the complete trace.
 
 **Available MCP tools:**
 
 | Tool | What it does |
 |------|-------------|
 | `radiant_run` | **Full loop in one call** — start + execute + export. Blocks until done. |
-| `radiant_loop_start` | Start a loop (non-blocking from MCP perspective, runs synchronously) |
+| `radiant_loop_start` | Start a loop (non-blocking from MCP perspective) |
 | `radiant_loop_status` | Get progress of a run |
 | `radiant_loop_list` | List all runs |
 

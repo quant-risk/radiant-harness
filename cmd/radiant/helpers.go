@@ -1308,13 +1308,46 @@ type mcpError struct {
 	Message string `json:"message"`
 }
 
+// mcpDispatcher carries the execution context for a running MCP server session.
+// It is created once per runMCPServe call and threaded explicitly through the
+// dispatch chain, replacing the former package-level activeSamplingBackend global.
+type mcpDispatcher struct {
+	// sampling is non-nil only when --sampling mode is active.
+	// When non-nil, radiant_run routes all LLM calls through it instead
+	// of the HTTP API. The host agent provides inference via
+	// sampling/createMessage responses delivered to Dispatch().
+	sampling *llm.SamplingBackend
+}
+
+// backend returns the llm.Backend to use for radiant_run calls, or nil
+// in non-sampling mode (caller uses the HTTP path).
+func (d *mcpDispatcher) backend() llm.Backend {
+	if d == nil || d.sampling == nil {
+		return nil
+	}
+	return d.sampling
+}
+
 // runMCPServe reads newline-delimited JSON-RPC requests from `in`,
 // writes JSON-RPC responses to `out`. Implements the Model Context
 // Protocol (MCP) over stdio. Tools exposed are radiant commands
 // (spec, adr, product, evals, audit, release). Each tool call
 // spawns the corresponding command as a subprocess and returns
 // stdout as the result.
-func runMCPServe(in io.Reader, out io.Writer) error {
+//
+// When samplingMode is true, a SamplingBackend is created and used for
+// all radiant_run calls instead of the HTTP API. The host agent provides
+// LLM inference via sampling/createMessage responses written to the
+// server's stdin — no API key required.
+func runMCPServe(in io.Reader, out io.Writer, samplingMode bool) error {
+	d := &mcpDispatcher{}
+	if samplingMode {
+		d.sampling = llm.NewSamplingBackend(llm.SamplingOptions{
+			ModelHint: os.Getenv("RADIANT_MODEL"),
+			MaxTokens: 8192,
+			Out:       out,
+		})
+	}
 	tools := []mcpTool{
 		{Name: "radiant_spec", Description: "Scaffold a new feature (spec.md + tasks.md)", InputSchema: mcpInputSchema{
 			Type: "object",
@@ -1404,12 +1437,19 @@ func runMCPServe(in io.Reader, out io.Writer) error {
 		if len(line) == 0 {
 			continue
 		}
+		// In sampling mode, detect JSON-RPC responses (from the host client
+		// replying to sampling/createMessage) and dispatch them to the
+		// SamplingBackend. These have "result" or "error" but no "method".
+		if samplingMode && llm.IsSamplingResponse(line) {
+			d.sampling.Dispatch(line)
+			continue
+		}
 		var req mcpRequest
 		if err := json.Unmarshal(line, &req); err != nil {
 			_ = enc.Encode(mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32700, Message: "parse error"}})
 			continue
 		}
-		resp := handleMCPRequest(req, tools)
+		resp := handleMCPRequest(req, tools, d)
 		_ = enc.Encode(resp)
 	}
 	return scanner.Err()
@@ -1417,7 +1457,7 @@ func runMCPServe(in io.Reader, out io.Writer) error {
 
 // handleMCPRequest dispatches one JSON-RPC request to the
 // appropriate MCP method handler.
-func handleMCPRequest(req mcpRequest, tools []mcpTool) mcpResponse {
+func handleMCPRequest(req mcpRequest, tools []mcpTool, d *mcpDispatcher) mcpResponse {
 	switch req.Method {
 	case "initialize":
 		return mcpResponse{
@@ -1448,7 +1488,9 @@ func handleMCPRequest(req mcpRequest, tools []mcpTool) mcpResponse {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params"}}
 		}
-		return callMCPTool(params.Name, params.Arguments)
+		result := callMCPTool(params.Name, params.Arguments, d)
+		result.ID = req.ID
+		return result
 	default:
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32601, Message: "method not found: " + req.Method}}
 	}
@@ -2984,7 +3026,9 @@ func renderSecurityReport(scope string, findings []securityFinding, errors, warn
 
 // mcpRunFull implements the radiant_run MCP tool.
 // Calls loop.Run() directly in-process — no exec.Command, no PATH dependency.
-func mcpRunFull(args json.RawMessage) mcpResponse {
+// When backend is non-nil (sampling mode), all LLM calls route through it
+// instead of the HTTP API — no API key required.
+func mcpRunFull(args json.RawMessage, backend llm.Backend) mcpResponse {
 	var a struct {
 		Goal      string  `json:"goal"`
 		Profile   string  `json:"profile"`
@@ -3008,6 +3052,25 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
+
+	// Sampling mode: skip API key resolution entirely.
+	if backend != nil {
+		return mcpRunWithBackend(a, backend, cwd, cfg)
+	}
+	return mcpRunHTTP(a, cwd, cfg)
+}
+
+// mcpRunHTTP executes a full harness loop using the HTTP API (normal mode).
+// Resolves API credentials from the environment.
+func mcpRunHTTP(a struct {
+	Goal      string  `json:"goal"`
+	Profile   string  `json:"profile"`
+	Model     string  `json:"model"`
+	MaxIter   int     `json:"max_iter"`
+	MaxCost   float64 `json:"max_cost"`
+	MaxTime   string  `json:"max_time"`
+	AutoRoute bool    `json:"auto_route"`
+}, cwd string, cfg *config.Config) mcpResponse {
 
 	apiKey, baseURL := resolveLoopLLMCreds("")
 
@@ -3055,7 +3118,6 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 
 	result, err := loop.Run(context.Background(), cwd, runID, a.Goal, runCfg)
 
-	// Build response text.
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Run ID: %s\nGoal: %s\nModel: %s\n\n", runID, a.Goal, modelID))
 	if err != nil {
@@ -3069,7 +3131,88 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 		}
 	}
 
-	// Export trace directly from the trace file.
+	infos, _ := loop.ListTraceInfos(cwd)
+	for _, info := range infos {
+		if info.RunID == runID {
+			events, readErr := loop.ReadTrace(filepath.Join(cwd, ".radiant-harness", "traces", runID+".jsonl"))
+			if readErr == nil {
+				exp := loop.ExportTrace(runID, modelID, events)
+				sb.WriteString("\n---\n\n")
+				sb.WriteString(loop.ExportTraceMarkdown(exp))
+			}
+			break
+		}
+	}
+
+	isErr := err != nil
+	return mcpResponse{JSONRPC: "2.0", Result: map[string]interface{}{
+		"content": []map[string]string{{"type": "text", "text": sb.String()}},
+		"isError": isErr,
+	}}
+}
+
+// mcpRunWithBackend executes a full harness loop using a caller-supplied
+// llm.Backend (sampling mode). The host agent provides LLM inference via
+// MCP sampling/createMessage — no API key required.
+func mcpRunWithBackend(a struct {
+	Goal      string  `json:"goal"`
+	Profile   string  `json:"profile"`
+	Model     string  `json:"model"`
+	MaxIter   int     `json:"max_iter"`
+	MaxCost   float64 `json:"max_cost"`
+	MaxTime   string  `json:"max_time"`
+	AutoRoute bool    `json:"auto_route"`
+}, backend llm.Backend, cwd string, cfg *config.Config) mcpResponse {
+
+	modelID := a.Model
+	if modelID == "" {
+		modelID = os.Getenv("RADIANT_MODEL")
+	}
+	if modelID == "" && cfg.Model != "" {
+		modelID = cfg.Model
+	}
+	// In sampling mode we don't strictly need a model ID — the host decides.
+	if modelID == "" {
+		modelID = "mcp-sampling"
+	}
+
+	maxIter := a.MaxIter
+	if maxIter == 0 && cfg.MaxIter > 0 {
+		maxIter = cfg.MaxIter
+	}
+
+	var maxDuration time.Duration
+	if a.MaxTime != "" {
+		maxDuration, _ = time.ParseDuration(a.MaxTime)
+	}
+
+	runID := fmt.Sprintf("run-%d", time.Now().Unix())
+
+	runCfg := loop.RunConfig{
+		Backend: backend, // ← sampling mode: no API key
+		Budget: loop.BudgetConfig{
+			MaxIter:     maxIter,
+			Profile:     loop.BudgetProfile(a.Profile),
+			MaxDuration: maxDuration,
+			MaxCostUSD:  a.MaxCost,
+		},
+	}
+
+	result, err := loop.Run(context.Background(), cwd, runID, a.Goal, runCfg)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Run ID: %s\nGoal: %s\nModel: %s (sampling)\n\n", runID, a.Goal, modelID))
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("Loop failed: %v\n", err))
+	} else {
+		sb.WriteString(fmt.Sprintf("Exit: %s\nIterations: %d\nElapsed: %s\nTokens: %d\n",
+			result.ExitReason, result.Iterations,
+			result.Elapsed.Round(time.Second), result.TokensUsed))
+		if result.CostUSD > 0 {
+			sb.WriteString(fmt.Sprintf("Cost: $%.4f\n", result.CostUSD))
+		}
+	}
+
 	infos, _ := loop.ListTraceInfos(cwd)
 	for _, info := range infos {
 		if info.RunID == runID {
@@ -3092,7 +3235,7 @@ func mcpRunFull(args json.RawMessage) mcpResponse {
 
 // callMCPTool dispatches a tools/call request to the matching
 // radiant CLI command. Returns the stdout as a content array.
-func callMCPTool(name string, args json.RawMessage) mcpResponse {
+func callMCPTool(name string, args json.RawMessage, d *mcpDispatcher) mcpResponse {
 	var argv []string
 	argv = append(argv, name)
 	// Each tool has its own CLI shape. Map tools to subcommands.
@@ -3196,7 +3339,7 @@ func callMCPTool(name string, args json.RawMessage) mcpResponse {
 			argv = append(argv, "--plain")
 		}
 	case "radiant_run":
-		return mcpRunFull(args)
+		return mcpRunFull(args, d.backend())
 	default:
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 	}

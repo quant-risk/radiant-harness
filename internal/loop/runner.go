@@ -25,8 +25,16 @@ var _ StreamWriter = os.Stdout
 // RunConfig holds all runtime parameters for an autonomous loop run.
 // It is built from CLI flags by the caller and passed to Run().
 type RunConfig struct {
+	// Backend is an optional LLM backend that overrides the HTTP clients.
+	// When non-nil, all LLM calls (executor, verifier, planner) use this
+	// backend. This enables MCP sampling mode where inference is provided
+	// by the host agent via sampling/createMessage — no API key needed.
+	// When nil, HTTPBackend is constructed from ExecutorModel etc.
+	Backend llm.Backend
+
 	// LLM clients — executor and verifier are intentionally separate.
 	// The executor never grades its own work.
+	// Only used when Backend == nil.
 	ExecutorModel llm.Model
 	VerifierModel llm.Model // if zero, falls back to ExecutorModel
 
@@ -196,41 +204,46 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 	verModel := cfg.VerifierModel
 	planModel := cfg.PlannerModel
 
-	if cfg.AutoRoute {
-		anchor := cfg.ExecutorModel.Model
-		if routed := llm.AutoRoute(anchor, llm.PhaseResearch); routed != anchor {
-			verModel = llm.Model{
-				Model:   routed,
-				APIKey:  cfg.ExecutorModel.APIKey,
-				BaseURL: cfg.ExecutorModel.BaseURL,
+	// When Backend is provided (e.g. sampling mode), skip all HTTP model
+	// resolution and use the backend for every phase. The model IDs for
+	// trace/cost purposes come from Backend.ModelID().
+	if cfg.Backend == nil {
+		if cfg.AutoRoute {
+			anchor := cfg.ExecutorModel.Model
+			if routed := llm.AutoRoute(anchor, llm.PhaseResearch); routed != anchor {
+				verModel = llm.Model{
+					Model:   routed,
+					APIKey:  cfg.ExecutorModel.APIKey,
+					BaseURL: cfg.ExecutorModel.BaseURL,
+				}
 			}
-		}
-		if routed := llm.AutoRoute(anchor, llm.PhasePlan); routed != anchor {
-			planModel = llm.Model{
-				Model:   routed,
-				APIKey:  cfg.ExecutorModel.APIKey,
-				BaseURL: cfg.ExecutorModel.BaseURL,
+			if routed := llm.AutoRoute(anchor, llm.PhasePlan); routed != anchor {
+				planModel = llm.Model{
+					Model:   routed,
+					APIKey:  cfg.ExecutorModel.APIKey,
+					BaseURL: cfg.ExecutorModel.BaseURL,
+				}
 			}
+			// Execute always stays on the anchor model.
 		}
-		// Execute always stays on the anchor model.
+
+		if verModel.Model == "" {
+			verModel = execModel
+		}
+		if planModel.Model == "" {
+			planModel = execModel
+		}
+
+		// When no executor model is specified at all, default to a sensible
+		// mid-tier anchor. The routing engine picks the family's mid model.
+		if execModel.Model == "" {
+			execModel = llm.Model{Model: "claude-sonnet-4-6"}
+		}
 	}
 
-	if verModel.Model == "" {
-		verModel = execModel
-	}
-	if planModel.Model == "" {
-		planModel = execModel
-	}
-
-	// When no executor model is specified at all, default to a sensible
-	// mid-tier anchor. The routing engine picks the family's mid model.
-	if execModel.Model == "" {
-		execModel = llm.Model{Model: "claude-sonnet-4-6"}
-	}
-
-	execClient := llm.NewClient(execModel)
-	verClient := llm.NewClient(verModel)
-	planClient := llm.NewClient(planModel)
+	// Resolve the effective backends: either the caller-supplied Backend
+	// (sampling mode) or HTTPBackend wrappers per phase.
+	execBackend, verBackend, planBackend, execModelID, verModelID, planModelID := resolveBackends(cfg, execModel, verModel, planModel)
 
 	// Verifier config defaults.
 	verCfg := cfg.Verifier
@@ -291,9 +304,9 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		var planOutput string
 		if cfg.Plan && len(lastReviewFindings) == 0 {
 			planPrompt := BuildPlannerPrompt(goal, c.State().Iteration)
-			planResp, planErr := planClient.SimpleChat(ctx, plannerSystemPrompt(), planPrompt)
+			planResp, planErr := backendSimpleChat(ctx, planBackend, plannerSystemPrompt(), planPrompt)
 			planToks := estimateTokens(planPrompt, planResp)
-			traceCall(tr, cfg.LogJSON, runID, PhasePlan, "planner", planModel.Model, planPrompt, planResp, planToks, planErr)
+			traceCall(tr, cfg.LogJSON, runID, PhasePlan, "planner", planModelID, planPrompt, planResp, planToks, planErr)
 			if planErr == nil {
 				b.Consume(planToks, PhasePlan)
 				planOutput = planResp
@@ -319,13 +332,13 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		if cfg.Stream {
 			iter := c.State().Iteration + 1
 			fmt.Fprintf(streamOut, "\n── executor (iter %d) ──────────────────────────────\n", iter)
-			execOutput, execErr = simpleChatStream(ctx, execClient, executorSystemPrompt(projectCtxBlock), execPrompt, streamOut)
+			execOutput, execErr = backendChatStream(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt, streamOut)
 			fmt.Fprintf(streamOut, "\n────────────────────────────────────────────────────\n")
 		} else {
-			execOutput, execErr = execClient.SimpleChat(ctx, executorSystemPrompt(projectCtxBlock), execPrompt)
+			execOutput, execErr = backendSimpleChat(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt)
 		}
 		toks := estimateTokens(execPrompt, execOutput)
-		traceCall(tr, cfg.LogJSON, runID, PhaseExecute, "executor", cfg.ExecutorModel.Model, execPrompt, execOutput, toks, execErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseExecute, "executor", execModelID, execPrompt, execOutput, toks, execErr)
 		if execErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("executor error: %v", execErr))
 			_ = c.IncrIteration()
@@ -347,9 +360,9 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg)
-		verResponse, verErr := verClient.SimpleChat(ctx, verifierSystemPrompt(), verPrompt)
+		verResponse, verErr := backendSimpleChat(ctx, verBackend, verifierSystemPrompt(), verPrompt)
 		verToks := estimateTokens(verPrompt, verResponse)
-		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "verifier", verModel.Model, verPrompt, verResponse, verToks, verErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "verifier", verModelID, verPrompt, verResponse, verToks, verErr)
 		if verErr != nil {
 			_ = c.Transition(PhaseFailed, fmt.Sprintf("verifier error: %v", verErr))
 			_ = c.IncrIteration()
@@ -378,9 +391,9 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 
 		// ── Post-convergence review panel ────────────────────────────────
 		reviewPrompt := BuildReviewPrompt(goal, lastVerifyOutput, lastReviewFindings)
-		reviewResponse, reviewErr := verClient.SimpleChat(ctx, reviewerSystemPrompt(), reviewPrompt)
+		reviewResponse, reviewErr := backendSimpleChat(ctx, verBackend, reviewerSystemPrompt(), reviewPrompt)
 		revToks := estimateTokens(reviewPrompt, reviewResponse)
-		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "reviewer", verModel.Model, reviewPrompt, reviewResponse, revToks, reviewErr)
+		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "reviewer", verModelID, reviewPrompt, reviewResponse, revToks, reviewErr)
 		if reviewErr == nil {
 			b.Consume(revToks, PhaseVerify)
 			reviewResult := ParseReviewResponse(reviewResponse)
@@ -538,6 +551,59 @@ func plannerSystemPrompt() string {
 into a numbered list of concrete implementation steps. Be specific and actionable.
 Do not implement — only plan. Output a numbered list, one step per line.
 Keep it under 10 steps. Focus on what the executor needs to do next.`
+}
+
+// resolveBackends returns the per-phase LLM backends and model IDs to use
+// for trace/cost logging. When cfg.Backend is non-nil (sampling mode), all
+// three phases share that single backend and model IDs come from it. When
+// nil, HTTPBackend wrappers are constructed per-phase from the Model values.
+func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (exec, ver, plan llm.Backend, execID, verID, planID string) {
+	if cfg.Backend != nil {
+		id := cfg.Backend.ModelID()
+		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id
+	}
+	exec = llm.NewHTTPBackend(execModel)
+	ver = llm.NewHTTPBackend(verModel)
+	plan = llm.NewHTTPBackend(planModel)
+	return exec, ver, plan, execModel.Model, verModel.Model, planModel.Model
+}
+
+// backendSimpleChat is the Backend equivalent of Client.SimpleChat: it sends
+// a system+user message pair and returns the assistant text. Works with any
+// Backend implementation (HTTP or sampling).
+func backendSimpleChat(ctx context.Context, backend llm.Backend, systemPrompt, userPrompt string) (string, error) {
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+	resp, err := backend.Chat(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from LLM")
+	}
+	return resp.Choices[0].Message.Content, nil
+}
+
+// backendChatStream is the Backend equivalent of simpleChatStream: it streams
+// the response via callback while accumulating the full text. For backends
+// that don't support native streaming (e.g. sampling), the callback is called
+// once with the complete response.
+func backendChatStream(ctx context.Context, backend llm.Backend, systemPrompt, userPrompt string, w StreamWriter) (string, error) {
+	var sb strings.Builder
+	callback := func(chunk string) {
+		sb.WriteString(chunk)
+		if w != nil {
+			_, _ = fmt.Fprint(w, chunk)
+		}
+	}
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+	_, err := backend.ChatStream(ctx, messages, callback)
+	return sb.String(), err
 }
 
 // simpleChatStream calls ChatStream and writes each chunk to w, returning the

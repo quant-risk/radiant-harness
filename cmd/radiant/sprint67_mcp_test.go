@@ -15,7 +15,7 @@ func TestMCPToolsList_IncludesLoopTools(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
 	in := strings.NewReader(input)
 	var out strings.Builder
-	_ = runMCPServe(in, &out)
+	_ = runMCPServe(in, &out, false)
 
 	raw := out.String()
 	for _, name := range []string{"radiant_loop_start", "radiant_loop_status", "radiant_loop_list"} {
@@ -39,7 +39,7 @@ func TestMCPToolsList_IncludesLoopTools(t *testing.T) {
 
 func TestCallMCPTool_LoopStart_Dispatches(t *testing.T) {
 	args := json.RawMessage(`{"goal":"refactor auth","model":"claude-sonnet-4-6","max_iter":5}`)
-	resp := callMCPTool("radiant_loop_start", args)
+	resp := callMCPTool("radiant_loop_start", args, nil)
 	// Should NOT return unknown-tool error (-32602).
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_start should be a known tool, got: %+v", resp.Error)
@@ -48,7 +48,7 @@ func TestCallMCPTool_LoopStart_Dispatches(t *testing.T) {
 
 func TestCallMCPTool_LoopStatus_Dispatches(t *testing.T) {
 	args := json.RawMessage(`{"run_id":"my-run-001"}`)
-	resp := callMCPTool("radiant_loop_status", args)
+	resp := callMCPTool("radiant_loop_status", args, nil)
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_status should be a known tool, got: %+v", resp.Error)
 	}
@@ -56,7 +56,7 @@ func TestCallMCPTool_LoopStatus_Dispatches(t *testing.T) {
 
 func TestCallMCPTool_LoopList_Dispatches(t *testing.T) {
 	args := json.RawMessage(`{}`)
-	resp := callMCPTool("radiant_loop_list", args)
+	resp := callMCPTool("radiant_loop_list", args, nil)
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_list should be a known tool, got: %+v", resp.Error)
 	}
@@ -64,7 +64,7 @@ func TestCallMCPTool_LoopList_Dispatches(t *testing.T) {
 
 func TestCallMCPTool_LoopStart_AutoRoute(t *testing.T) {
 	args := json.RawMessage(`{"goal":"build API","auto_route":true}`)
-	resp := callMCPTool("radiant_loop_start", args)
+	resp := callMCPTool("radiant_loop_start", args, nil)
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_start with auto_route should be a known tool: %+v", resp.Error)
 	}
@@ -73,7 +73,7 @@ func TestCallMCPTool_LoopStart_AutoRoute(t *testing.T) {
 func TestCallMCPTool_LoopStatus_NoRunID_Dispatches(t *testing.T) {
 	// Empty run_id → falls back to active loop status (no run-id arg).
 	args := json.RawMessage(`{}`)
-	resp := callMCPTool("radiant_loop_status", args)
+	resp := callMCPTool("radiant_loop_status", args, nil)
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_status with empty run_id should still dispatch: %+v", resp.Error)
 	}
@@ -81,7 +81,7 @@ func TestCallMCPTool_LoopStatus_NoRunID_Dispatches(t *testing.T) {
 
 func TestCallMCPTool_LoopList_Plain(t *testing.T) {
 	args := json.RawMessage(`{"plain":true}`)
-	resp := callMCPTool("radiant_loop_list", args)
+	resp := callMCPTool("radiant_loop_list", args, nil)
 	if resp.Error != nil && resp.Error.Code == -32602 {
 		t.Errorf("radiant_loop_list --plain should be a known tool: %+v", resp.Error)
 	}
@@ -93,7 +93,7 @@ func TestMCPLoopStartSchema_HasGoalRequired(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
 	in := strings.NewReader(input)
 	var out strings.Builder
-	_ = runMCPServe(in, &out)
+	_ = runMCPServe(in, &out, false)
 	raw := out.String()
 	// "goal" must appear near "radiant_loop_start" and be in required list.
 	if !strings.Contains(raw, `"goal"`) {
@@ -110,14 +110,14 @@ func TestMCPToolsList_IncludesRadiantRun(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
 	in := strings.NewReader(input)
 	var out strings.Builder
-	_ = runMCPServe(in, &out)
+	_ = runMCPServe(in, &out, false)
 	if !strings.Contains(out.String(), "radiant_run") {
 		t.Errorf("tools/list missing radiant_run; got: %s", out.String())
 	}
 }
 
 func TestCallMCPTool_RadiantRun_RequiresGoal(t *testing.T) {
-	resp := callMCPTool("radiant_run", json.RawMessage(`{}`))
+	resp := callMCPTool("radiant_run", json.RawMessage(`{}`), nil)
 	if resp.Error == nil {
 		t.Error("expected JSON-RPC error when goal is missing")
 	}
@@ -130,7 +130,7 @@ func TestCallMCPTool_RadiantRun_Schema_HasGoal(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
 	in := strings.NewReader(input)
 	var out strings.Builder
-	_ = runMCPServe(in, &out)
+	_ = runMCPServe(in, &out, false)
 	raw := out.String()
 	if !strings.Contains(raw, `"goal"`) {
 		t.Errorf("radiant_run schema missing 'goal' property; got: %s", raw)
