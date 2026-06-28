@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] — 2026-06-27 — Integração MCP: loop tools (Sprint 67)
+
+20/20 packages green com -race. 8 novos testes no cmd/radiant package.
+
+### Added — `cmd/radiant/helpers.go`
+- `radiant_loop_start` — loop start via MCP com goal, model, max_iter, auto_route
+- `radiant_loop_status` — progress via trace (run_id opcional); passa --model para FormatProgress
+- `radiant_loop_list` — lista runs com evento count e custo; flag plain
+
+### Added — `cmd/radiant/sprint67_mcp_test.go`
+- 8 testes: tools/list inclui 3 novos tools, dispatch sem erro -32602 para cada variante
+
+---
+
 ## [2.14.0] — 2026-06-27 — fleet watch (Sprint 66)
 
 20/20 packages green com -race. 8 novos testes no fleet package.

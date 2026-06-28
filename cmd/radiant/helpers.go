@@ -1348,6 +1348,30 @@ func runMCPServe(in io.Reader, out io.Writer) error {
 			},
 			Required: []string{"version"},
 		}},
+		{Name: "radiant_loop_start", Description: "Start an autonomous feedback loop for a goal", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"goal":      {Type: "string", Description: "The goal the loop should achieve"},
+				"run_id":    {Type: "string", Description: "Optional run ID (auto-generated if omitted)"},
+				"model":     {Type: "string", Description: "Model ID (e.g. claude-sonnet-4-6)"},
+				"max_iter":  {Type: "number", Description: "Maximum iterations (default 20)"},
+				"auto_route": {Type: "boolean", Description: "Enable AutoRoute (research→top-tier, plan→mid, execute→anchor)"},
+			},
+			Required: []string{"goal"},
+		}},
+		{Name: "radiant_loop_status", Description: "Get progress of a loop run from its trace", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"run_id": {Type: "string", Description: "Run ID to inspect (leave empty for active loop state)"},
+				"model":  {Type: "string", Description: "Model ID for cost estimation"},
+			},
+		}},
+		{Name: "radiant_loop_list", Description: "List all loop runs with event count and cost", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"plain": {Type: "boolean", Description: "Return bare run IDs only"},
+			},
+		}},
 	}
 
 	enc := json.NewEncoder(out)
@@ -2996,6 +3020,50 @@ func callMCPTool(name string, args json.RawMessage) mcpResponse {
 		// Always dry-run via MCP for safety — never let an MCP
 		// caller tag a release without explicit CLI confirmation.
 		argv = []string{"release", a.Version, "--dry-run"}
+	case "radiant_loop_start":
+		var a struct {
+			Goal      string `json:"goal"`
+			RunID     string `json:"run_id"`
+			Model     string `json:"model"`
+			MaxIter   int    `json:"max_iter"`
+			AutoRoute bool   `json:"auto_route"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"loop", "start", a.Goal}
+		if a.RunID != "" {
+			argv = append(argv, "--run-id="+a.RunID)
+		}
+		if a.Model != "" {
+			argv = append(argv, "--model="+a.Model)
+		}
+		if a.MaxIter > 0 {
+			argv = append(argv, "--max-iter="+strconv.Itoa(a.MaxIter))
+		}
+		if a.AutoRoute {
+			argv = append(argv, "--auto-route")
+		}
+	case "radiant_loop_status":
+		var a struct {
+			RunID string `json:"run_id"`
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"loop", "status"}
+		if a.RunID != "" {
+			argv = append(argv, a.RunID)
+		}
+		if a.Model != "" {
+			argv = append(argv, "--model="+a.Model)
+		}
+	case "radiant_loop_list":
+		var a struct {
+			Plain bool `json:"plain"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"loop", "list"}
+		if a.Plain {
+			argv = append(argv, "--plain")
+		}
 	default:
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 	}
