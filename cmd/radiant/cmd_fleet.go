@@ -342,7 +342,71 @@ so all agents share the same model configuration.`,
 	fleetDispatchCmd.Flags().Bool("auto-route", false, "Forward --auto-route to each agent (research→top-tier, plan→mid, execute→anchor)")
 	fleetDispatchCmd.Flags().Int("timeout", 0, "Per-agent timeout in minutes (0 = no timeout)")
 
-	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd)
+	fleetWatchCmd := &cobra.Command{
+		Use:   "watch <run-id>",
+		Short: "Poll fleet status every N seconds until all tasks finish",
+		Long: `Watch polls the fleet store and re-prints status on every tick until all
+tasks reach a terminal state (done or failed), or the user interrupts with Ctrl-C.
+
+Examples:
+  radiant fleet watch fleet-1234567890
+  radiant fleet watch fleet-1234567890 --interval 5`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			runID := args[0]
+			intervalSecs, _ := cmd.Flags().GetInt("interval")
+			if intervalSecs < 1 {
+				intervalSecs = 10
+			}
+			ticker := time.NewTicker(time.Duration(intervalSecs) * time.Second)
+			defer ticker.Stop()
+
+			ctx := cmd.Context()
+			printStatus := func() (done bool) {
+				store, err := fleet.LoadStore(cwd, runID)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "watch: load fleet %q: %v\n", runID, err)
+					return false
+				}
+				coord := fleet.NewCoordinator(store, 0)
+				status := coord.Status()
+				// Clear screen with ANSI escape when writing to a terminal.
+				fmt.Print("\033[H\033[2J")
+				fmt.Printf("[ fleet watch — %s — every %ds — Ctrl-C to stop ]\n\n", runID, intervalSecs)
+				fmt.Print(fleet.FormatStatus(status))
+
+				// Terminal when all tasks are done or failed (none pending/assigned).
+				for _, t := range status.Tasks {
+					if t.Status == fleet.TaskPending || t.Status == fleet.TaskAssigned {
+						return false
+					}
+				}
+				return len(status.Tasks) > 0
+			}
+
+			// First tick immediately.
+			if printStatus() {
+				fmt.Println("\n✓ All tasks finished.")
+				return nil
+			}
+
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if printStatus() {
+						fmt.Println("\n✓ All tasks finished.")
+						return nil
+					}
+				}
+			}
+		},
+	}
+	fleetWatchCmd.Flags().Int("interval", 10, "Polling interval in seconds")
+
+	fleetCmd.AddCommand(fleetStartCmd, fleetStatusCmd, fleetSummaryCmd, fleetPlanCmd, fleetDispatchCmd, fleetWatchCmd)
 	root.AddCommand(fleetCmd)
 
 	// ── improve (Sprint 38) ──────────────────────────────────────────────────

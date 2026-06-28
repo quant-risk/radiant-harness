@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] — 2026-06-27 — fleet watch (Sprint 66)
+
+20/20 packages green com -race. 8 novos testes no fleet package.
+
+### Added — `cmd/radiant/cmd_fleet.go`
+- `fleet watch <run-id> [--interval N]` — polling a cada N segundos (default 10),
+  limpa tela com ANSI e re-imprime FormatStatus; para quando todos tasks são done/failed
+
+### Added — `internal/fleet/sprint66_test.go`
+- 8 testes: condição de terminal (all-done, all-failed, mixed, one-pending, one-assigned, empty),
+  FormatStatus reflete transição pending→done+evidence
+
+---
+
 ## [2.13.0] — 2026-06-27 — Cost tracking em tempo real (Sprint 65)
 
 20/20 packages green com -race. 16 novos testes no loop package.
