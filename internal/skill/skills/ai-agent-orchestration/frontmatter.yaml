@@ -1,0 +1,13 @@
+name: ai-agent-orchestration
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [agents, orchestration, multi-agent, autonomous, langgraph, crewai, mcp]
+    related_skills: [machine-learning-pipelines, reinforcement-learning-pipelines]
+description: "(description pending — see SKILL.md body)"
+when_to_use: AI Agent Orchestration covers autonomous agent loops, multi-agent fleet coordination, state machines, role-based agents, checkpointing, human-in-the-loop patterns, event-driven architectures, sandboxed execution, and self-improvement engines.
+tier_eligible:
+  - feature
+  - architecture

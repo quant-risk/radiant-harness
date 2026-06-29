@@ -1,0 +1,13 @@
+name: science-quantum
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [science, quantum, biology, chemistry, physics, bioinformatics, cheminformatics]
+    related_skills: [machine-learning-pipelines, reinforcement-learning-pipelines]
+description: Science & Quantum covers computational biology, cheminformatics, physics simulation, quantum computing, quantum ML, Bayesian inference, and statistical modeling. This skill merges domain knowledge ...
+when_to_use: Science & Quantum covers computational biology, cheminformatics, physics simulation, quantum computing, quantum ML, Bayesian inference, and statistical modeling.
+tier_eligible:
+  - feature
+  - architecture

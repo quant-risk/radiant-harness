@@ -1,0 +1,13 @@
+name: context-engineering
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [context, rag, vector-store, memory, token-efficiency, llamaindex, chroma]
+    related_skills: [mcp-tools-model-routing, ai-agent-orchestration]
+description: Deep architectural patterns for building RAG pipelines, vector stores, memory systems, and evaluation frameworks — distilled from production codebases (LlamaIndex, ChromaDB, Mem0, Langfuse, Ragas).
+when_to_use: Context Engineering covers RAG pipeline architecture, vector store design, memory systems, context compression, token efficiency, and evaluation metrics.
+tier_eligible:
+  - feature
+  - architecture

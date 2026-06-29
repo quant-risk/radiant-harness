@@ -1,0 +1,13 @@
+name: mcp-tools-model-routing
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [mcp, tools, function-calling, model-routing, llm-client, openai]
+    related_skills: [ai-agent-orchestration, context-engineering]
+description: "(description pending — see SKILL.md body)"
+when_to_use: MCP, Tools & Model Routing covers the Model Context Protocol (MCP) internals, tool registration patterns, function calling, model routing strategies, LLM client abstraction, streaming, retry logic, and cost tracking.
+tier_eligible:
+  - feature
+  - architecture

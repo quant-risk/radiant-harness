@@ -1,0 +1,13 @@
+name: machine-learning
+version: 2.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [machine-learning, mlops, pipelines, production, feature-engineering, deployment]
+    related_skills: [reinforcement-learning-pipelines, causal-ml-inference, econometrics-pipelines]
+description: "This skill codifies the **10 universal patterns** extracted from analysis of 10 production ML repositories: made-with-ml, Metaflow, Kedro, TFX, ZenML, Flyte, DVC, Evidently, Feast, and Seldon Core."
+when_to_use: Building reproducible, versioned, monitored production ML pipelines — any domain.
+tier_eligible:
+  - feature
+  - architecture

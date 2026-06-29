@@ -1,0 +1,13 @@
+name: web3-smart-contracts
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [web3, blockchain, solidity, smart-contracts, defi, security, ethereum]
+    related_skills: [software-architecture-go]
+description: Comprehensive guide for Solidity smart contract development, security analysis, EVM internals, and the Rust Ethereum toolchain. Covers the full lifecycle from writing contracts through auditing and...
+when_to_use: "Web3 & Smart Contracts covers the full smart contract development lifecycle: writing, compiling, testing, deploying, verifying, and auditing Solidity contracts."
+tier_eligible:
+  - feature
+  - architecture

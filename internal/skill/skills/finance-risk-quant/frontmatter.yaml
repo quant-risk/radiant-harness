@@ -1,0 +1,13 @@
+name: finance-risk-quant
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [finance, risk, quant, credit-risk, market-risk, var, portfolio, trading, backtesting]
+    related_skills: [econometrics, machine-learning-pipelines, causal-ml-inference]
+description: "Finance & Risk covers the full spectrum of quantitative finance: credit risk (PD/LGD/EAD), market risk (VaR/ES/Greeks), portfolio optimization, backtesting, stress testing, AML/KYC, fraud detection..."
+when_to_use: "Finance & Risk covers the full spectrum of quantitative finance: credit risk (PD/LGD/EAD), market risk (VaR/ES/Greeks), portfolio optimization, backtesting, stress testing, AML/KYC, fraud detection, actuarial science, accounting, tax, valuation, and capital markets."
+tier_eligible:
+  - feature
+  - architecture

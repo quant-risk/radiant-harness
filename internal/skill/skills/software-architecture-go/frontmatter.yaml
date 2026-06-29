@@ -1,0 +1,13 @@
+name: software-architecture-go
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags: [go, cli, testing, observability, architecture, cobra, opentelemetry]
+    related_skills: [ai-agent-orchestration, context-engineering]
+description: Deep architectural patterns for building CLI tools, structured logging systems, test frameworks, and observability pipelines in Go — distilled from production codebases (Cobra, Zap, Testify, OpenTe...
+when_to_use: Software Architecture (Go) covers CLI patterns (Cobra), structured logging (Zap), testing patterns (Testify), observability (OpenTelemetry), and Go-specific architecture patterns like functional options, interface composition, and context propagation.
+tier_eligible:
+  - feature
+  - architecture
