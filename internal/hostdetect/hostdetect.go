@@ -43,6 +43,8 @@ const (
 	AgentOpenCode    AgentID = "opencode"
 	AgentVSCode      AgentID = "vscode-copilot"
 	AgentMiniMaxCode AgentID = "MiniMax-code"
+	AgentWindsurf    AgentID = "windsurf"
+	AgentZed         AgentID = "zed"
 )
 
 // knownAgents lists every agent we know how to detect. The order is
@@ -58,6 +60,8 @@ var knownAgents = []AgentID{
 	AgentOpenCode,
 	AgentVSCode,
 	AgentMiniMaxCode,
+	AgentWindsurf,
+	AgentZed,
 }
 
 // HostInfo is what Detect returns. Confidence is 0-100 where 0 means
@@ -150,6 +154,18 @@ var signatures = map[AgentID]agentSignature{
 		EnvVars:          []string{"MINIMAX_CODE_VERSION", "MINIMAX_CODE_HOME", "MINIMAX_CODE_CONFIG", "MINIMAX_PROJECT_ROOT"},
 		ParentBinaries:   []string{"MiniMax-code", "minimax-code", "minimax", "MiniMax"},
 		SupportsSampling: true, // MiniMax Code is MCP-native
+	},
+	AgentWindsurf: {
+		ID:               AgentWindsurf,
+		EnvVars:          []string{"WINDSURF_VERSION", "WINDSURF_HOME"},
+		ParentBinaries:   []string{"windsurf", "Windsurf", "windsurf-server"},
+		SupportsSampling: true,
+	},
+	AgentZed: {
+		ID:               AgentZed,
+		EnvVars:          []string{"ZED_VERSION", "ZED_CONFIG_DIR"},
+		ParentBinaries:   []string{"zed", "Zed", "zed-server"},
+		SupportsSampling: true,
 	},
 }
 

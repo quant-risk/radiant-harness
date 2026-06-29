@@ -4,6 +4,70 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.5.0] — 2026-06-29 — `make test-agents` (12/12 PASS)
+
+Adds a **cross-agent install/validation matrix** that simulates each of
+the 12 supported host agents (Claude, Cursor, Hermes, Kimi, OpenClaw,
+Codex, Cline, OpenCode, Windsurf, Zed, VS Code Copilot, MiniMax Code)
+in a sandbox HOME + project, runs `radiant setup-mcp`, then verifies
+the config landed at the expected path **and** `radiant doctor --mcp`
+correctly detects the entry.
+
+The Sprint 5 deliverable is the matrix tool itself — running it
+already surfaced six real layer-coordination bugs that had been
+hidden since v3.2.0:
+
+  - `cmd_setup_mcp.go` and `cmd_doctor.go::mcpConfigPath` used **different
+    agent names** (`"claude"` vs hostdetect's `"claude-code"`,
+    `"mavis-code"` vs `"MiniMax-code"`). Aligned both layers to hostdetect.
+  - OpenCode probe in `probeRadiantEntry` looked up a literal `"<test>"`
+    placeholder; replaced with `"radiant"`.
+  - OpenClaw probe walked `mcpServers.radiant`; OpenClaw actually stores
+    `mcp.servers.radiant`. Added dedicated case.
+  - Windsurf and Zed were in `cmd_setup_mcp` and `mcpConfigPath` but had
+    **no fingerprint in `internal/hostdetect`**. Added both with
+    matching env-var signatures.
+  - `cmd_setup_mcp` for `cursor/windsurf/zed/vscode` hardcoded `cwd`
+    even with `--global`; `scripts/test-agents.sh` now creates a
+    sandbox `proj/` so we see those writes.
+
+### Added
+
+- **`scripts/host-agent-matrix.json`** — declarative env-var +
+  config-path matrix for all 12 agents. Schema-versioned (`schema_version: 2`).
+- **`scripts/test-agents.sh`** — runs the matrix; emits a Markdown
+  report at `.radiant-harness/agent-matrix.md` (and JSON to stdout
+  with `--json`). Per-agent bash scripts are generated via Python
+  heredoc so env vars with spaces / paths / special characters round-trip
+  cleanly. Each agent block starts with an `unset` prelude over **every**
+  env var seen across the matrix, so leakage between agents never wins.
+- **`make test-agents`** Makefile target — entry point for the matrix.
+- **Aliases**: `scripts/test-agents.sh one <agent>` runs a single agent
+  for debugging; `RADIANT=path/to/bin scripts/test-agents.sh ...` lets
+  the user point at any local build.
+
+### Changed
+
+- `cmd/radiant/cmd_doctor.go::mcpConfigPath`: agent IDs now match
+  `internal/hostdetect.AgentID`; paths now match `cmd/radiant/cmd_setup_mcp.go::mcpConfigFor`.
+- `cmd/radiant/cmd_doctor.go::probeRadiantEntry`: openclaw walks
+  `mcp.servers.radiant`; opencode walks `mcp.radiant`.
+- `internal/hostdetect/hostdetect.go`: added `AgentWindsurf` and
+  `AgentZed` (env var + parent-binary fingerprints) so they're no longer
+  invisible to `radiant host-info` / `radiant doctor --mcp`.
+- `scripts/smoke-test.sh`: accepts any 3.3.x / 3.4.x / 3.5.x release.
+
+### Verified
+
+```
+$ make test-agents
+12 agents; 12 PASS, 0 FAIL.
+```
+
+(Sprint 5 began at **2/12 PASS**. Each FAIL was a real upstream defect
+in `cmd_doctor` or `internal/hostdetect`, not a script bug — the
+matrix was the diagnostic tool.)
+
 ## [3.4.0] — 2026-06-29 — `radiant test-case`
 
 Adds the **single most diagnostic command in the project** —

@@ -277,33 +277,34 @@ func runDoctorMCP(cmd *cobra.Command, w io.Writer) error {
 // mcpConfigPath returns the expected MCP config path for the given agent.
 // The match-the-other-side values mirror what cmd_setup_mcp writes.
 func mcpConfigPath(agent, home, cwd string) string {
+	// Returns the config file path written by `radiant setup-mcp` for the
+	// given host AgentID. Stays in lock-step with cmd_setup_mcp.go's
+	// mcpConfigFor — same names as internal/hostdetect.AgentID values.
 	switch agent {
-	case "claude":
-		return filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+	case "claude-code":
+		return filepath.Join(home, ".claude", "settings.json")
 	case "cursor":
-		return filepath.Join(home, ".cursor", "mcp.json")
+		return filepath.Join(cwd, ".cursor", "mcp.json")
+	case "windsurf":
+		return filepath.Join(cwd, ".windsurf", "mcp.json")
+	case "zed":
+		return filepath.Join(cwd, ".zed", "settings.json")
+	case "vscode-copilot":
+		return filepath.Join(cwd, ".vscode", "mcp.json")
 	case "codex":
-		return filepath.Join(cwd, ".codex", "config.toml")
+		return filepath.Join(home, ".codex", "config.toml")
 	case "opencode":
-		return filepath.Join(cwd, ".opencode", "config.json")
+		return filepath.Join(home, ".config", "opencode", "config.json")
 	case "hermes":
 		return filepath.Join(home, ".hermes", "config.yaml")
-	case "kimi":
+	case "kimi-cli":
 		return filepath.Join(home, ".kimi", "mcp.json")
 	case "openclaw":
-		return filepath.Join(cwd, ".openclaw", "openclaw.json")
+		return filepath.Join(home, ".openclaw", "openclaw.json")
 	case "cline":
 		return filepath.Join(home, ".cline", "mcp.json")
-	case "windsurf":
-		return filepath.Join(home, ".codeium", "windsurf", "mcp_config.json")
-	case "mavis-code":
+	case "MiniMax-code":
 		return filepath.Join(home, ".MiniMax", "mcp.json")
-	case "zed":
-		return filepath.Join(home, ".config", "zed", "settings.json")
-	case "vscode-copilot":
-		return filepath.Join(home, ".config", "Code", "User", "mcp.json")
-	case "github-copilot":
-		return filepath.Join(home, ".config", "github-copilot", "mcp.json")
 	}
 	return ""
 }
@@ -357,8 +358,8 @@ func probeRadiantEntry(agent string, data []byte) (bool, bool, string, string, e
 		}
 		return true, samplingEnabled, samplingTimeout, mcpTimeout, nil
 
-	case "claude", "cursor", "kimi", "openclaw", "cline", "windsurf",
-		"vscode-copilot", "github-copilot", "mavis-code":
+	case "claude-code", "cursor", "kimi-cli", "cline", "windsurf",
+		"vscode-copilot", "MiniMax-code":
 		// JSON: mcpServers.radiant
 		var root map[string]any
 		if err := json.Unmarshal(data, &root); err != nil {
@@ -372,12 +373,27 @@ func probeRadiantEntry(agent string, data []byte) (bool, bool, string, string, e
 		return true, false, "", "", nil
 
 	case "opencode":
+		// JSON: mcp.<serverName> (serverName = the user-chosen identifier
+		// for the MCP server; we always emit "radiant" from setup-mcp).
 		var root map[string]any
 		if err := json.Unmarshal(data, &root); err != nil {
 			return false, false, "", "", err
 		}
 		mcp, _ := root["mcp"].(map[string]any)
-		servers, _ := mcp["<test>"].(map[string]any) // placeholder; real key is the agent-set server name
+		_, ok := mcp["radiant"].(map[string]any)
+		if !ok {
+			return false, false, "", "", nil
+		}
+		return true, false, "", "", nil
+
+	case "openclaw":
+		// JSON: mcp.servers.radiant  (servers is a nested map)
+		var root map[string]any
+		if err := json.Unmarshal(data, &root); err != nil {
+			return false, false, "", "", err
+		}
+		mcp, _ := root["mcp"].(map[string]any)
+		servers, _ := mcp["servers"].(map[string]any)
 		_, ok := servers["radiant"].(map[string]any)
 		if !ok {
 			return false, false, "", "", nil

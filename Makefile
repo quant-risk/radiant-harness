@@ -1,5 +1,5 @@
 # Radiant Harness — Makefile
-.PHONY: build test lint clean install release smoke
+.PHONY: build test lint clean install release smoke test-agents
 
 # CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
 # "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
@@ -50,3 +50,11 @@ install: build
 # HTTP-LLM symbols, checks size.
 smoke: build
 	./scripts/smoke-test.sh
+
+# Cross-agent install matrix (Sprint 5). Builds first, then for each of
+# the 12 supported host agents: simulates the host's env, runs setup-mcp
+# in a sandbox HOME + sandbox proj/, runs doctor --mcp and mcp self-test
+# against the resulting config, and emits a Markdown pass/fail report.
+# Manual invocation; no cron, no polling, no daemon.
+test-agents: build
+	./scripts/test-agents.sh

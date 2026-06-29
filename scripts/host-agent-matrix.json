@@ -1,0 +1,205 @@
+{
+  "_comment": [
+    "Cross-agent install/validation matrix used by `make test-agents`.",
+    "Paths here MUST match the target paths cmd_setup_mcp.go writes to.",
+    "If you add a new agent in hostdetect + setup-mcp, also add the matching",
+    "row here. Keep `name` matching setup-mcp's --agent flag (which is the",
+    "case label in cmd_setup_mcp.go::mcpConfigFor).",
+    "",
+    "For the modern (12-agent) list, see internal/hostdetect/hostdetect.go."
+  ],
+  "schema_version": 2,
+  "agents": [
+    {
+      "name": "claude",
+      "env": {
+        "CLAUDE_CODE_ENTRY": "/Applications/Claude Code.app/.../claude-code",
+        "CLAUDE_CODE_SSE_PORT": "12345",
+        "CLAUDE_CODE_PID": "99999"
+      },
+      "config_file_relpath": ".claude/settings.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".claude.settings.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".claude/settings.json",
+      "config_file_relpath_project": ".claude/settings.json"
+    },
+    {
+      "name": "cursor",
+      "env": {
+        "CURSOR_TRACE_ID": "abc123",
+        "CURSOR_HOME": "/Applications/Cursor.app",
+        "CURSOR_USER_DATA_DIR": "/tmp/sandbox/Library/Application Support/Cursor"
+      },
+      "config_file_relpath": ".cursor/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".cursor.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".cursor/mcp.json",
+      "config_file_relpath_project": ".cursor/mcp.json"
+    },
+    {
+      "name": "hermes",
+      "env": {
+        "HERMES_VERSION": "0.1.0",
+        "HERMES_HOME": "/tmp/sandbox/.hermes",
+        "HERMES_AGENT_HOME": "/tmp/sandbox/.hermes/agents/main"
+      },
+      "config_file_relpath": ".hermes/config.yaml",
+      "config_format": "yaml",
+      "config_root_key": "mcp_servers",
+      "verify_keys": [
+        ".hermes.config.yaml.mcp_servers"
+      ],
+      "sampling_required": true,
+      "config_file_relpath_global": ".hermes/config.yaml",
+      "config_file_relpath_project": ".hermes/config.yaml"
+    },
+    {
+      "name": "codex",
+      "env": {
+        "CODEX_HOME": "/tmp/sandbox/.codex",
+        "CODEX_THREAD_ID": "thr-1",
+        "CODEX_RUNTIME": "node",
+        "CODEX_THREAD_ENV": "host=darwin"
+      },
+      "config_file_relpath": ".codex/config.toml",
+      "config_format": "toml",
+      "config_root_key": "mcp_servers",
+      "verify_keys": [
+        ".codex.config.toml.mcp_servers"
+      ],
+      "config_file_relpath_global": ".codex/config.toml",
+      "config_file_relpath_project": ".codex/config.toml"
+    },
+    {
+      "name": "opencode",
+      "env": {
+        "OPENCODE_HOME": "/tmp/sandbox/.config/opencode",
+        "OPENCODE_VERSION": "0.5.0",
+        "OPENCODE_CONFIG": "/tmp/sandbox/.config/opencode/config.json"
+      },
+      "config_file_relpath_global": ".config/opencode/config.json",
+      "config_file_relpath_project": ".opencode/config.json",
+      "config_format": "json",
+      "config_root_key": "mcp",
+      "verify_keys": [
+        ".config.opencode.config.json.mcp"
+      ]
+    },
+    {
+      "name": "kimi",
+      "env": {
+        "KIMI_SHARE_DIR": "/tmp/sandbox/.kimi",
+        "KIMI_VERSION": "1.2.0",
+        "KIMI_CONFIG_DIR": "/tmp/sandbox/.kimi"
+      },
+      "config_file_relpath": ".kimi/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".kimi.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".kimi/mcp.json",
+      "config_file_relpath_project": ".kimi/mcp.json"
+    },
+    {
+      "name": "openclaw",
+      "env": {
+        "OPENCLAW_GATEWAY_URL": "http://localhost:9876",
+        "OPENCLAW_VERSION": "0.3.0",
+        "OPENCLAW_WORKSPACE": "/tmp/sandbox/openclaw-work"
+      },
+      "config_file_relpath": ".openclaw/openclaw.json",
+      "config_format": "json",
+      "config_root_key": "mcp.servers",
+      "verify_keys": [
+        ".openclaw.openclaw.json.mcp.servers"
+      ],
+      "config_file_relpath_global": ".openclaw/openclaw.json",
+      "config_file_relpath_project": ".openclaw/openclaw.json"
+    },
+    {
+      "name": "cline",
+      "env": {
+        "CLINE_USER": "test",
+        "CLINE_VERSION": "3.0.0",
+        "CLINE_WORKSPACE": "/tmp/sandbox/cline-work"
+      },
+      "config_file_relpath": ".cline/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".cline.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".cline/mcp.json",
+      "config_file_relpath_project": ".cline/mcp.json"
+    },
+    {
+      "name": "windsurf",
+      "env": {
+        "WINDSURF_HOME": "/tmp/sandbox/.codeium/windsurf",
+        "WINDSURF_VERSION": "1.5.0"
+      },
+      "config_file_relpath": ".windsurf/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".windsurf.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".windsurf/mcp.json",
+      "config_file_relpath_project": ".windsurf/mcp.json"
+    },
+    {
+      "name": "zed",
+      "env": {
+        "ZED_VERSION": "0.180.0",
+        "ZED_CONFIG_DIR": "/tmp/sandbox/.config/zed"
+      },
+      "config_file_relpath": ".zed/settings.json",
+      "config_format": "json",
+      "config_root_key": "context_servers",
+      "verify_keys": [
+        ".zed.settings.json.context_servers"
+      ],
+      "config_file_relpath_global": ".zed/settings.json",
+      "config_file_relpath_project": ".zed/settings.json"
+    },
+    {
+      "name": "vscode",
+      "env": {
+        "VSCODE_PID": "99999",
+        "VSCODE_IPC_HOOK_CLI": "/tmp/sandbox/.vscode/hook",
+        "VSCODE_CWD": "/tmp/sandbox/proj"
+      },
+      "config_file_relpath": ".vscode/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".vscode.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".vscode/mcp.json",
+      "config_file_relpath_project": ".vscode/mcp.json"
+    },
+    {
+      "name": "MiniMax",
+      "env": {
+        "MINIMAX_CODE_VERSION": "1.0.0",
+        "MINIMAX_CODE_HOME": "/tmp/sandbox/.MiniMax",
+        "MINIMAX_PROJECT_ROOT": "/tmp/sandbox/proj"
+      },
+      "config_file_relpath": ".MiniMax/mcp.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".MiniMax.mcp.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".MiniMax/mcp.json",
+      "config_file_relpath_project": ".MiniMax/mcp.json"
+    }
+  ]
+}
