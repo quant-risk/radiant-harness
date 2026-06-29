@@ -713,7 +713,7 @@ func backendChatStream(ctx context.Context, backend llm.Backend, systemPrompt, u
 // simpleChatStream (legacy shim around *llm.Client) was removed in
 // Sprint 78 — it was dead code, and the *llm.Client reference made it
 // impossible to compile internal/loop in the Light build (where
-// client.go is //go:build !light_only). Callers should use the
+// client.go is //go:build !with_full). Callers should use the
 // backend-equivalent helpers above.
 
 // traceCall records a single LLM call to the Tracer and optionally emits a

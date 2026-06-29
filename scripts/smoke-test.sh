@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Smoke test for the Light binary.
+# Smoke test for the radiant binary.
 #
-# Verifies the three core properties of radiant-light at the artifact level:
-#   1. Binary compiles (and the right number of artefacts per platform).
-#   2. Light has NO HTTP-LLM symbols (chatAnthropic, HTTPBackend, api.*).
-#   3. The Light binary self-reports its version with the -light suffix.
+# Verifies the three core properties at the artifact level:
+#   1. Binary compiles.
+#   2. Binary has NO HTTP-LLM symbols (chatAnthropic, HTTPBackend, api.*).
+#   3. The binary self-reports its version as 3.0.0.
 #
 # Usage:
-#   scripts/smoke-test-light.sh                          # build + test
-#   BI=/path/to/radiant-light scripts/smoke-test-light.sh  # test existing
+#   scripts/smoke-test.sh                          # build + test
+#   BIN=/path/to/radiant scripts/smoke-test.sh     # test existing
 #
 # Exit code 0 = all checks pass. Non-zero on first failure.
 
@@ -22,10 +22,10 @@ cd "$REPO_ROOT"
 BIN="${BIN:-}"
 case "$BIN" in
   "")
-    echo "==> building radiant-light"
+    echo "==> building radiant"
     mkdir -p bin
-    BIN="bin/radiant-light"
-    CGO_ENABLED=0 go build -tags light_only -o "$BIN" ./cmd/radiant
+    BIN="bin/radiant"
+    CGO_ENABLED=0 go build -ldflags "-s -w" -o "$BIN" ./cmd/radiant
     ;;
   /*) ;;
   *) BIN="$REPO_ROOT/$BIN" ;;
@@ -41,16 +41,14 @@ ok()   { echo "$(green OK): $*"; }
 [ -x "$BIN" ] || fail "$BIN is missing or not executable"
 ok "$BIN exists and is executable"
 
-# 2. Version reports the -light suffix.
+# 2. Version is exactly 3.0.0.
 V="$("$BIN" --version 2>&1 || true)"
 case "$V" in
-  *-light) ok "version reports '$V' (contains -light)" ;;
-  *)       fail "expected version to contain '-light', got: $V" ;;
+  *"3.0.0"*) ok "version reports '$V'" ;;
+  *)         fail "expected version to contain '3.0.0', got: $V" ;;
 esac
 
 # 3. NO HTTP-LLM symbols.
-# nm | grep checks for: chatAnthropic, HTTPBackend, NewHTTPBackend.
-# (Portability: try both `nm` and `llvm-nm`, fall back to `strings`.)
 HTTP_LLM_SYMBOLS=""
 if command -v nm >/dev/null 2>&1; then
   HTTP_LLM_SYMBOLS="$(nm "$BIN" 2>/dev/null | grep -iE 'chatAnthropic|^[^ ]+ T .*HTTPBackend|^[^ ]+ T .*NewHTTPBackend' || true)"
@@ -60,16 +58,14 @@ if [ -z "$HTTP_LLM_SYMBOLS" ] && command -v strings >/dev/null 2>&1; then
 fi
 
 if [ -n "$HTTP_LLM_SYMBOLS" ]; then
-  fail "Light binary contains HTTP-LLM symbols/strings:\n$HTTP_LLM_SYMBOLS"
+  fail "binary contains HTTP-LLM symbols/strings:\n$HTTP_LLM_SYMBOLS"
 fi
 ok "no HTTP-LLM symbols in $BIN"
 
 # 4. No env var instructions about API keys.
 API_HINTS="$("$BIN" --help 2>&1 | grep -iE 'API_KEY|openai|anthropic|openrouter' || true)"
 if [ -n "$API_HINTS" ]; then
-  # It's OK to mention "$RADIANT_OPENROUTER_API_KEY" in --help IF the
-  # command is in the Full binary. Light should mention nothing.
-  fail "Light --help contains API key references:\n$API_HINTS"
+  fail "binary --help contains API key references:\n$API_HINTS"
 fi
 ok "no API key references in $BIN --help"
 
@@ -82,7 +78,7 @@ for cmd in setup-mcp mcp host-info; do
   esac
 done
 
-# 6. setup-mcp --help mentions 11 agents.
+# 6. setup-mcp --help mentions the supported agents.
 SETUP_HELP="$("$BIN" setup-mcp --help 2>&1 || true)"
 for agent in claude cursor codex hermes kimi openclaw cline opencode; do
   case "$SETUP_HELP" in
@@ -91,17 +87,17 @@ for agent in claude cursor codex hermes kimi openclaw cline opencode; do
   esac
 done
 
-# 7. host-info runs and produces output (no agent expected).
+# 7. host-info runs and produces output.
 HOST_INFO_OUT="$("$BIN" host-info 2>&1 || true)"
 case "$HOST_INFO_OUT" in
   *"Detected host agent"*) ok "host-info emitted status line" ;;
   *)                       fail "host-info produced no status line:\n$HOST_INFO_OUT" ;;
 esac
 
-# 8. Light binary ≤ 15 MB.
+# 8. Binary ≤ 15 MB.
 BYTES=$(stat -f%z "$BIN" 2>/dev/null || stat -c%s "$BIN" 2>/dev/null)
 MAX=$((15 * 1024 * 1024))
-[ "$BYTES" -le "$MAX" ] || fail "Light binary is $BYTES bytes, > 15 MB"
+[ "$BYTES" -le "$MAX" ] || fail "binary is $BYTES bytes, > 15 MB"
 ok "binary size: $BYTES bytes (≤ 15 MB)"
 
 echo

@@ -1,4 +1,4 @@
-//go:build !light_only
+//go:build with_full
 
 // Full build entrypoint. Has every command, including the HTTP LLM
 // layer (Anthropic native, OpenAI-compatible via OpenRouter, etc.).

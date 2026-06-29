@@ -1,4 +1,4 @@
-//go:build !light_only
+//go:build with_full
 
 // Package llm provides a universal LLM client that works with any model via
 // any OpenAI-compatible provider. No agent dependency — the harness calls

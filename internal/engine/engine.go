@@ -1,4 +1,4 @@
-//go:build !light_only
+//go:build with_full
 
 // Package engine implements the universal SDD harness engine.
 // It calls LLM APIs directly — no external agent dependency.

@@ -1,12 +1,11 @@
-//go:build light_only
+//go:build !with_full
 
 // Light-only MCP runtime. Compiles in only when building
-// `go build -tags light_only ./cmd/radiant`.
+// `go build ./cmd/radiant`.
 //
-// In Light builds, runMCPServe here is the sole MCP server entry point.
-// In Full builds, this file is excluded and the Full runtime in
-// cmd_mcp_runtime_full.go provides the same `runMCPServe` symbol
-// (with more tools wired through exec.Command to sub-binaries).
+// runMCPServe here is the sole MCP server entry point. It dispatches every
+// tool call through `callMCPTool`, which routes inference via MCP
+// sampling/createMessage back to the host agent.
 
 package main
 
@@ -131,7 +130,7 @@ func handleMCPRequestLight(req mcpRequest, tools []mcpTool, d *mcpDispatcher) mc
 
 func callMCPToolLight(name string, args json.RawMessage, d *mcpDispatcher) mcpResponse {
 	if name != "radiant_run" {
-		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name + " (Light build only supports radiant_run)"}}
+		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 	}
 	return mcpRunWithBackendLight(args, d.backend())
 }

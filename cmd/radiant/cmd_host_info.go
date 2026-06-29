@@ -47,9 +47,7 @@ is passed. Both modes include the agent ID, confidence score, and
 which env-var fingerprint matched.
 
 Use this to verify possession: if SupportsSampling=true, the harness
-can drive the host agent's LLM via MCP sampling/createMessage (no
-API key required in Light build, or Full build with appropriate
-precedence in Sprint 80+).`,
+can drive the host agent's LLM via MCP sampling/createMessage.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d := hostdetect.New()
 			info := d.Detect()
@@ -96,14 +94,14 @@ func renderHostInfo(w *os.File, info hostdetect.HostInfo, verbose bool) {
 	switch {
 	case info.Agent == hostdetect.AgentUnknown:
 		fmt.Fprintln(w, "No agent host detected. radiant-harness is running standalone.")
-		fmt.Fprintln(w, "API key required for Full build HTTP LLM features.")
+		fmt.Fprintln(w, "Run `radiant setup-mcp` from inside your agent to wire it in.")
 	case !info.SupportsSampling:
 		fmt.Fprintf(w, "Host %q does not support MCP sampling/createMessage.\n", info.Agent)
-		fmt.Fprintln(w, "API key required for Full build HTTP LLM features.")
+		fmt.Fprintln(w, "Possession via sampling is not possible from this host.")
 	default:
 		fmt.Fprintf(w, "Host %q supports MCP sampling — possession is possible.\n", info.Agent)
 		if info.Confidence >= 75 {
-			fmt.Fprintln(w, "Sprint 80 will wire this into PickBackend for automatic inference routing.")
+			fmt.Fprintln(w, "radiant can drive this agent's LLM via MCP sampling.")
 		} else {
 			fmt.Fprintln(w, "(Medium/Low confidence — heuristic; may be wrong.)")
 		}

@@ -1,4 +1,4 @@
-//go:build !light_only
+//go:build with_full
 
 package llm
 
@@ -8,7 +8,7 @@ import "context"
 // (Anthropic native, OpenRouter, OpenAI, xAI, etc.). It is a thin wrapper
 // over the existing Client, preserving the retry/backoff/429 logic.
 //
-// This file is excluded from the Light build (//go:build !light_only) —
+// This file is excluded from the Light build (//go:build !with_full) —
 // Light binaries have no HTTP LLM layer and cannot talk to providers
 // directly. They must rely on the host agent via MCP sampling.
 //

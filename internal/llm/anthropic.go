@@ -1,4 +1,4 @@
-//go:build !light_only
+//go:build with_full
 
 // Anthropic native Messages API client.
 //

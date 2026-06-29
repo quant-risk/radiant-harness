@@ -1,18 +1,12 @@
-//go:build light_only
+//go:build !with_full
 
-// This is the Light build entrypoint. Light means: NO HTTP LLM backend,
-// NO API key infrastructure. The Light binary can only do work via the
-// host agent (MCP sampling). It is meant for users who want to run
-// the harness without bringing their own LLM credentials.
+// radiant entrypoint. Inference comes exclusively from the host agent via
+// MCP sampling/createMessage — no API key, no HTTP LLM client.
 //
-// Subcommands registered here (Light subset):
+// Subcommands registered here:
 //   - setup-mcp   (vendor-neutral agent config writes — 11 agents)
-//   - mcp serve   (the actual Light path — MCP sampling)
-//
-// To build: `go build -tags light_only -o /tmp/radiant-light ./cmd/radiant`
-//
-// For the Full build (every subcommand, including HTTP LLM providers
-// like OpenRouter/OpenAI/Anthropic, requires API key): see main_full.go.
+//   - mcp serve   (the MCP server: routes tool calls to the host agent)
+//   - host-info   (detect which agent, if any, is invoking radiant)
 
 package main
 
@@ -22,13 +16,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "3.0.0-light"
+var version = "3.0.0"
 
 func main() {
 	root := &cobra.Command{
 		Use:     "radiant",
-		Short:   "Universal autonomous development harness for any LLM (light build)",
-		Long:    "Light build of the harness. Inference comes exclusively from the host agent via MCP sampling/createMessage. No API key required, no HTTP LLM backend included. For the Full build (HTTP LLM providers + API key infrastructure), use the default build.",
+		Short:   "Self-driving loops for any LLM agent",
+		Long:    "radiant turns any MCP-compatible agent into a verifiable, budgeted, persistent dev loop. Inference comes from the host agent via MCP sampling/createMessage — no API key needed. Wire it into your agent with `radiant setup-mcp`, then ask it to ship something.",
 		Version: version,
 	}
 

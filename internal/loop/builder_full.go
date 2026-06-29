@@ -1,11 +1,11 @@
-//go:build !light_only
+//go:build with_full
 
 package loop
 
 import "github.com/quant-risk/radiant-harness/internal/llm"
 
 // init registers the HTTP backend builder for the Full build. The
-// Light build (//go:build light_only) does NOT have this file —
+// Light build (//go:build with_full) does NOT have this file —
 // internal/loop's httpBackendBuilder stays nil, and the loop package
 // requires callers to supply cfg.Backend.
 //
