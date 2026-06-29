@@ -187,6 +187,13 @@ say "installing to $PREFIX/radiant"
 if [ "$DRY_RUN" = 1 ]; then
   echo "[dry-run] install -m 0755 $TMPDIR/$ASSET $PREFIX/radiant"
 else
+  # Create the parent directory if missing (PREFIX=~/.local/bin or other
+  # custom paths may not exist on first install; /usr/local/bin typically
+  # does, but we don't assume).
+  if [ ! -d "$PREFIX" ]; then
+    mkdir -p "$PREFIX" 2>/dev/null \
+      || bail "could not create $PREFIX (try PREFIX=\$HOME/.local/bin and rerun)"
+  fi
   install -m 0755 "$TMPDIR/$ASSET" "$PREFIX/radiant" \
     || bail "install failed (does $PREFIX exist and is writable? try PREFIX=~/.local/bin)"
   echo "installed: $($PREFIX/radiant --version 2>&1 || echo "(version unknown)")"

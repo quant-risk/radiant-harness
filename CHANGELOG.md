@@ -4,6 +4,42 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.3.2] — 2026-06-29 — install.sh PREFIX auto-mkdir
+
+### Fixed
+- **`install.sh`** now `mkdir -p`s the PREFIX directory before
+  `install(1)`. Previously, calling with `PREFIX=~/.local/bin` (or any
+  other non-existent path) failed at the install step with
+  "install failed (does $PREFIX exist and is writable? try
+  PREFIX=~/.local/bin)" — the error message itself pointed at the
+  workaround instead of doing it.
+  Real-world repro was `PREFIX=/tmp/install-fix-prefix bash install.sh
+  --self-for-agent` from a fresh container.
+
+### Verified — end-to-end
+```bash
+$ HERMES_VERSION=0.1 \
+  WORKDIR=/tmp/install-fix-test \
+  RADIANT_VERSION=v3.3.1 PREFIX=/tmp/install-fix-prefix \
+  bash install.sh --agent=hermes --self-for-agent
+==> downloading radiant-darwin-arm64
+==> verifying SHA256
+==> SHA256 OK
+==> installing to /tmp/install-fix-prefix/radiant   # was: "install failed"
+==> wiring MCP for host: hermes
+==> agent-bootstrap files written to: /tmp/install-fix-test/.radiant-harness/
+==> NEXT STEP for the agent in this directory:
+==>   send /reload-mcp in this chat
+```
+
+- 5/5 MCP possession runs (URL shortener case)
+- `make smoke` 17/17 OK
+- 30 unit-test packages pass; 0 fail
+
+[3.3.2]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.3.2
+
+---
+
 ## [3.3.0] — 2026-06-29 — Possession is the only way
 
 This release rewrites the agent-side contract so that `mcp__radiant__possess`
