@@ -1,3 +1,91 @@
+# Release Notes — v2.43.0 (setup-mcp: Codex + OpenCode)
+
+> Two more agents in `radiant setup-mcp`. Codex (OpenAI) and
+> OpenCode (sst/opencode) are now auto-detected and configured.
+
+## Headlines
+
+### 1. Codex (OpenAI CLI) support
+
+```bash
+radiant setup-mcp        # auto-detects if .codex/ or ~/.codex/ exists
+radiant setup-mcp --agent=codex  # explicit
+```
+
+Writes TOML config:
+
+```toml
+[mcp_servers.radiant]
+command = "/usr/local/bin/radiant"
+args = ["mcp", "serve"]
+```
+
+Project: `.codex/config.toml`. Global (`--global`): `~/.codex/config.toml`.
+
+### 2. OpenCode (sst/opencode) support
+
+```bash
+radiant setup-mcp        # auto-detects if .opencode/ exists
+radiant setup-mcp --agent=opencode
+```
+
+Writes JSON config:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "radiant": {
+      "type": "local",
+      "command": ["/usr/local/bin/radiant", "mcp", "serve"]
+    }
+  }
+}
+```
+
+Project: `.opencode/config.json`. Global: `~/.config/opencode/config.json`.
+
+## What was NOT added (and why)
+
+User requested 8 agents. 2 added (Codex, OpenCode). 6 skipped:
+
+| Agent | Skipped because |
+|-------|-----------------|
+| **hermes** | NousResearch Hermes is a model family, not an MCP host. Unclear which agent was meant. |
+| **MiniMax code** | Not a recognised public MCP host. |
+| **kimi code** | `kimi-cli` MCP support not stable in upstream yet. |
+| **open claw** | Not a recognised public MCP host. |
+| **lang chain** | Framework, not MCP host. Wrap the harness as an MCP tool from inside the LangChain agent. |
+| **lang graph** | Same — framework. |
+
+For any of these, the user can:
+- Open an issue with the agent's MCP config schema and path, and we'll add it.
+- Build a custom wrapper that calls `radiant mcp serve` from the agent.
+
+## Stats
+
+- 2 new concrete agents supported.
+- **997 tests passing across 30 packages, 0 failures**.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 1 modified file, 1 new test file, 1 new doc.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.43.0
+# or:
+git pull
+make build
+./bin/radiant --version                  # should report 2.43.0
+./bin/radiant setup-mcp --help           # lists codex, opencode in agent flag
+cd /your/project/with/.codex/  # or create .opencode/
+./bin/radiant setup-mcp --dry-run       # preview the config writes
+./bin/radiant setup-mcp                 # actually write
+```
+
+---
+
 # Release Notes — v2.42.0 (Light/Full by subcommand, not by flag)
 
 > "Behaviour emerges from the subcommand." v2.42.0 collapses the

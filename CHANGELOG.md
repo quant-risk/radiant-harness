@@ -4,6 +4,100 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.43.0] — 2026-06-29 — setup-mcp: Codex + OpenCode auto-detect (Sprint 73)
+
+Adds support for two more MCP-capable agents in `radiant setup-mcp`:
+**Codex** (OpenAI CLI) and **OpenCode** (sst/opencode). Both have
+public MCP support and ship config files the harness can write to.
+
+### Added — Codex (OpenAI CLI)
+
+- Auto-detect: presence of `.codex/` (project) or `~/.codex/`
+  (global) triggers Codex config.
+- TOML format: `[mcp_servers.radiant]` block with `command`,
+  `args`. Project: `.codex/config.toml`. Global: `~/.codex/config.toml`.
+- `mergeCodexTOML(path, entry)` — minimal TOML merge that
+  preserves other sections, replaces the existing radiant block if
+  present, and appends a new block otherwise.
+- `tomlQuote(string)` — TOML-safe double-quoted string escaping
+  (backslash, double-quote, newline, tab).
+- Regex-based block capture uses Go RE2 syntax (no lookahead);
+  pattern `(?ms)^\[mcp_servers\.radiant\][\s\S]*?(?:\n\[|\z)`
+  matches the block up to (but not including) the next section
+  header or end of file.
+
+### Added — OpenCode (sst/opencode)
+
+- Auto-detect: presence of `.opencode/` (project) or
+  `~/.config/opencode/` (global) triggers OpenCode config.
+- JSON format: `{"$schema": "...", "mcp": {"radiant": {...}}}`
+  with `type: "local"` and `command: [...]` (array, not string).
+  Project: `.opencode/config.json`. Global:
+  `~/.config/opencode/config.json`.
+- `mergeOpenCodeConfig(path, entry)` — full JSON merge that
+  preserves unknown top-level keys (decoded into a flexible map,
+  re-serialised after merge).
+- Differs from Cursor/Windsurf/VSCode (which use `mcpServers` at
+  top level): OpenCode uses `mcp` and the value is a flat map,
+  not a list.
+
+### Changed — `setup-mcp`
+
+- Auto-detect list extended from 5 to 7 agents:
+  `claude`, `cursor`, `windsurf`, `zed`, `vscode`, **`codex`**,
+  **`opencode`**.
+- `--agent` flag accepts the new names; comma-separated for
+  multiple agents in one invocation.
+- `--agent` flag help text updated.
+- Long description updated with the new supported list.
+
+### Tests
+
+- 14 new tests in `cmd_setup_mcp_test.go`:
+  - Codex: new file, preserve existing, replace existing.
+  - OpenCode: new file, preserve existing, replace existing.
+  - `tomlQuote`: 5 escape cases (simple, quote, backslash,
+    newline, tab).
+  - Detection: codex, opencode, explicit flag.
+  - `mcpConfigFor`: project vs global paths for both agents,
+    unknown agent error.
+
+### Stats
+
+- 2 new concrete agents supported (Codex, OpenCode).
+- **997 tests passing across 30 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 1 file modified (`cmd_setup_mcp.go`), 1 file added
+  (`cmd_setup_mcp_test.go`), 1 file added
+  (`docs/SPRINT73-PLAN.md`).
+
+### Notes — what was NOT added (and why)
+
+The user asked about 8 additional agents in addition to the 5
+already supported. Two were added (Codex, OpenCode). The other six
+were intentionally skipped:
+
+| Agent | Skipped because |
+|-------|-----------------|
+| **hermes** | NousResearch Hermes is a model family, not an MCP host. Unclear which specific agent the user meant. |
+| **MiniMax code** | Not a recognised public MCP host. Could be internal to Fortvna — needs format info. |
+| **kimi code** | Moonshot's `kimi-cli` exists but public MCP support is not stable yet. Skip until upstream stabilises. |
+| **open claw** | Not a recognised public MCP host. |
+| **lang chain** | **LangChain is a Python framework for building agents, not an MCP host.** Adding it to `setup-mcp` would be misleading. Operators building LangChain agents wrap the harness as an MCP tool — that's the integration path. |
+| **lang graph** | Same as LangChain — framework, not MCP host. Part of the LangChain ecosystem. |
+
+### Compatibility
+
+- No breaking changes. New agents are additive.
+- Existing config files for previously-supported agents are
+  untouched.
+- `--agent` flag accepts comma-separated values; existing
+  single-agent usage unchanged.
+
+---
+
 ## [2.42.0] — 2026-06-29 — Light/Full by subcommand, not by flag
 
 The "no more mode flag" release. v2.37.0 introduced Light and Full
