@@ -1,8 +1,8 @@
+//go:build !light_only
+
 package main
 
 import (
-	"os"
-
 	"github.com/spf13/cobra"
 )
 
@@ -106,62 +106,9 @@ func registerAuditCmds(root *cobra.Command) {
 	auditCmd.Flags().Bool("fail-on-warning", false, "exit non-zero on warnings (default: only errors)")
 	root.AddCommand(auditCmd)
 
-	// ── mcp (Sprint 14.5 — MCP server, stdio transport) ──
-	// `radiant mcp serve` exposes a JSON-RPC 2.0 server over stdio
-	// that implements the Model Context Protocol (MCP) so agents
-	// that prefer MCP can call radiant commands. Tools exposed:
-	//   - radiant_spec: scaffold a feature
-	//   - radiant_adr: create an ADR
-	//   - radiant_product: start a Lean Inception
-	//   - radiant_evals: AC→test coverage report
-	//   - radiant_audit: project layout audit
-	//   - radiant_release: cut a release
-	//
-	// Reads newline-delimited JSON-RPC from stdin; writes
-	// responses to stdout.
-	//
-	// --sampling: when set, the server uses MCP sampling/createMessage
-	// to request LLM inference from the calling agent (Claude Code,
-	// Hermes, etc.) instead of using its own API key. No API key
-	// required in this mode.
-	mcpCmd := &cobra.Command{
-		Use:   "mcp",
-		Short: "MCP server commands",
-	}
-	var mcpSamplingFlag bool
-	mcpServeCmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the MCP server (stdio transport)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPServe(os.Stdin, os.Stdout, mcpSamplingFlag)
-		},
-	}
-	mcpServeCmd.Flags().BoolVar(&mcpSamplingFlag, "sampling", false,
-		"Use MCP sampling/createMessage — the calling agent provides LLM inference (no API key needed)")
-	mcpCmd.AddCommand(mcpServeCmd)
-	root.AddCommand(mcpCmd)
-
 	// ── security (Sprint 16 — security posture audit) ──
-	// `radiant security [--scope=secrets|perms|all] [--output=...]`
-	// scans the project for common security issues:
-	//   - Hardcoded secrets (API keys, tokens) in source code
-	//   - Sensitive files with overly permissive file permissions
-	//
-	// MVP scope: secrets + permissions. Dependency-CVE scanning and
-	// config-CORS checks are deferred to future work.
-	securityCmd := &cobra.Command{
-		Use:   "security",
-		Short: "Security posture audit: hardcoded secrets + sensitive file perms",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			scope, _ := cmd.Flags().GetString("scope")
-			outPath, _ := cmd.Flags().GetString("output")
-			failOnWarn, _ := cmd.Flags().GetBool("fail-on-warning")
-			return runSecurity(scope, outPath, failOnWarn)
-		},
-	}
-	securityCmd.Flags().String("scope", "all", "scan scope: secrets | perms | all")
-	securityCmd.Flags().StringP("output", "o", "", "output path (default: docs/security-report.md)")
-	securityCmd.Flags().Bool("fail-on-warning", false, "exit non-zero on warnings (default: only errors)")
-	root.AddCommand(securityCmd)
+	// Implementation moved to cmd_security.go in Sprint 74. This
+	// registration just wires the cobra command into the root tree.
+	registerSecurityCmd(root)
 
 }

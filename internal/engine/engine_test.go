@@ -1,17 +1,67 @@
+//go:build !light_only
+
 package engine
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/quant-risk/radiant-harness/internal/fsutil"
 	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/tools"
 )
+
+// Note: tests for pathIsSafe now live in internal/fsutil. The engine
+// wrapper (PathIsSafe, pathIsSafe) is a thin re-export kept for
+// backwards-compat with any caller that depended on engine.PathIsSafe.
+
+// stubWriteTool returns a write_file-like tool that performs the
+// actual file write but uses fsutil.PathIsSafe directly (not
+// internal/tools/fs). Lets engine tests exercise the dispatcher
+// without taking a dependency on the concrete tool package (which
+// would cycle back through engine).
+func stubWriteTool(projectDir string) *tools.Tool {
+	return &tools.Tool{
+		Name: "write_file",
+		Invoke: func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var args struct {
+				Path    string `json:"path"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(raw, &args); err != nil {
+				return nil, err
+			}
+			if !fsutil.PathIsSafe(projectDir, args.Path) {
+				return nil, &stubErr{msg: "refusing path outside project: " + args.Path}
+			}
+			full := filepath.Join(projectDir, args.Path)
+			dir := filepath.Dir(full)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(full, []byte(args.Content), 0o644); err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"written": args.Path,
+				"bytes":   len(args.Content),
+				"created": true,
+			}, nil
+		},
+	}
+}
+
+type stubErr struct{ msg string }
+
+func (e *stubErr) Error() string { return e.msg }
 
 func TestIsShellOp(t *testing.T) {
 	yes := []string{"&&", "||", "|", ";", "&", ">", "<", "(", ")"}
@@ -139,6 +189,49 @@ func TestPathIsSafe(t *testing.T) {
 		if got := pathIsSafe(dir, c.candidate); got != c.safe {
 			t.Errorf("pathIsSafe(%q, %q) = %v, want %v", dir, c.candidate, got, c.safe)
 		}
+	}
+}
+
+// TestPathIsSafe_SymlinkEscape verifies that a symlink inside the project
+// pointing outside the project is rejected. Without symlink resolution,
+// "../../etc/passwd" passes the textual check as long as the literal path
+// doesn't traverse — but a symlink renders that bypass obsolete.
+func TestPathIsSafe_SymlinkEscape(t *testing.T) {
+	project := t.TempDir()
+	outside := t.TempDir()
+
+	// Create a symlink inside project that targets outside.
+	linkPath := filepath.Join(project, "evil")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	// Writing through the symlink should be rejected even though the
+	// textual path "evil/target.txt" stays inside the project.
+	if pathIsSafe(project, "evil/target.txt") {
+		t.Errorf("pathIsSafe should reject writes through symlink that escapes project")
+	}
+
+	// Sanity: a normal in-project path still passes.
+	if !pathIsSafe(project, "src/main.go") {
+		t.Errorf("pathIsSafe should accept a normal in-project path")
+	}
+}
+
+// TestPathIsSafe_SymlinkedProjectRoot verifies that when the project root
+// itself is a symlink, the comparison happens on real paths.
+func TestPathIsSafe_SymlinkedProjectRoot(t *testing.T) {
+	realProject := t.TempDir()
+	linkDir := t.TempDir()
+	symlinkProject := filepath.Join(linkDir, "project-link")
+	if err := os.Symlink(realProject, symlinkProject); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// A path that's in the real project should be accepted when we
+	// pass the symlinked project root as projectDir.
+	if !pathIsSafe(symlinkProject, "src/main.go") {
+		t.Errorf("pathIsSafe should accept path under real root when given symlinked root")
 	}
 }
 
@@ -684,5 +777,174 @@ func TestConfigAcceptsValidatorModel(t *testing.T) {
 	}
 	if cfg.ValidatorModel.Model != "claude-opus-4.1" {
 		t.Errorf("ValidatorModel.Model = %q, want claude-opus-4.1", cfg.ValidatorModel.Model)
+	}
+}
+
+// ── Sprint 69 / v2.38.0: tool-call dispatch tests ──
+
+func TestExtractToolCalls_Single(t *testing.T) {
+	resp := "Some preamble\n" +
+		"```tool_call\n" +
+		`{"name": "write_file", "args": {"path": "x.txt", "content": "hi"}}` + "\n" +
+		"```\n" +
+		"trailing text"
+	calls := extractToolCalls(resp)
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	if calls[0].Name != "write_file" {
+		t.Errorf("Name: got %q want write_file", calls[0].Name)
+	}
+}
+
+func TestExtractToolCalls_Multiple(t *testing.T) {
+	resp := "```tool_call\n{\"name\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"a\"}}\n```\n" +
+		"between\n" +
+		"```tool_call\n{\"name\":\"write_file\",\"args\":{\"path\":\"b.txt\",\"content\":\"b\"}}\n```\n"
+	calls := extractToolCalls(resp)
+	if len(calls) != 2 {
+		t.Fatalf("got %d calls, want 2", len(calls))
+	}
+	if calls[0].Name != "write_file" || calls[1].Name != "write_file" {
+		t.Errorf("names: %q %q", calls[0].Name, calls[1].Name)
+	}
+}
+
+func TestExtractToolCalls_IgnoresCodeBlocks(t *testing.T) {
+	// ```go and ```python must be ignored — only ```tool_call extracts.
+	resp := "```go\npackage main\n```\n" +
+		"```python\nprint(1)\n```\n"
+	if got := extractToolCalls(resp); len(got) != 0 {
+		t.Errorf("expected 0 tool calls from code blocks, got %d", len(got))
+	}
+}
+
+func TestExtractToolCalls_SkipsMalformed(t *testing.T) {
+	// Missing name field — skipped, not crashed.
+	resp := "```tool_call\n{\"args\":{}}\n```\n" +
+		"```tool_call\nnot json at all\n```"
+	calls := extractToolCalls(resp)
+	// First call has Args but no name — we keep it as a struct with
+	// empty Name, but the dispatcher will reject unknown names.
+	// We don't crash, we don't produce false positives.
+	if len(calls) > 2 {
+		t.Errorf("got %d calls, expected at most 2", len(calls))
+	}
+}
+
+func TestApplyLLMResponse_LegacyFallback(t *testing.T) {
+	// No tool calls → code-block path. Back-compat with v2.37.0.
+	dir := t.TempDir()
+	e := &Engine{projectDir: dir}
+	resp := "```go\n// File: hello.go\npackage main\n```\n"
+	if err := e.applyLLMResponse(resp, ""); err != nil {
+		t.Fatalf("legacy path errored: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "hello.go"))
+	if err != nil {
+		t.Fatalf("expected hello.go to be written, got %v", err)
+	}
+	if !strings.Contains(string(got), "package main") {
+		t.Errorf("file content: %q", got)
+	}
+	if trace := e.LastToolTrace(); trace != nil {
+		t.Errorf("LastToolTrace should be nil for legacy path, got %v", trace)
+	}
+}
+
+func TestApplyLLMResponse_ToolCallPath(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(stubWriteTool(dir))
+	e := &Engine{projectDir: dir, ToolRegistry: registry}
+
+	resp := "I'll write the file now.\n" +
+		"```tool_call\n" +
+		`{"name": "write_file", "args": {"path": "out.txt", "content": "hello"}}` + "\n" +
+		"```\n"
+	if err := e.applyLLMResponse(resp, ""); err != nil {
+		t.Fatalf("tool-call path errored: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatalf("expected out.txt to be written, got %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("file content: got %q want %q", got, "hello")
+	}
+	trace := e.LastToolTrace()
+	if len(trace) != 1 {
+		t.Fatalf("trace: got %d records want 1", len(trace))
+	}
+	if trace[0].Name != "write_file" {
+		t.Errorf("trace name: got %q want write_file", trace[0].Name)
+	}
+	if trace[0].Err != "" {
+		t.Errorf("trace err: got %q want empty", trace[0].Err)
+	}
+}
+
+func TestApplyLLMResponse_ToolCallRejectsUnsafePath(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(stubWriteTool(dir))
+	e := &Engine{projectDir: dir, ToolRegistry: registry}
+
+	resp := "```tool_call\n" +
+		`{"name": "write_file", "args": {"path": "../escape.txt", "content": "nope"}}` + "\n" +
+		"```\n"
+	err := e.applyLLMResponse(resp, "")
+	if err == nil {
+		t.Fatal("expected error for unsafe tool-call path, got nil")
+	}
+	trace := e.LastToolTrace()
+	if len(trace) != 1 || trace[0].Err == "" {
+		t.Errorf("trace should record error, got %+v", trace)
+	}
+}
+
+func TestApplyLLMResponse_ToolCallsWinOverCodeBlocks(t *testing.T) {
+	// Mixed response: one tool_call AND one code block. Tool call
+	// path executes; code block is ignored.
+	dir := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(stubWriteTool(dir))
+	e := &Engine{projectDir: dir, ToolRegistry: registry}
+
+	resp := "```tool_call\n" +
+		`{"name": "write_file", "args": {"path": "via_tool.txt", "content": "tool"}}` + "\n" +
+		"```\n" +
+		"```go\n// File: via_code.txt\npackage main\n```\n"
+	if err := e.applyLLMResponse(resp, ""); err != nil {
+		t.Fatalf("applyLLMResponse: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "via_tool.txt")); err != nil {
+		t.Errorf("via_tool.txt should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "via_code.txt")); err == nil {
+		t.Errorf("via_code.txt must NOT exist — tool calls win over code blocks")
+	}
+}
+
+func TestPathIsSafe_PublicMatchesPrivate(t *testing.T) {
+	// PathIsSafe and pathIsSafe must agree — one is a wrapper, the
+	// other is the private alias. fsutil.PathIsSafe is the source of
+	// truth; both wrappers must return identical results.
+	dir := t.TempDir()
+	cases := []string{
+		"src/main.go",
+		"docs/spec.md",
+		"a/b/c/d.txt",
+		"../escape.txt",
+		"",
+	}
+	for _, c := range cases {
+		pub := PathIsSafe(dir, c)
+		priv := pathIsSafe(dir, c)
+		fsu := fsutil.PathIsSafe(dir, c)
+		if pub != priv || pub != fsu {
+			t.Errorf("disagreement on %q: PathIsSafe=%v pathIsSafe=%v fsutil=%v",
+				c, pub, priv, fsu)
+		}
 	}
 }

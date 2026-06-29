@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package loop
 
 import (
@@ -438,7 +440,7 @@ func TestFormatTrace_Empty(t *testing.T) {
 
 func TestBuildVerifierPrompt_ContainsGoal(t *testing.T) {
 	cfg := DefaultVerifierConfig()
-	prompt := BuildVerifierPrompt("implement login API", "output here", cfg)
+	prompt := BuildVerifierPrompt("implement login API", "output here", cfg, nil)
 	if !strings.Contains(prompt, "implement login API") {
 		t.Error("prompt should contain the goal")
 	}
@@ -450,9 +452,50 @@ func TestBuildVerifierPrompt_ContainsGoal(t *testing.T) {
 func TestBuildVerifierPrompt_StrictMode(t *testing.T) {
 	strict := DefaultVerifierConfig()
 	strict.StrictMode = true
-	prompt := BuildVerifierPrompt("goal", "output", strict)
+	prompt := BuildVerifierPrompt("goal", "output", strict, nil)
 	if !strings.Contains(prompt, "Default to REJECTED") {
 		t.Error("strict mode prompt should contain 'Default to REJECTED'")
+	}
+}
+
+func TestBuildVerifierPrompt_WithToolTrace(t *testing.T) {
+	cfg := DefaultVerifierConfig()
+	trace := []ToolCallRecord{
+		{Name: "write_file", Written: "internal/foo.go", Bytes: 1432, Created: true},
+		{Name: "write_file", Written: "internal/foo_test.go", Bytes: 892, Created: true},
+	}
+	prompt := BuildVerifierPrompt("goal", "output", cfg, trace)
+	if !strings.Contains(prompt, "TOOL CALLS OBSERVED") {
+		t.Error("prompt should contain 'TOOL CALLS OBSERVED' section when trace non-empty")
+	}
+	if !strings.Contains(prompt, "internal/foo.go") {
+		t.Error("prompt should contain the written path")
+	}
+	if !strings.Contains(prompt, "1432 bytes") {
+		t.Error("prompt should contain byte count")
+	}
+	if !strings.Contains(prompt, "ANTI-CHEAT ADDENDUM") &&
+		!strings.Contains(prompt, "wrote outside the project boundary") {
+		t.Error("prompt should mention tool-call anti-cheat clause")
+	}
+}
+
+func TestBuildVerifierPrompt_NoToolTrace(t *testing.T) {
+	cfg := DefaultVerifierConfig()
+	prompt := BuildVerifierPrompt("goal", "output", cfg, nil)
+	if strings.Contains(prompt, "TOOL CALLS OBSERVED") {
+		t.Error("prompt should NOT contain tool-call section when trace is empty (legacy prompt)")
+	}
+}
+
+func TestBuildVerifierPrompt_ToolCallError(t *testing.T) {
+	cfg := DefaultVerifierConfig()
+	trace := []ToolCallRecord{
+		{Name: "write_file", Written: "../escape.txt", Err: "refusing path outside project"},
+	}
+	prompt := BuildVerifierPrompt("goal", "output", cfg, trace)
+	if !strings.Contains(prompt, "[ERROR: refusing path outside project]") {
+		t.Error("prompt should surface the tool-call error in the trace")
 	}
 }
 

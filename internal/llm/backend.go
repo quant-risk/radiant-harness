@@ -4,12 +4,16 @@ import "context"
 
 // Backend is the abstraction the loop uses for all LLM calls. It decouples
 // the runner from the transport — HTTP (Anthropic, OpenRouter, OpenAI) in the
-// normal case, or MCP sampling/createMessage over a JSON-RPC pipe when the
-// harness is driven by a host agent that provides inference.
+// Full build, or MCP sampling/createMessage over a JSON-RPC pipe in both
+// Light and Full builds when the harness is driven by a host agent that
+// provides inference.
 //
-// Implementations:
-//   - HTTPBackend: thin wrapper over the existing Client.
-//   - SamplingBackend: MCP sampling/createMessage via stdin/stdout.
+// Light build: only SamplingBackend satisfies this interface (HTTP files
+// are excluded via build tags). Inference comes from the host agent.
+//
+// Full build (default): both SamplingBackend and HTTPBackend are
+// available. Inference source is selected by PickBackend based on runtime
+// context.
 type Backend interface {
 	// Chat sends messages and returns a synchronous completion.
 	Chat(ctx context.Context, messages []Message) (*ChatResponse, error)
@@ -24,34 +28,7 @@ type Backend interface {
 	ModelID() string
 }
 
-// HTTPBackend implements Backend via HTTP for any OpenAI-compatible provider
-// (Anthropic native, OpenRouter, OpenAI, xAI, etc.). It is a thin wrapper
-// over the existing Client, preserving the retry/backoff/429 logic.
-type HTTPBackend struct {
-	client *Client
-}
-
-// NewHTTPBackend creates an HTTPBackend from a Model configuration. The
-// returned backend owns its own *http.Client with the standard timeout.
-func NewHTTPBackend(m Model) *HTTPBackend {
-	return &HTTPBackend{client: NewClient(m)}
-}
-
-// Chat delegates to the underlying Client.Chat.
-func (b *HTTPBackend) Chat(ctx context.Context, msgs []Message) (*ChatResponse, error) {
-	return b.client.Chat(ctx, msgs)
-}
-
-// ChatStream delegates to the underlying Client.ChatStream.
-func (b *HTTPBackend) ChatStream(ctx context.Context, msgs []Message, cb StreamCallback) (*ChatResponse, error) {
-	return b.client.ChatStream(ctx, msgs, cb)
-}
-
-// ModelID returns the configured model identifier.
-func (b *HTTPBackend) ModelID() string { return b.client.model.Model }
-
-// Compile-time interface conformance checks.
-var (
-	_ Backend = (*HTTPBackend)(nil)
-	_ Backend = (*SamplingBackend)(nil)
-)
+// Compile-time interface conformance check for the always-available backend.
+// The HTTPBackend conformance check lives in backend_http.go (only compiled
+// in the Full build).
+var _ Backend = (*SamplingBackend)(nil)

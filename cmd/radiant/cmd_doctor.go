@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 import (
@@ -96,6 +98,21 @@ Checks:
 			} else {
 				add("radiant binary", true, self)
 			}
+
+			// ── mode ─────────────────────────────────────────────────────────
+			// Mode is now derived from which subcommand you ran (no flag,
+			// env, or config field). The harness doesn't carry an
+			// "active mode" any more; report the expected mode based on
+			// whether an API key is present.
+			modeNote := ""
+			modeOK := true
+			if apiKey == "" {
+				modeNote = "Full mode (CLI subcommand) requires an API key — export OPENROUTER_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY, or set api_key in .radiant.yaml"
+				modeOK = false
+			} else {
+				modeNote = "Full mode (CLI subcommand) — API key present"
+			}
+			add("mode", modeOK, modeNote)
 
 			// ── print results ────────────────────────────────────────────────
 			fmt.Println("radiant doctor")

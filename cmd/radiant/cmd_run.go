@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 import (
@@ -14,6 +16,8 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/benchmark"
 	"github.com/quant-risk/radiant-harness/internal/engine"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/loop"
+	"github.com/quant-risk/radiant-harness/internal/mcpbridge"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/routing"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
@@ -192,6 +196,8 @@ func registerRunCmds(root *cobra.Command) {
 	var runRetries int
 	var runVerbose bool
 	var runAutoRoute bool
+	var runDisableTools bool
+	var runMCPBridges []string
 	var runPlanner string
 	var runImplementer string
 	var runTraceOut string
@@ -251,6 +257,33 @@ func registerRunCmds(root *cobra.Command) {
 			}
 
 			e := engine.New(cfg)
+			// Sprint 69 / v2.38.0: wire the structured tool-use registry
+			// into the engine so ```tool_call``` fences in the LLM
+			// output are dispatched through it. Falls back to legacy
+			// code-block emission when the LLM doesn't emit tool calls.
+			// Use a nil check so a future "disable tools" flag is a
+			// one-liner.
+			if !runDisableTools {
+				// Sprint 72 / v2.41.0: register MCP bridges before
+				// passing the registry to the engine. Failures here
+				// surface as a clear CLI error so operators see
+				// which bridge failed and why.
+				mcpBridges := make([]loop.MCPSpec, 0, len(runMCPBridges))
+				for _, spec := range runMCPBridges {
+					name, command, args, err := mcpbridge.ParseSpec(spec)
+					if err != nil {
+						return fmt.Errorf("invalid --mcp-bridge %q: %w", spec, err)
+					}
+					mcpBridges = append(mcpBridges, loop.MCPSpec{
+						Name: name, Command: command, Args: args,
+					})
+				}
+				registry, err := loop.RealRegistry(projectDir, mcpBridges...)
+				if err != nil {
+					return err
+				}
+				e.ToolRegistry = registry
+			}
 			result, err := e.Run(context.Background(), specDir)
 			if err != nil {
 				return err
@@ -319,6 +352,8 @@ func registerRunCmds(root *cobra.Command) {
 	runCmd.Flags().IntVar(&runRetries, "retries", 3, "max correction retries")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
 	runCmd.Flags().BoolVar(&runAutoRoute, "auto-route", false, "automatically pick the right model per RPI phase (research uses top-tier, implement uses mid-tier)")
+	runCmd.Flags().BoolVar(&runDisableTools, "no-tools", false, "disable structured tool-use; force the legacy code-block emission path (v2.37.0 behaviour)")
+	runCmd.Flags().StringArrayVar(&runMCPBridges, "mcp-bridge", nil, "register an MCP server as a tool source (format: \"name:command args...\"). Repeatable. Example: --mcp-bridge \"github:npx -y @modelcontextprotocol/server-github\"")
 	runCmd.Flags().StringVar(&runPlanner, "planner", "", "LLM used for planning (defaults to --model). E.g. claude-opus-4.1 for planning while claude-sonnet-4.5 implements.")
 	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
 	runCmd.Flags().StringVar(&runTraceOut, "trace-out", "", "write per-LLM-call trace events to this file as JSONL (one event per line). Useful for cost debugging and observability.")

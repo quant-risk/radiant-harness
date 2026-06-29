@@ -1,5 +1,5 @@
 # Radiant Harness — Makefile
-.PHONY: build test lint clean install release
+.PHONY: build test lint clean install release light light-all light-smoke
 
 # CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
 # "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
@@ -12,15 +12,38 @@ LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 build:
 	CGO_ENABLED=$(CGO_ENABLED) go build $(LDFLAGS) -o bin/radiant ./cmd/radiant/
 
+# Light build: no API key infrastructure whatsoever (Sprint 78+).
+# Binary is physically incapable of HTTP LLM — only MCP sampling.
+light:
+	CGO_ENABLED=$(CGO_ENABLED) go build -tags light_only $(LDFLAGS) -o bin/radiant-light ./cmd/radiant/
+
+# Cross-platform Light release (same platforms as Full).
+light-all:
+	GOOS=linux   GOARCH=amd64 go build -tags light_only $(LDFLAGS) -o dist/radiant-light-linux-amd64     ./cmd/radiant/
+	GOOS=linux   GOARCH=arm64 go build -tags light_only $(LDFLAGS) -o dist/radiant-light-linux-arm64     ./cmd/radiant/
+	GOOS=darwin  GOARCH=amd64 go build -tags light_only $(LDFLAGS) -o dist/radiant-light-darwin-amd64    ./cmd/radiant/
+	GOOS=darwin  GOARCH=arm64 go build -tags light_only $(LDFLAGS) -o dist/radiant-light-darwin-arm64    ./cmd/radiant/
+	GOOS=windows GOARCH=amd64 go build -tags light_only $(LDFLAGS) -o dist/radiant-light-windows-amd64.exe ./cmd/radiant/
+	@echo "✓ Light release binaries in dist/"
+
+# Smoke test for Light: verifies zero HTTP-LLM symbols (no API key code).
+light-smoke: light
+	./scripts/smoke-test-light.sh
+
 test:
 	CGO_ENABLED=$(CGO_ENABLED) go test ./... -v -count=1
 
 test-short:
 	CGO_ENABLED=$(CGO_ENABLED) go test ./... -short
 
+# Test the LIGHT build separately (excludes !light_only files).
+test-light:
+	CGO_ENABLED=$(CGO_ENABLED) go test -tags light_only ./... -count=1
+
 lint:
 	CGO_ENABLED=$(CGO_ENABLED) go vet ./...
-	@echo "✓ vet passed"
+	CGO_ENABLED=$(CGO_ENABLED) go vet -tags light_only ./...
+	@echo "✓ vet passed (both modes)"
 
 clean:
 	rm -rf bin/ dist/
@@ -52,3 +75,4 @@ smoke: build
 	./bin/radiant validate .tmp-smoke
 	rm -rf .tmp-smoke
 	@echo "✓ Smoke test passed"
+

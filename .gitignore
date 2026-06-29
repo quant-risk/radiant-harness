@@ -22,3 +22,5 @@ vendor/
 # Node (vscode-extension build)
 node_modules/
 *.tsbuildinfo
+.radiant-harness/
+/radiant

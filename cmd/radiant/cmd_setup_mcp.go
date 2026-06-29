@@ -11,6 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// registerSetupMCPCmd registers `radiant setup-mcp` under root. The
+// per-agent config merges (Codex TOML, OpenCode, Hermes YAML, Kimi,
+// OpenClaw, Cline) live in cmd_setup_mcp_per_agent.go. The generic
+// JSON merges (Claude / Cursor / Windsurf / VSCode / Zed) live below
+// because they're the default format that five of the eleven
+// supported agents share.
 func registerSetupMCPCmd(root *cobra.Command) {
 	var agentFlag string
 	var globalFlag bool
@@ -20,12 +26,16 @@ func registerSetupMCPCmd(root *cobra.Command) {
 	cmd := &cobra.Command{
 		Use:   "setup-mcp",
 		Short: "Register radiant as an MCP server in your agent's config",
-		Long: `Detects your agent (Claude Code, Cursor, Windsurf, Zed) and writes
-the MCP server entry so any prompt can invoke radiant_run automatically.
+		Long: `Detects your agent and writes the MCP server entry so any prompt
+can invoke radiant_run automatically.
+
+Supported agents (auto-detected):
+  Claude Code, Cursor, Windsurf, Zed, VSCode, Codex (OpenAI), OpenCode,
+  Hermes (NousResearch), Kimi CLI (Moonshot), OpenClaw, Cline.
 
   radiant setup-mcp                  # auto-detect agent
-  radiant setup-mcp --agent=claude   # Claude Code only
-  radiant setup-mcp --global         # write to user-level config (~/.claude/)
+  radiant setup-mcp --agent=codex    # specific agent (comma-separated for multiple)
+  radiant setup-mcp --global         # write to user-level config (~/.claude/, etc.)
   radiant setup-mcp --dry-run        # show what would be written`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			binaryPath, err := radiantBinaryPath()
@@ -38,7 +48,8 @@ the MCP server entry so any prompt can invoke radiant_run automatically.
 			agents := resolveMCPAgents(agentFlag, cwd)
 			if len(agents) == 0 {
 				return fmt.Errorf("no supported agent detected in %s\n"+
-					"Use --agent=claude|cursor|windsurf|zed|vscode to specify one", cwd)
+					"Use --agent=claude|cursor|windsurf|zed|vscode|codex|opencode|"+
+					"hermes|kimi|openclaw|cline to specify one", cwd)
 			}
 
 			for _, a := range agents {
@@ -69,7 +80,7 @@ the MCP server entry so any prompt can invoke radiant_run automatically.
 		},
 	}
 
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to configure: claude|cursor|windsurf|zed|vscode (default: auto-detect)")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to configure: claude|cursor|windsurf|zed|vscode|codex|opencode|hermes|kimi|openclaw|cline (comma-separated; default: auto-detect)")
 	cmd.Flags().BoolVar(&globalFlag, "global", false, "write to user-level config instead of project-level")
 	cmd.Flags().BoolVar(&forceFlag, "force", false, "overwrite existing MCP entry")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "show what would be written without writing")
@@ -114,10 +125,28 @@ func resolveMCPAgents(agentFlag, cwd string) []string {
 		{"windsurf", filepath.Join(cwd, ".windsurf")},
 		{"zed", filepath.Join(cwd, ".zed")},
 		{"vscode", filepath.Join(cwd, ".vscode")},
+		{"codex", filepath.Join(cwd, ".codex")},
+		{"opencode", filepath.Join(cwd, ".opencode")},
+		{"hermes", filepath.Join(cwd, ".hermes")},
+		{"openclaw", filepath.Join(cwd, ".openclaw")},
 	}
 	for _, c := range checks {
 		if _, err := os.Stat(c.path); err == nil {
 			detected = append(detected, c.name)
+		}
+	}
+
+	// Kimi CLI and Cline are global-only — detect by presence of their
+	// global config dir as a fallback. They are appended AFTER the
+	// project-local checks above so the project's primary agent stays
+	// first in the list.
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		if _, err := os.Stat(filepath.Join(home, ".kimi")); err == nil {
+			detected = append(detected, "kimi")
+		}
+		if _, err := os.Stat(filepath.Join(home, ".cline")); err == nil {
+			detected = append(detected, "cline")
 		}
 	}
 
@@ -135,10 +164,14 @@ type mcpEntry struct {
 }
 
 // mcpConfigFor returns (targetPath, jsonContent, error) for a given agent.
+// The first five agents (claude/cursor/windsurf/zed/vscode) use the
+// generic JSON merge helpers in this file. The remaining six
+// (codex/opencode/hermes/kimi/openclaw/cline) use specialized merge
+// functions in cmd_setup_mcp_per_agent.go.
 func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, error) {
 	entry := mcpEntry{
 		Command: binaryPath,
-		Args:    []string{"mcp-serve"},
+		Args:    []string{"mcp", "serve"},
 	}
 
 	switch agent {
@@ -173,8 +206,88 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		content, err := mergeMCPJSON(target, entry)
 		return target, content, err
 
+	case "codex":
+		// Codex (OpenAI CLI) uses TOML config with [mcp_servers.<name>]
+		// blocks. Project-level: .codex/config.toml. Global: ~/.codex/config.toml.
+		var target string
+		if global {
+			home, _ := os.UserHomeDir()
+			target = filepath.Join(home, ".codex", "config.toml")
+		} else {
+			target = filepath.Join(cwd, ".codex", "config.toml")
+		}
+		content, err := mergeCodexTOML(target, entry)
+		return target, content, err
+
+	case "opencode":
+		// OpenCode (sst/opencode) uses JSON config with `mcp.<name>` block.
+		// Project-level: .opencode/config.json. Global: ~/.config/opencode/config.json.
+		var target string
+		if global {
+			home, _ := os.UserHomeDir()
+			target = filepath.Join(home, ".config", "opencode", "config.json")
+		} else {
+			target = filepath.Join(cwd, ".opencode", "config.json")
+		}
+		content, err := mergeOpenCodeConfig(target, entry)
+		return target, content, err
+
+	case "hermes":
+		// Hermes Agent (NousResearch) uses a YAML config file
+		//   (~/.hermes/config.yaml or .hermes/config.yaml) with an
+		//   `mcp_servers` top-level key whose value is a map of
+		//   server-name → {command, args}.
+		var target string
+		if global {
+			home, _ := os.UserHomeDir()
+			target = filepath.Join(home, ".hermes", "config.yaml")
+		} else {
+			target = filepath.Join(cwd, ".hermes", "config.yaml")
+		}
+		content, err := mergeHermesConfig(target, entry)
+		return target, content, err
+
+	case "kimi":
+		// Kimi CLI (Moonshot AI) stores MCP servers globally only:
+		//   ~/.kimi/mcp.json  (or $KIMI_SHARE_DIR/mcp.json).
+		// Standard mcpServers shape — same as Claude/Cursor.
+		// No project-level file exists in Kimi; the --global flag is
+		// always implicit for this agent.
+		home, _ := os.UserHomeDir()
+		target := filepath.Join(home, ".kimi", "mcp.json")
+		content, err := mergeKimiMCP(target, entry)
+		return target, content, err
+
+	case "openclaw":
+		// OpenClaw uses { mcp: { servers: { <name>: {command, args} } } }
+		// with many sibling keys under `mcp` and `channels`/`gateway`/etc.
+		// at the top level. Project-level: .openclaw/openclaw.json.
+		// Global: ~/.openclaw/openclaw.json.
+		var target string
+		if global {
+			home, _ := os.UserHomeDir()
+			target = filepath.Join(home, ".openclaw", "openclaw.json")
+		} else {
+			target = filepath.Join(cwd, ".openclaw", "openclaw.json")
+		}
+		content, err := mergeOpenClawJSONConfig(target, entry)
+		return target, content, err
+
+	case "cline":
+		// Cline CLI writes to ~/.cline/mcp.json with the standard
+		// mcpServers shape. Cline's official examples include optional
+		// `disabled` and `autoApprove` fields — mergeClineConfig emits
+		// both for compatibility.
+		// Cline is global-only via its CLI config; the VS Code
+		// extension-managed file lives elsewhere and is not addressed
+		// by `radiant setup-mcp`.
+		home, _ := os.UserHomeDir()
+		target := filepath.Join(home, ".cline", "mcp.json")
+		content, err := mergeClineConfig(target, entry)
+		return target, content, err
+
 	default:
-		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode)", agent)
+		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode, codex, opencode, hermes, kimi, openclaw, cline)", agent)
 	}
 }
 

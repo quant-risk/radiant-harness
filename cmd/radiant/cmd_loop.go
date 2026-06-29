@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 import (
@@ -66,6 +68,12 @@ func registerLoopCmds(root *cobra.Command) {
 			autoRoute, _ := cmd.Flags().GetBool("auto-route")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
+			// `radiant loop start` is always Full mode — the harness calls
+			// LLM HTTP endpoints directly with the operator's API key. For
+			// Light mode (MCP sampling), use `radiant mcp-serve` and let the
+			// host agent drive the loop. No flag/env/config to set; the
+			// behaviour emerges from which subcommand you ran.
+
 			// Resolve API key from env (vendor-neutral order).
 			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
 			if apiKey == "" && !dryRun {
@@ -105,6 +113,7 @@ func registerLoopCmds(root *cobra.Command) {
 				quorumN = quorumK + 1
 			}
 
+			intensityFlag, _ := cmd.Flags().GetString("intensity")
 			runCfg := loop.RunConfig{
 				ExecutorModel: execModel,
 				VerifierModel: verModel,
@@ -128,6 +137,7 @@ func registerLoopCmds(root *cobra.Command) {
 				Stream:              stream,
 				Plan:                plan,
 				AutoRoute:           autoRoute,
+				Intensity:           intensityFlag,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -226,6 +236,7 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal before each executor call")
 	loopStartCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model; a cheaper model like haiku is often sufficient)")
 	loopStartCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family (research→top-tier, plan→mid, execute→anchor)")
+	loopStartCmd.Flags().String("intensity", "", "Executor intensity for lazy-executor skill: lite|full|ultra|off. Default: full. lite = build what was asked, suggest lazy alt. full = ladder enforced. ultra = YAGNI extremist. off = no skill injected.")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status [run-id]",

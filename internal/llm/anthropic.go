@@ -1,3 +1,5 @@
+//go:build !light_only
+
 // Anthropic native Messages API client.
 //
 // The OpenAI-compatible adapter in client.go works for OpenRouter-routed

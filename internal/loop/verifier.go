@@ -21,6 +21,19 @@ type VerifyResult struct {
 	Escalate bool
 }
 
+// ToolCallRecord mirrors engine.ToolCallRecord but is duplicated here
+// to avoid a loop → engine import (loop is the lower layer). Sprint 70
+// will consolidate by moving ToolCallRecord into a shared package
+// (likely internal/toolrecord). For now, the verifier only reads
+// the fields it needs: Name, Written, Bytes, Created, Err.
+type ToolCallRecord struct {
+	Name    string
+	Written string
+	Bytes   int
+	Created bool
+	Err     string
+}
+
 // VerifierConfig controls adversarial verification behavior.
 type VerifierConfig struct {
 	// MinScore is the minimum score required for approval (default 0.7).
@@ -47,7 +60,13 @@ func DefaultVerifierConfig() VerifierConfig {
 // Key design: the verifier is instructed to assume the work is broken
 // until proven otherwise. This prevents the common failure mode where
 // an LLM agent confirms its own output without genuine scrutiny.
-func BuildVerifierPrompt(goal, executorOutput string, cfg VerifierConfig) string {
+//
+// Sprint 69: toolTrace is the structured record of tool calls the
+// executor dispatched in this iteration. When non-empty, the prompt
+// gains a "TOOL CALLS OBSERVED" section so the verifier can audit
+// each invocation (paths written, byte counts, errors). When empty
+// (legacy code-block path), the prompt is unchanged from v2.37.0.
+func BuildVerifierPrompt(goal, executorOutput string, cfg VerifierConfig, toolTrace []ToolCallRecord) string {
 	strictClause := ""
 	if cfg.StrictMode {
 		strictClause = `
@@ -64,6 +83,8 @@ You MUST cite specific evidence for your verdict:
 - For REJECTED: quote the specific gap, error, or missing element`
 	}
 
+	toolClause := buildToolClause(toolTrace)
+
 	return fmt.Sprintf(`You are an adversarial code reviewer. Your job is to verify whether
 the following work actually achieves the stated goal.
 
@@ -72,7 +93,7 @@ GOAL:
 
 EXECUTOR OUTPUT:
 %s
-
+%s
 Your task:
 1. Assume the work is BROKEN until you find concrete evidence otherwise
 2. Check: does the output demonstrably achieve the goal?
@@ -85,6 +106,8 @@ ANTI-CHEAT CHECKS (verify all before approving):
 - No function was left as a stub or placeholder
 - Scope is unchanged from the original goal (no unrelated changes snuck in)
 - No gate or threshold was widened just to make a check pass
+- (Tool-call iterations only) No tool call wrote outside the project boundary
+- (Tool-call iterations only) A tool call erroring is NOT grounds for rejection if the executor correctly surfaced the error and adjusted
 If any of these are violated, you MUST set ESCALATE: true.
 
 ESCALATE (set to true if the situation requires human review):
@@ -102,9 +125,39 @@ ISSUES:
 - [issue 2, if any]`,
 		goal,
 		truncateOutput(executorOutput, 4000),
+		toolClause,
 		strictClause,
 		evidenceClause,
 	)
+}
+
+// buildToolClause renders the "TOOL CALLS OBSERVED" section. Returns
+// the empty string when the trace is empty (so the prompt stays
+// byte-identical to the v2.37.0 prompt for legacy callers).
+func buildToolClause(toolTrace []ToolCallRecord) string {
+	if len(toolTrace) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\nTOOL CALLS OBSERVED (in execution order):\n")
+	for i, t := range toolTrace {
+		sb.WriteString(fmt.Sprintf("%d. %s", i+1, t.Name))
+		if t.Written != "" {
+			sb.WriteString(fmt.Sprintf(" — %s", t.Written))
+		}
+		if t.Bytes > 0 {
+			sb.WriteString(fmt.Sprintf(" (%d bytes", t.Bytes))
+			if t.Created {
+				sb.WriteString(", created")
+			}
+			sb.WriteString(")")
+		}
+		if t.Err != "" {
+			sb.WriteString(fmt.Sprintf(" [ERROR: %s]", t.Err))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // ParseVerifyResponse parses the structured verifier response.

@@ -1,0 +1,118 @@
+domain: credit-risk
+title: Credit Risk Metrics (Basileia + IFRS 9 + CMN 4.966)
+version: 1.0.0
+
+# Conventions:
+#   {customer.segment} — dimensional value (e.g. Corporate, SME, Retail)
+#   {policy.rating}    — internal rating (AA, A, B, C, D, E)
+#   {exposure.ead}     — exposure at default
+#   Other metrics referenced as {metric_name}
+
+metrics:
+  - name: PD
+    description: |
+      Probability of Default — likelihood that a counterparty fails to
+      meet its obligations over a 12-month horizon. Sourced from internal
+      rating model calibrated against historical default data.
+    unit: percent
+    formula: |
+      lookup(rating_pd_table, {policy.rating})
+      where rating_pd_table maps AA→0.0003, A→0.0010, B→0.0050,
+      C→0.0150, D→0.0500, E→0.1500
+    scopes:
+      - field: customer.segment
+        values: [Retail, SME, Corporate, Sovereign]
+    regulation: CMN 4.966 §4.2.1 (Basileia PD definition)
+    tags: [pd, probability_of_default, default_risk, basileia]
+
+  - name: LGD
+    description: |
+      Loss Given Default — proportion of exposure that is lost when default
+      occurs. Calibrated by collateral type and seniority.
+    unit: percent
+    formula: |
+      if({collateral.type} == "real_estate",
+         0.20,
+         if({collateral.type} == "receivable",
+            0.45,
+            if({debt.seniority} == "senior", 0.45, 0.75)))
+    scopes:
+      - field: collateral.type
+        values: [real_estate, receivable, unsecured, government_guarantee]
+      - field: debt.seniority
+        values: [senior, subordinated]
+    regulation: CMN 4.966 §4.2.3 (LGD definition)
+    tags: [lgd, loss_given_default, basileia]
+
+  - name: EAD
+    description: |
+      Exposure at Default — total credit exposure if the counterparty
+      defaults. For off-balance-sheet items (guarantees, undrawn lines),
+      a credit conversion factor (CCF) is applied.
+    unit: currency
+    formula: |
+      {exposure.drawn} + {exposure.off_balance} * ccf({product.type})
+      where ccf(guarantee)=0.50, ccf(undrawn_credit_line)=0.75,
+      ccf(committed_credit_line)=0.50, ccf(letter_of_credit)=0.20
+    scopes:
+      - field: product.type
+        values: [loan, guarantee, undrawn_credit_line, letter_of_credit]
+    regulation: CMN 4.966 §4.2.2 (EAD definition)
+    tags: [ead, exposure_at_default, basileia, ccf]
+
+  - name: RWA
+    description: |
+      Risk-Weighted Assets — EAD multiplied by a risk weight K that
+      depends on segment, rating, and (for some segments) maturity.
+      RWA is the denominator in capital ratios (Basileia).
+    unit: currency
+    formula: |
+      {EAD} * K({customer.segment}, {policy.rating}, {policy.maturity_years})
+      where K is the segment-specific lookup from CMN 4.966 §4.2.1.4:
+        Sovereign  → 0.00 to 1.00 by rating
+        Corporate  → 0.20 to 1.50 by rating × maturity factor
+        SME        → 0.20 to 1.00 (retail-style if criteria met)
+        Retail     → 0.10 to 0.75 (mortgage vs other)
+    scopes:
+      - field: customer.segment
+        values: [Sovereign, Corporate, SME, Retail, Bank]
+      - field: policy.rating
+        values: [AAA, AA, A, BBB, BB, B, CCC, D]
+    regulation: CMN 4.966 §4.2.1.4 (Fator de risco K)
+    tags: [rwa, risk_weighted_assets, basileia, capital_ratio]
+
+  - name: ExpectedLoss
+    description: |
+      Expected Loss — the average credit loss over a 12-month period.
+      Foundation for IFRS 9 provisioning and regulatory expected loss.
+    unit: currency
+    formula: |
+      {PD} * {LGD} * {EAD}
+    regulation: IFRS 9 §5.5 (ECL — Expected Credit Loss)
+    tags: [el, expected_loss, ecl, ifrs9]
+
+  - name: provision_min_ifrs9
+    description: |
+      Minimum IFRS 9 provision (stage 1, 2 or 3) — driven by staging
+      and SICR (Significant Increase in Credit Risk) criteria.
+    unit: currency
+    formula: |
+      if({policy.stage} == 1,
+         12 * {PD_12m} * {LGD} * {EAD},
+         if({policy.stage} == 2,
+            12 * {PD_lifetime} * {LGD} * {EAD},
+            {EAD}))
+    regulation: CMN 4.966 §4.4 (Provisão mínima IFRS 9)
+    tags: [provision, ifrs9, staging, sicr]
+
+  - name: capital_required
+    description: |
+      Minimum regulatory capital required for this exposure — Basileia
+      PR (Principal) capital equals 8% of RWA, with additional CET1
+      buffers when applicable.
+    unit: currency
+    formula: |
+      0.08 * {RWA} + max(0, capital_buffer({customer.segment}))
+      where capital_buffer(Corporate) = 0.025 * {RWA} (CET1 add-on)
+    regulation: CMN 4.966 §4.1.1 (Capital mínimo)
+    tags: [capital, basileia, cet1, pr]

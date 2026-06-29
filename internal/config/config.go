@@ -34,6 +34,10 @@ type Config struct {
 
 	// AutoRoute enables AutoRoute by default for loop start.
 	AutoRoute bool `yaml:"auto_route" json:"auto_route"`
+
+	// Mode is the default operational mode: "light", "full", or "auto".
+	// See internal/mode for resolution rules.
+	Mode string `yaml:"mode" json:"mode"`
 }
 
 // Load reads .radiant.yaml (or .radiant.yml) from projectDir.

@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 import (
@@ -116,6 +118,11 @@ func registerFleetCmds(root *cobra.Command) {
 			cwd, _ := os.Getwd()
 			goal := args[0]
 			agentCount, _ := cmd.Flags().GetInt("agents")
+
+			// `radiant fleet start` is always Full mode — fleet agents run
+			// autonomously with the operator's API key. For Light mode
+			// (MCP sampling), use `radiant mcp-serve` and let the host
+			// agent drive the fleet via sampling. No flag/env/config.
 
 			runID := fmt.Sprintf("fleet-%d", time.Now().Unix())
 			store, err := fleet.NewStore(cwd, runID, goal)

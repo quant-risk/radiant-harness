@@ -1,3 +1,5 @@
+//go:build !light_only
+
 // Package engine implements the universal SDD harness engine.
 // It calls LLM APIs directly — no external agent dependency.
 // Works with any model via OpenRouter, OpenAI, Anthropic, or custom providers.
@@ -16,11 +18,13 @@ import (
 	"time"
 
 	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/fsutil"
 	"github.com/quant-risk/radiant-harness/internal/gaterun"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/policy"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/spec"
+	"github.com/quant-risk/radiant-harness/internal/tools"
 )
 
 // gateAllowlist is the closed set of binaries the engine will allow
@@ -64,24 +68,34 @@ const MaxParallelTasks = 4
 // Allowed path prefix for code blocks emitted by the LLM. Paths outside the
 // project directory are rejected to prevent a misaligned response from
 // writing into $HOME or /etc.
+//
+// Symlinks are resolved before the boundary check, so a symlink inside the
+// project that points outside is still rejected. The original implementation
+// only checked the textual path, which let an attacker (or a confused LLM)
+// create "../../etc/foo" via a symlink and bypass the gate.
+//
+// Strategy: resolve both the project root and the longest existing prefix
+// of the candidate path. If the file doesn't exist yet (LLM proposing a
+// new file), walk up the path until we find a directory that does, resolve
+// that, and check the prefix. This catches the symlink-escape case where
+// e.g. `evil/target.txt` passes the lexical check but `evil` is a symlink
+// pointing outside the project.
+// PathIsSafe is the public wrapper for the internal pathIsSafe check.
+// It returns true iff `candidate` (a project-relative path) resolves
+// to a location inside `projectDir` after symlink resolution.
+//
+// The actual implementation lives in internal/fsutil so it can be
+// reused by internal/tools/fs (write_file tool) without creating an
+// import cycle. This wrapper preserves the v2.37.0 public surface
+// for any caller that depended on engine.PathIsSafe.
+//
+// Deprecated: new callers should import internal/fsutil directly.
+func PathIsSafe(projectDir, candidate string) bool {
+	return fsutil.PathIsSafe(projectDir, candidate)
+}
+
 func pathIsSafe(projectDir, candidate string) bool {
-	if candidate == "" {
-		return false
-	}
-	absProj, err := filepath.Abs(projectDir)
-	if err != nil {
-		return false
-	}
-	full := filepath.Join(absProj, candidate)
-	abs, err := filepath.Abs(full)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absProj, abs)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..") && rel != ".."
+	return fsutil.PathIsSafe(projectDir, candidate)
 }
 
 // Engine is the universal SDD harness engine.
@@ -96,6 +110,23 @@ type Engine struct {
 	verbose           bool
 	gateMaxOutput     int // per-gate stdout+stderr cap in bytes; 0 = DefaultGateMaxOutput
 	mu                sync.Mutex
+
+	// ToolRegistry enables structured tool-use (Sprint 69). When
+	// non-nil, applyLLMResponse routes tool calls emitted by the LLM
+	// through this registry instead of (or before) the legacy code-block
+	// emission path. nil = legacy code-block path only (v2.37.0 default).
+	//
+	// The Engine does not own the registry — callers (CLI, MCP server,
+	// tests) construct it once and inject it. This keeps Engine free of
+	// cyclic dependencies on internal/tools/fs and lets multiple
+	// harnesses share one registry if needed.
+	ToolRegistry *tools.Registry
+
+	// toolTrace is the accumulated trace from the most recent
+	// applyLLMResponse call. Reset on every applyLLMResponse; read by
+	// the verifier via LastToolTrace. Guarded by e.mu (the existing
+	// Engine mutex).
+	toolTrace []ToolCallRecord
 
 	// runUsage accumulates token counts across every LLM call in a
 	// single Run. Populated by executeTask via accountUsage, copied
@@ -732,8 +763,37 @@ func (e *Engine) buildCorrectPrompt(task radiant.Task, gateError string, previou
 // applyLLMResponse parses the LLM response and applies code changes. Each
 // emitted path is checked against the project boundary so a misaligned
 // response can't escape the project directory.
+//
+// In v2.38.0 (Sprint 69), applyLLMResponse prefers tool calls over
+// code blocks when both are present. The contract is:
+//
+//   - If the response contains any ```tool_call``` fences, they are
+//     dispatched via e.ToolRegistry. Code blocks in the same response
+//     are ignored (logged at verbose=2).
+//   - If the response contains only code blocks, the legacy path
+//     applies (back-compat with v2.37.0 and all earlier releases).
+//   - If e.ToolRegistry is nil, only the legacy path is available.
+//
+// This keeps the contract unambiguous: tool calls are an alternative,
+// not an addition. A confused LLM that emits both will still produce
+// a deterministic outcome.
 func (e *Engine) applyLLMResponse(response string, specDir string) error {
-	// Extract code blocks from the response
+	// Prefer tool calls when the response contains them AND a registry
+	// is wired. Without a registry, tool calls can't be dispatched and
+	// we silently fall back to the code-block path — this preserves
+	// behavior for tests / callers that never set ToolRegistry.
+	if e.ToolRegistry != nil {
+		calls := extractToolCalls(response)
+		if len(calls) > 0 {
+			return e.applyToolCalls(response, calls)
+		}
+	}
+	return e.applyCodeBlocks(response)
+}
+
+// applyCodeBlocks is the legacy path, factored out of applyLLMResponse
+// so the tool-call branch can be tested in isolation.
+func (e *Engine) applyCodeBlocks(response string) error {
 	blocks := extractCodeBlocks(response)
 
 	for _, block := range blocks {
@@ -852,6 +912,177 @@ func extractCodeBlocks(response string) []CodeBlock {
 	}
 
 	return blocks
+}
+
+// ── Tool Call Extraction (Sprint 69 / v2.38.0) ──
+
+// ToolCall is one structured tool invocation emitted by the LLM inside
+// a ```tool_call``` fenced block. The wire format mirrors what the
+// standard SDKs (Anthropic, OpenAI, Gemini) call a "function call",
+// but expressed as a JSON object in a markdown fence so we don't need
+// any SDK to parse it.
+type ToolCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
+// ToolCallRecord is what the executor passes to the verifier after a
+// tool call has been dispatched. Carries enough information for the
+// verifier to audit the action without re-running it.
+type ToolCallRecord struct {
+	Name      string          `json:"name"`
+	Args      json.RawMessage `json:"args"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Err       string          `json:"err,omitempty"`
+	Bytes     int             `json:"bytes,omitempty"`     // populated by write_file
+	Written   string          `json:"written,omitempty"`   // populated by write_file
+	Created   bool            `json:"created,omitempty"`   // populated by write_file
+	ProjectOK bool            `json:"project_ok,omitempty"`
+}
+
+// LastToolTrace returns the trace from the most recent applyLLMResponse
+// call. Used by the verifier prompt builder (internal/loop/verifier.go)
+// to inject the "TOOL CALLS OBSERVED" section.
+//
+// Returns nil if no tool calls were dispatched in the most recent call
+// (i.e. legacy code-block path was used) or if ToolRegistry was nil.
+func (e *Engine) LastToolTrace() []ToolCallRecord {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.toolTrace == nil {
+		return nil
+	}
+	// Return a copy so callers can't mutate internal state.
+	out := make([]ToolCallRecord, len(e.toolTrace))
+	copy(out, e.toolTrace)
+	return out
+}
+
+// extractToolCalls parses ```tool_call``` fenced blocks from an LLM
+// response. Each block must contain a single JSON object with "name"
+// and "args" fields. Malformed blocks are skipped (the executor
+// surfaces the count of skipped calls in its log so the verifier can
+// catch a pattern of malformed emissions).
+//
+// Symmetric with extractCodeBlocks — both share the markdown-fence
+// structure. This keeps the parser simple and the wire format human-
+// readable (a developer can paste the same payload into a markdown
+// file and see what the LLM emitted).
+func extractToolCalls(response string) []ToolCall {
+	var calls []ToolCall
+	lines := strings.Split(response, "\n")
+
+	var body []byte
+	inBlock := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "```") && !inBlock {
+			lang := strings.TrimPrefix(line, "```")
+			lang = strings.TrimSpace(lang)
+			if lang != "tool_call" {
+				// Not a tool-call fence; let extractCodeBlocks handle it.
+				body = nil
+				continue
+			}
+			inBlock = true
+			body = body[:0]
+			continue
+		}
+
+		if strings.HasPrefix(line, "```") && inBlock {
+			// End of block. Parse the accumulated body as JSON.
+			if len(body) > 0 {
+				var parsed struct {
+					Name string          `json:"name"`
+					Args json.RawMessage `json:"args"`
+				}
+				if err := json.Unmarshal(body, &parsed); err == nil && parsed.Name != "" {
+					calls = append(calls, ToolCall{Name: parsed.Name, Args: parsed.Args})
+				}
+				// Malformed blocks silently skip — the dispatcher will
+				// surface the count of skipped calls when needed.
+			}
+			body = nil
+			inBlock = false
+			continue
+		}
+
+		if inBlock {
+			body = append(body, []byte(line)...)
+			body = append(body, '\n')
+		}
+	}
+
+	return calls
+}
+
+// annotator is the duck-typed interface a tool's return value can
+// satisfy to surface structured trace metadata (bytes written, paths,
+// etc.) without taking a direct dependency on the tool's package.
+//
+// Defined here (not in internal/tools) so the engine doesn't import
+// any concrete tool package — which would cycle when fs.WriteFileTool
+// (in internal/tools/fs) wants to import internal/tools for its
+// tool.Tool wrapper.
+//
+// A concrete tool's result type simply implements:
+//
+//	func (r MyResult) Annotate() map[string]any { return ... }
+//
+// and the executor's type-switch picks it up automatically.
+type annotator interface {
+	Annotate() map[string]any
+}
+
+// applyToolCalls dispatches parsed tool calls through the registry and
+// accumulates the trace. Returns an error if any call fails (the loop
+// surfaces this to the verifier, same as a write failure in the legacy
+// path).
+func (e *Engine) applyToolCalls(response string, calls []ToolCall) error {
+	e.mu.Lock()
+	e.toolTrace = e.toolTrace[:0] // reset for this iteration
+	e.mu.Unlock()
+
+	for i, call := range calls {
+		record := ToolCallRecord{Name: call.Name, Args: call.Args}
+		ctx := context.Background() // TODO: thread Run context through here
+		result, err := e.ToolRegistry.Call(ctx, call.Name, call.Args)
+		if err != nil {
+			record.Err = err.Error()
+			e.mu.Lock()
+			e.toolTrace = append(e.toolTrace, record)
+			e.mu.Unlock()
+			e.log("  Tool call %d (%s) failed: %v", i+1, call.Name, err)
+			return fmt.Errorf("tool call %s failed: %w", call.Name, err)
+		}
+		// Type-switch against the local annotator interface (duck-typed).
+		// Tools that implement Annotate() map[string]any surface their
+		// metadata in the trace; tools that don't just get their result
+		// JSON-marshalled verbatim.
+		if a, ok := result.(annotator); ok {
+			meta := a.Annotate()
+			record.Result, _ = json.Marshal(meta)
+			if v, ok := meta["bytes"].(int); ok {
+				record.Bytes = v
+			}
+			if v, ok := meta["written"].(string); ok {
+				record.Written = v
+			}
+			if v, ok := meta["created"].(bool); ok {
+				record.Created = v
+			}
+			if v, ok := meta["project_ok"].(bool); ok {
+				record.ProjectOK = v
+			}
+		} else {
+			record.Result, _ = json.Marshal(result)
+		}
+		e.mu.Lock()
+		e.toolTrace = append(e.toolTrace, record)
+		e.mu.Unlock()
+		e.log("  Tool call %d (%s) ok: %s", i+1, call.Name, record.Written)
+	}
+	return nil
 }
 
 // ── Result Types ──

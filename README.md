@@ -1,337 +1,347 @@
 # radiant-harness
 
-> A vendor-neutral autonomous development harness for any LLM.
-> Shipped as a single binary — works with Claude Code, Cursor, Codex, Copilot, Gemini CLI, Windsurf, Hermes, and any MCP-compatible agent.
+> **A vendor-neutral autonomous development harness for any LLM.**
+> Shipped as **two physically separate binaries** from one source tree.
+> Works with Claude Code, Cursor, Hermes, Codex, OpenCode, Cline, Kimi CLI, OpenClaw, VS Code Copilot, and any MCP-compatible agent.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.36.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-22_packages_green-brightgreen.svg)](CHANGELOG.md)
-[![MCP](https://img.shields.io/badge/MCP-radiant__run-purple.svg)](AGENTS.md)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](CHANGELOG.md)
+[![Builds](https://img.shields.io/badge/builds-2%20%28light+%2B+full%29-brightgreen.svg)](docs/LIGHT-VS-FULL.md)
+[![Hosts](https://img.shields.io/badge/hosts-9%20agents%20detected-purple.svg)](docs/HOST-AGENTS.md)
+[![Tests](https://img.shields.io/badge/tests-1%2C190%2B%20pass-success.svg)](CHANGELOG.md)
+[![Go](https://img.shields.io/badge/go-1.22%2B-blue.svg)](go.mod)
 
 ---
 
-## What it is
+## Two binaries from one source
 
-`radiant` is a CLI harness for **autonomous LLM-driven development**. One binary, zero external dependencies at runtime.
+This repo is the **monorepo** for `radiant-harness`. It produces
+two distinct binaries via Go build tags:
 
-**Core engines:**
-
-| Engine | What it does |
-|--------|-------------|
-| **Loop Engine** | Crash-safe `Discover→Plan→Execute→Verify→Persist` cycle. Verifier is always a separate LLM call. |
-| **Fleet Engine** | Parallel multi-agent dispatch with conflict-safe shared state, concurrency cap, and auto-retry. |
-| **Context Engine** | Detects project domain and lazy-loads 3–10 relevant skills (~300 tokens vs 55K for all 60). |
-| **MCP Server** | Exposes the full harness as MCP tools — any MCP-compatible agent calls `radiant_run` and gets results back. |
-
-Works with any OpenAI-compatible API (Claude, GPT-4o, Gemini, Mistral, OpenRouter, local models).
-
----
-
-## Quickstart — 3 minutes to first autonomous run
-
-### Option A: compile from source
+| Binary    | Size      | Inference source           | API key | Commands                                                                 |
+|-----------|-----------|----------------------------|---------|--------------------------------------------------------------------------|
+| `radiant-light`  | ~10 MB | MCP sampling (host agent) only | **no**  | `setup-mcp`, `mcp serve`, `host-info`                                |
+| `radiant-full`   | ~14 MB | HTTP LLM **and** MCP sampling  | yes     | everything (loop, run, fleet, audit, evals, scaffolds, etc.)          |
 
 ```bash
-git clone https://github.com/quant-risk/radiant-harness.git
-cd radiant-harness
+# Light: no API key infrastructure whatsoever
+go build -tags light_only -o radiant-light ./cmd/radiant
+
+# Full: everything (same as prior versions)
+go build -o radiant-full ./cmd/radiant
+```
+
+Read [docs/LIGHT-VS-FULL.md](docs/LIGHT-VS-FULL.md) for the full
+split rationale, `nm`-verified symbol separation, and how to publish
+each artifact to its own GitHub repo.
+
+---
+
+## Quick start
+
+### I'm running inside an agent (Claude Code, Cursor, etc.)
+
+Use the **Light** binary. It possesses your agent via MCP sampling —
+no API key needed.
+
+```bash
+# 1. Build (or download a release)
+go build -tags light_only -o radiant ./cmd/radiant
+
+# 2. Wire into your agent (auto-detects what's installed)
+./radiant setup-mcp
+
+# 3. Restart your agent and start using radiant
+#    e.g. in Claude Code: "use radiant-harness to fix the auth bug"
+./radiant --version        # → 3.0.0-light
+```
+
+Any tool call inside the agent becomes a `radiant_run` MCP call,
+which samples your agent's LLM (no API key, no HTTP egress).
+
+### I'm running autonomous (CI, local dev, no agent)
+
+Use the **Full** binary with an API key.
+
+```bash
+export RADIANT_OPENROUTER_API_KEY=sk-or-...   # or OPENAI_API_KEY, ANTHROPIC_API_KEY
 go build -o radiant ./cmd/radiant
-./radiant doctor
-```
-
-### Option B: install via go
-
-```bash
-go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
-```
-
-### Option C: use the pre-built binary
-
-```bash
-# macOS arm64 (Apple Silicon)
-curl -L https://github.com/quant-risk/radiant-harness/releases/latest/download/radiant-darwin-arm64 -o radiant
-chmod +x radiant && sudo mv radiant /usr/local/bin/
-```
-
-### First run
-
-```bash
-export ANTHROPIC_API_KEY=sk-...   # or OPENROUTER_API_KEY / OPENAI_API_KEY
-
-radiant doctor                    # verify environment
-radiant boot                      # read project manifest + AGENT PROTOCOL
-
-radiant loop start "add rate limiting to /api/users" --profile=standard
-radiant loop status               # monitor
-radiant loop export <run-id>      # full trace
+./radiant loop start "ship the on-call dashboard"
 ```
 
 ---
 
-## Using radiant as a sub-agent (MCP)
+## What is `radiant-harness`?
 
-This is the primary way to use radiant from any coding agent (Claude Code, Hermes, Cursor, etc.).
+A CLI that turns any LLM into an **autonomous development loop**:
+Discover → Plan → Execute → Verify → Persist. Verifier is always
+a separate LLM call (so the same LLM can't approve its own work).
 
-### One-time setup
+**Core engines** (all available in Full; Light exposes the MCP surface
+that drives the same engines inside the host agent):
 
-Add to your agent's MCP config:
+| Engine            | What it does |
+|-------------------|-------------|
+| **Loop Engine**   | Crash-safe `Discover→Plan→Execute→Verify→Persist` cycle. |
+| **Fleet Engine**  | Parallel multi-agent dispatch with shared state + auto-retry. |
+| **Context Engine** | Detects project domain; loads 3-10 relevant skills. |
+| **Semantic Model** | Curated metric/regulation layer (e.g. CMN 4.966, IFRS 9). |
+| **MCP Server**    | Full harness exposed as MCP tools (`radiant_run`, etc.). |
 
-```json
-{
-  "mcpServers": {
-    "radiant": {
-      "command": "/path/to/radiant",
-      "args": ["mcp-serve"]
-    }
-  }
-}
-```
-
-Or use the auto-detection command:
-
-```bash
-radiant setup-mcp   # detects Claude Code, Cursor, Windsurf, Zed, VSCode automatically
-```
-
-### Two operating modes
-
-| Mode | Command | How it works |
-|------|---------|-------------|
-| **HTTP mode** (default) | `radiant mcp-serve` | Harness makes its own LLM calls using an API key from the environment |
-| **Sampling mode** | `radiant mcp-serve --sampling` | Harness uses the calling agent as its LLM — no API key needed |
-
-**Sampling mode** is the recommended mode for Claude Code, Hermes, Cursor, and any other MCP-compatible agent. The harness "possesses" the agent: every LLM call in the loop (planner, executor, verifier) is dispatched back to the calling agent via `sampling/createMessage`. The harness controls the state machine and orchestration; the agent provides the intelligence.
-
-```
-User → Agent → radiant_run({ goal })
-                  ↓
-              harness loop
-                  ├─ DISCOVER → sampling/createMessage → Agent reasons → discovery
-                  ├─ PLAN     → sampling/createMessage → Agent plans   → plan
-                  ├─ EXECUTE  → sampling/createMessage → Agent codes   → code
-                  └─ VERIFY   → sampling/createMessage → Agent checks  → verdict
-                  ↓
-              returns full trace to Agent → User
-```
-
-### Claude Code setup (sampling mode)
-
-```json
-// .claude/settings.json
-{
-  "mcpServers": {
-    "radiant": { "command": "radiant", "args": ["mcp-serve", "--sampling"] }
-  }
-}
-```
-
-### Usage after setup
-
-The agent calls ONE tool. No extra prompt engineering needed.
-
-```
-radiant_run({ goal: "add input validation to POST /api/users" })
-```
-
-The harness runs the full loop, blocks until done, and returns the complete trace.
-
-**Available MCP tools:**
-
-| Tool | What it does |
-|------|-------------|
-| `radiant_run` | **Full loop in one call** — start + execute + export. Blocks until done. |
-| `radiant_loop_start` | Start a loop (non-blocking from MCP perspective) |
-| `radiant_loop_status` | Get progress of a run |
-| `radiant_loop_list` | List all runs |
-
-### Prompt to any agent
-
-Once the MCP server is registered:
-
-```
-Read the project context and use radiant-harness to: <your goal>
-```
-
-Or even simpler — the agent reads `AGENTS.md` at session start and knows to call `radiant_run` automatically.
+Works with any OpenAI-compatible API: Claude, GPT-4o, Gemini,
+Mistral, OpenRouter, xAI, Groq, local models.
 
 ---
 
-## Loop Engine
-
-Crash-safe state machine: `idle → discover → plan → execute → verify → persist → done`
+## Repository layout
 
 ```
-radiant loop start "add rate limiting to /api/users"
-
-  iteration 1
-  ├─ discover  → domain: backend, skills: [api, security]
-  ├─ plan      → decompose into tasks
-  ├─ execute   → write internal/api/ratelimit.go
-  ├─ verify    → REJECTED: missing tests        ← separate agent, never self-grades
-  ├─ execute   → write internal/api/ratelimit_test.go
-  └─ verify    → APPROVED: score 0.92
-     persist   → checkpoint + JSONL trace
-     done      → exit reason: success
-```
-
-**Guards:** `--max-iter`, `--max-cost`, `--max-time`, `--stall-patience`
-
-**Structured logging:** `--log-json` emits JSONL per LLM call to stdout.
-
-**Full command reference:**
-
-```bash
-radiant loop start "<goal>" [--profile=lean|standard|thorough]
-                            [--model=<id>]
-                            [--max-iter=N]
-                            [--max-cost=2.00]
-                            [--max-time=10m]
-                            [--auto-route]
-                            [--log-json]
-                            [--webhook-url=<url>]
-radiant loop status [<run-id>] [--json]
-radiant loop list
-radiant loop history [--json]
-radiant loop resume <run-id>
-radiant loop cancel <run-id>
-radiant loop export <run-id> [--format=json|md]
-radiant loop diff <run-id> [--base=main] [--stat]
+.
+├── cmd/radiant/                        CLI source (all subcommands)
+│   ├── main.go                          Light entrypoint (//go:build light_only)
+│   ├── main_full.go                     Full entrypoint (//go:build !light_only)
+│   ├── cmd_setup_mcp.go                 11-agent config writer
+│   ├── cmd_mcp_serve.go                 MCP server (both builds)
+│   ├── cmd_mcp_runtime.go               Light-only MCP server impl
+│   ├── cmd_mcp_runtime_full.go          Full MCP server impl (more tools)
+│   ├── cmd_host_info.go                 radiant host-info (both builds)
+│   ├── cmd_loop.go, cmd_run.go, ...    Full-only (tagged !light_only)
+│   └── helpers.go                       Full-only helpers
+│
+├── internal/
+│   ├── llm/                             LLM client + backend abstraction
+│   │   ├── types.go                    shared types (Model, Message, ...)
+│   │   ├── presets.go                  PresetModels + GetPreset + ListPresets
+│   │   ├── backend.go                  Backend interface + SamplingBackend
+│   │   ├── backend_http.go             HTTPBackend (Full only, !light_only)
+│   │   └── anthropic.go, client.go     Full only
+│   │
+│   ├── loop/                            Loop engine + budget + verifier
+│   ├── mcpbridge/                       MCP tool-bridge adapter
+│   ├── config/, ontology/, semantic/   Semantic layer
+│   ├── policy/, routing/, pricing/     Cost + policy + routing
+│   ├── scaffold/, skill/, schedule/    Scaffolds, skills, scheduling
+│   └── ...  (28 packages total)
+│
+├── internal/hostdetect/                 Sprint 79: runtime agent detection
+│
+├── docs/
+│   ├── LIGHT-VS-FULL.md                 Split architecture + publishing guide
+│   ├── HOST-AGENTS.md                   9-agent detection matrix
+│   ├── MODES.md                         Light/Full behaviour
+│   ├── SPRINT74-PLAN.md, ...           Per-sprint design docs
+│   └── validation-report-*.md          Per-sprint verification
+│
+├── .goreleaser.yml                       Release config (Full by default)
+├── Makefile                              `make`, `make test`, `make release`
+├── Dockerfile                             Multi-stage build
+└── README.md                             (you are here)
 ```
 
 ---
 
-## Fleet Engine
+## Build
 
-Parallel multi-agent dispatch for goals that decompose into independent sub-tasks.
+### Light (no API key code, ~10 MB)
 
 ```bash
-radiant fleet start "<goal>"
-radiant fleet status <run-id> [--json]
-radiant fleet summary <run-id> [--json]
-radiant fleet history [--json]
-radiant fleet resume <run-id>
-radiant fleet retry <run-id> <task-id>
-radiant fleet cancel <run-id>
-radiant fleet dispatch --concurrency=4 --max-retries=2
+go build -tags light_only -o bin/radiant-light ./cmd/radiant
 ```
 
-**Config defaults** (`.radiant.yaml`):
+Cross-compile:
 
-```yaml
-model: claude-sonnet-4-6
-max_iter: 20
-profile: standard
-webhook_url: ""
-fleet_concurrency: 4
-fleet_max_retries: 2
-auto_route: true
+```bash
+GOOS=linux   GOARCH=amd64 go build -tags light_only -o bin/radiant-light-linux-amd64     ./cmd/radiant
+GOOS=darwin  GOARCH=arm64 go build -tags light_only -o bin/radiant-light-darwin-arm64    ./cmd/radiant
+GOOS=windows GOARCH=amd64 go build -tags light_only -o bin/radiant-light-windows-amd64.exe ./cmd/radiant
+```
+
+### Full (~14 MB, requires API key)
+
+```bash
+go build -o bin/radiant ./cmd/radiant
+```
+
+### Verify the split (zero HTTP-LLM symbols in Light)
+
+```bash
+nm bin/radiant-light | grep -iE 'chatAnthropic|HTTPBackend|NewHTTPBackend'
+# (must return 0 results)
+```
+
+### Run tests
+
+```bash
+go test -count=1 ./...                              # Full: 31 packages
+go test -count=1 -tags light_only ./...           # Light: 29 packages
 ```
 
 ---
 
-## Other commands
+## Commands
 
-### Context & Boot
+### Light
+
+| Command                          | What it does                                                  |
+|----------------------------------|---------------------------------------------------------------|
+| `radiant setup-mcp`              | Auto-detect agent + write MCP config (11 agents supported).   |
+| `radiant setup-mcp --agent=claude|cursor|...` | Target a single agent.                         |
+| `radiant setup-mcp --global`     | Write to `~/.claude/settings.json` etc. instead of project-level. |
+| `radiant mcp serve`              | Start MCP server on stdio (sampling).                        |
+| `radiant host-info`              | Print detected host agent + confidence.                       |
+| `radiant host-info --json`       | Machine-readable version.                                    |
+| `radiant host-info --verbose`    | Show all matched env vars.                                    |
+| `radiant --version`              | Prints `3.0.0-light`.                                         |
+
+### Full (everything from Light, plus)
+
+The Full binary registers every subcommand the harness has ever
+shipped. The most-used ones:
+
 ```bash
-radiant boot                              # ≤500-token manifest + AGENT PROTOCOL
-radiant boot --world-model               # + compact ontology
-radiant context detect [--json]
-radiant context assemble [--budget=N]
-radiant context compress --budget=2000
+radiant init .                       # scaffold a project (CONTEXT.md, AGENTS.md)
+radiant spec "ship X"               # start a feature (spec.md + tasks.md)
+radiant loop start "fix the auth"   # autonomous feedback loop
+radiant run "add tests"              # one-shot full run with trace export
+radiant fleet start ...             # multi-agent parallel work
+radiant audit                       # project conformity check
+radiant evals                        # AC→test coverage report
+radiant release 0.4.0                # 7-step release pipeline
+radiant doctor                      # diagnose radiant environment
 ```
 
-### Diagnostics
-```bash
-radiant doctor                            # API key, git, model, worktrees
-```
-
-### Webhooks
-```bash
-radiant loop start "<goal>" --webhook-url=https://...
-# fires: loop.done / loop.failed / fleet.task.done / fleet.done
-```
-
-### Worktrees
-```bash
-radiant worktree add <name>
-radiant worktree list
-radiant worktree remove <path>
-radiant worktree prune
-```
-
-### Agent views (native files per IDE)
-```bash
-radiant views --agent=claude     # .claude/settings.json + skills
-radiant views --agent=cursor     # .cursor/rules/*.mdc
-radiant views --agent=copilot    # .github/copilot-instructions.md
-radiant views --agent=gemini     # GEMINI.md
-radiant views --agent=windsurf   # .windsurfrules
-radiant views --agent=codex      # AGENTS.md
-radiant views --agent=all --force
-```
-
-### Classic SDD workflow
-```bash
-radiant init . --all --yes
-radiant product "..."
-radiant spec "..."
-radiant run specs/0001-<slug>
-radiant validate specs/0001-<slug> --gates
-radiant audit
-radiant release v0.1.0
-```
+Plus: `adr`, `camada-agentica`, `bench`, `causal-estimate`, `config`,
+`context`, `diagramar`, `drift`, `evaluate`, `harness`, `host-info`,
+`mcp-serve`, `pricing`, `product`, `release-pr`, `review-pr`,
+`scaffold-*`, `security`, `semantic`, `session`, `setup-mcp`,
+`skills`, `spec`, `telemetry`, `tools`, `worktree`, ... — see
+`radiant --help`.
 
 ---
 
-## Architecture
+## How `setup-mcp` works
 
-```
-cmd/radiant/          ← CLI entrypoint (cobra) + MCP server
-internal/loop/        ← Loop Engine: cycle, budget, verifier, tracer, PID, JSONL log
-internal/fleet/       ← Fleet Engine: planner, dispatcher, store, E2E tests
-internal/context/     ← Context Engine: domain detect, skill selector
-internal/config/      ← .radiant.yaml project config
-internal/webhook/     ← fire-and-forget HTTP POST webhooks
-internal/slog/        ← structured JSONL logger
-internal/boot/        ← boot manifest + AGENT PROTOCOL renderer
-internal/ontology/    ← world model (domains, axioms)
-internal/worktree/    ← git worktree isolation
-internal/scaffold/    ← native agent view generation
-internal/llm/         ← OpenAI / Anthropic / OpenRouter clients
-internal/skill/       ← skill schema + bundle (60 skills, go:embed)
-internal/engine/      ← SDD execution engine
-internal/harness/     ← quality gates + policy enforcement
-internal/spec/        ← spec + task + ADR parsing
-```
+`radiant setup-mcp` writes the MCP config file your agent reads.
+It supports 11 agents:
 
-Single binary, no external runtime dependencies. Skills embedded via `//go:embed`.
+| Agent         | Config file (project)              | Format      |
+|---------------|-------------------------------------|-------------|
+| Claude Code   | `.mcp.json`                         | JSON-std    |
+| Cursor        | `.cursor/mcp.json`                  | JSON-std    |
+| Windsurf      | `.windsurf/mcp.json`                | JSON-std    |
+| Zed           | `.zed/settings.json`                | JSON-std    |
+| VS Code       | `.vscode/mcp.json`                  | JSON-std    |
+| Codex (OpenAI)| `.codex/config.toml`                | TOML        |
+| OpenCode      | `.opencode/config.json`             | JSON-nested |
+| Hermes        | `.hermes/config.yaml`               | YAML        |
+| Kimi CLI      | `~/.kimi/mcp.json` (global)         | JSON-std    |
+| OpenClaw      | `.openclaw/openclaw.json`           | JSON-nested |
+| Cline         | `~/.cline/mcp.json` (global)         | JSON-std    |
+
+Auto-detect runs from the current working directory's markers
+(`.claude/`, `.codex/`, `.hermes/`, etc.). Global fallback flags
+(`~/.kimi`, `~/.cline`) cover CLI-only tools.
+
+See [`docs/LIGHT-VS-FULL.md`](docs/LIGHT-VS-FULL.md) for the full
+detection rules.
 
 ---
 
-## Skills (60 bundled)
+## How `mcp serve` works
 
-Lazy-loaded — only 3–10 loaded per session based on domain detection.
+`radiant mcp serve` is the MCP server entry point. Read
+[`docs/MODES.md`](docs/MODES.md) for the Light/Full rationale.
 
-**Core:** `nova-feature`, `nova-product`, `kickoff`, `clarificar`  
-**Quality:** `validar`, `auditar`, `metricas`, `evals`, `revisar-pr`  
-**Architecture:** `adr`, `diagramar`, `mapear`, `camada-agentica`, `handoff`, `roadmap`  
-**Finance & Risk:** `finance`, `credit-risk`, `market-risk`, `liquidity-risk`, `operational-risk`, `model-risk`, `stress-test`, `regulatory`, `actuarial`, `accounting`, `controlling`, `valuation`, `aml-kyc`, `fraud-detection`, `capital-markets`  
-**ML & Data:** `ml`, `deep-learning`, `reinforcement-learning`, `causal`, `bayesian`, `stats`, `econometrics`, `synthetic-data`, `data`  
-**Engineering:** `api`, `cli`, `security`, `setup-ci`, `integracoes`, `update`, `incident`  
-**Domain:** `frontend`, `mobile`, `iot`, `game`, `blockchain`, `marketing`  
-**Science:** `biology`, `chemistry`, `physics`, `quantum-physics`, `quantum-ml`
+Wire into your agent with `setup-mcp`, then restart the agent.
+Any tool call from the agent that hits `radiant_run` will:
+
+1. Be sent to the harness via JSON-RPC 2.0 over stdio.
+2. The harness executes `loop.Run(goal)`.
+3. **Light:** every LLM call is `sampling/createMessage` back to
+   the host agent (no API key required).
+4. **Full:** every LLM call is a direct HTTP call to the configured
+   provider (API key required).
+5. The harness returns the trace as the tool result.
+
+The full trace lives at `.radiant-harness/traces/<run-id>.jsonl`
+once the run finishes.
+
+---
+
+## Auto-detected host agents
+
+Use `radiant host-info` to see which agent is currently driving
+the harness (whether the agent's MCP server is running or not).
+Detection works in 3 layers:
+
+1. **Env-var fingerprint** (high confidence).
+2. **`/proc/<ppid>/comm` walk** (medium confidence).
+3. **PID trace** (low confidence; future).
+
+See [`docs/HOST-AGENTS.md`](docs/HOST-AGENTS.md) for the matrix of
+which env vars and binaries each agent uses, and how to add a new
+agent.
+
+Supported today:
+
+- Claude Code (`CLAUDE_CODE_*`)
+- Cursor (`CURSOR_*`)
+- Hermes (`HERMES_*`)
+- Kimi CLI (`KIMI_*`)
+- OpenClaw (`OPENCLAW_*`)
+- Codex (`CODEX_*`)
+- Cline (`CLINE_*`)
+- OpenCode (`OPENCODE_*`)
+- VS Code Copilot (`VSCODE_*`)
+
+Adding a new agent is a 5-line edit in `internal/hostdetect/hostdetect.go`.
 
 ---
 
 ## Documentation
 
-| Doc | What it covers |
-|-----|----------------|
-| [`AGENTS.md`](AGENTS.md) | Full agent onboarding — commands, profiles, rules |
-| [`CLAUDE.md`](CLAUDE.md) | Claude Code specific instructions |
-| [`docs/AGENT-SYSTEM-PROMPT.md`](docs/AGENT-SYSTEM-PROMPT.md) | System prompt template for external agents (Hermes, mimo, etc.) |
-| [`docs/LOOP-ENGINE.md`](docs/LOOP-ENGINE.md) | Loop state machine, exit conditions |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full architecture deep-dive |
-| [`CHANGELOG.md`](CHANGELOG.md) | Version history |
+| Doc                                     | What's in it                                |
+|-----------------------------------------|---------------------------------------------|
+| [docs/LIGHT-VS-FULL.md](docs/LIGHT-VS-FULL.md) | Build-tag split, publishing flow, verification |
+| [docs/HOST-AGENTS.md](docs/HOST-AGENTS.md)     | Auto-detection matrix (9 agents)            |
+| [docs/MODES.md](docs/MODES.md)                 | Light vs Full behaviour                     |
+| [CHANGELOG.md](CHANGELOG.md)                   | Version history                             |
+| [RELEASE-NOTES.md](RELEASE-NOTES.md)           | Per-release notes (Light + Full)            |
+| [INSTALL.md](INSTALL.md)                       | Install instructions                        |
+| [EXAMPLES.md](EXAMPLES.md)                     | Worked examples                             |
+| [AGENTS.md](AGENTS.md)                         | Agent guidance / project memory             |
+| [CLAUDE.md](CLAUDE.md)                         | Claude-specific guidance                    |
+| [docs/SPRINT*.md](docs/SPRINT*.md)             | Per-sprint design docs                      |
+
+---
+
+## Versioning & release
+
+`radiant-harness` follows [semver](https://semver.org/). Each
+release ships both the Light and Full artifacts built from the
+same source tag.
+
+- **Major**: breaking changes to MCP wire protocol or command
+  surface.
+- **Minor**: new agents in `setup-mcp`, new commands.
+- **Patch**: bug fixes, refactors, no API change.
+
+Releases cut from `main` via `.goreleaser.yml`. Tags of the form
+`vX.Y.Z` mark Full releases; `vX.Y.Z-light` is informational only
+(Light is built from the same tag with `-tags light_only`).
+
+Latest: **v3.0.0** (Full) and **v3.0.0-light** (Light) — first
+public release of the dual-binary form.
+
+---
+
+## Contributing
+
+Issues, PRs, and forks welcome.
+
+For new agents in `setup-mcp`: edit `cmd_setup_mcp_per_agent.go`
+and add a `case "agent-name":` block.
+For new host-detect signatures: edit `internal/hostdetect/hostdetect.go`.
 
 ---
 
