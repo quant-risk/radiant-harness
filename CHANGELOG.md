@@ -4,6 +4,136 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.0] — 2026-06-29 — Light/Full modes, Semantic Model, Lazy-Executor
+
+The "make it closed" release. Three things the harness was missing are
+now first-class: the two-mode abstraction (Light/Full), the semantic
+model (credit-risk with CMN 4.966 / IFRS 9 / Basileia), and the
+lazy-executor skill (ported from the ponytail ladder).
+
+### Added — Mode abstraction (`internal/mode/`)
+- New `internal/mode/` package with `Mode` enum (`light`, `full`, `auto`).
+- `Resolve(flag, projectDir, configMode)` — full resolution chain:
+  `--mode` flag > `RADIANT_MODE` env > `.radiant.yaml` > auto-detect.
+- `Detect(projectDir)` — auto-detects via MCP config presence
+  (`~/.claude/settings.json`, `.cursor/mcp.json`, etc.) or LLM API key
+  in env.
+- 11 unit tests covering all paths.
+
+### Added — CLI: `radiant mode` (`cmd/radiant/cmd_mode.go`)
+- `radiant mode show` — display resolved mode and where it came from.
+- `radiant mode set light|full` — persist default in `.radiant.yaml`.
+- `--mode=light|full|auto` flag on `radiant loop start` and `radiant fleet start`.
+- `radiant doctor` now reports the active mode and validates key requirements.
+
+### Added — Pricing catalog (`internal/pricing/`)
+- New `internal/pricing/` package consolidates the three duplicated
+  model-rate tables (`PresetModels`, `PricePerMTokensUSD`,
+  `providerPricing`) into a single YAML source of truth.
+- `data/pricing.yaml` — embedded via `//go:embed`. 25 curated presets
+  across 12 vendors, with input/output rates, max tokens, and
+  `verified_at` date.
+- `Catalog.Get/List/Stale/EstimateCost` — thread-safe accessor.
+- 9 unit tests covering known presets, case-insensitive lookup,
+  cost estimation, sort order, staleness, source tracking.
+- `radiant pricing list|stale|refresh` CLI commands.
+
+### Added — Semantic model (`internal/semantic/`)
+- New `internal/semantic/` package — the "what it means here" layer
+  that fixes the drift problem described in the
+  Ontology-vs-Semantic-Model post.
+- `Model`, `Metric`, `Scope`, `Expression` types; normalize, Resolve,
+  Search, RenderMarkdown, RenderMarkdownCompact methods.
+- `Loader` with `//go:embed all:metrics` — same pattern as
+  `internal/skill/bundle.go`. User-level overrides via
+  `<root>/metrics/<domain>.yaml` when desired.
+- `normalizeWithCase` splits camelCase so `ExpectedLoss` →
+  `expected_loss`.
+- 11 unit tests covering normalize, Resolve, Search, RenderMarkdown,
+  loader caching.
+
+### Added — Domain: credit-risk (`internal/semantic/metrics/credit-risk.yaml`)
+- 7 metrics: `PD`, `LGD`, `EAD`, `RWA`, `ExpectedLoss`,
+  `provision_min_ifrs9`, `capital_required`.
+- Each carries description, formula (with cross-references via
+  `{metric_name}` and `{scope.field}` syntax), scopes (segment × rating),
+  and regulation reference (CMN 4.966 §X.X, IFRS 9 §X.X, Basileia).
+- This is the layer Fortvna needs for IFRS 9 / Basileia / CMN 4.966
+  work — the LLM resolves "RWA for Corporate" against curated math
+  instead of inventing a number.
+
+### Added — CLI: `radiant semantic` (`cmd/radiant/cmd_semantic.go`)
+- `radiant semantic list` — show all available domains.
+- `radiant semantic show <domain>` — full markdown of one domain.
+- `radiant semantic resolve <domain> <metric>` — formula + regulation.
+- `radiant semantic search <domain> <query>` — fuzzy search.
+
+### Added — Loop runner integration (`internal/loop/runner.go`)
+- `assembleSemanticBlock(projectDir)` — detects the project domain
+  and loads the matching semantic model; fails open if no YAML exists.
+- `executorSystemPromptWithIntensity()` now takes a `semanticBlock` and
+  injects it between the lazy-executor skill and the project context.
+- Result: in projects detected as `credit-risk`, every executor
+  iteration gets the full PD/LGD/EAD/RWA formulas with regulation
+  references automatically — no prompt engineering required.
+
+### Added — Lazy-executor skill (`internal/skill/skills/lazy-executor/`)
+- New skill porting the [ponytail ladder](https://github.com/DietrichGebert/ponytail)
+  in PT-BR, adapted to the radiant context where the verifier
+  already cuts code that doesn't satisfy ACs.
+- `SKILL.md` covers the 7-rung ladder, decision tree, workflow,
+  examples, anti-patterns, failure modes, related skills — all required
+  by schema rule 10.
+- `frontmatter.yaml` schema-compliant (tier_eligible, version, license).
+- Embedded via existing `bundle.go` `//go:embed` machinery.
+
+### Added — Intensity filter (`internal/skill/intensity.go`)
+- 4 levels: `lite`, `full` (default), `ultra`, `off`.
+- `FilterForIntensity()` strips table rows and bullet examples whose
+  label doesn't match the active intensity — mirrors ponytail's
+  `filterSkillBodyForMode`.
+- Preserves all non-labeled prose (rules, workflow, anti-patterns).
+- 10 unit tests covering all intensity paths.
+
+### Added — CLI: `--intensity` flag (`cmd/radiant/cmd_loop.go`)
+- `--intensity=lite|full|ultra|off` on `radiant loop start`.
+- Default: `full` (skill always injected unless explicitly off).
+
+### Security — `pathIsSafe` symlink fix (`internal/engine/engine.go`)
+- Original implementation did only lexical comparison — paths like
+  `evil/target.txt` passed the check even when `evil` was a symlink
+  pointing outside the project.
+- New strategy: resolve both sides to realpaths. For the candidate,
+  walk up to the longest existing prefix and resolve that — so a
+  proposed new file under a symlinked parent still gets caught.
+- `resolveLongestExistingPrefix()` walks up until something exists.
+- `fileExists()` helper for clarity.
+- 3 new tests: `TestPathIsSafe_SymlinkEscape`,
+  `TestPathIsSafe_SymlinkedProjectRoot`, plus existing
+  `TestPathIsSafe` still passes.
+
+### Documentation
+- `docs/MODES.md` — full operator guide: decision tree, architecture
+  diagrams per mode, resolution rules, pricing implications,
+  capability matrix, when-to-use-each guidance.
+- `docs/IMPLEMENTATION-PLAN.md` — roadmap for v2.37.0 (the plan
+  this release executed).
+- README updated with Choose-Your-Mode section, mode/pricing/semantic
+  command reference, lazy-executor skill mention, semantic-model
+  auto-injection explanation.
+- `.radiant-harness/` and `radiant` (root binary) added to `.gitignore`.
+
+### Stats
+- 8 commits on branch `feature/light-full-release`.
+- 4 new packages: `internal/mode/`, `internal/pricing/`, `internal/semantic/`, plus
+  extensions to `internal/skill/`, `internal/engine/`, `internal/loop/`.
+- 4 new CLI subcommands: `mode`, `pricing`, `semantic`, plus `--intensity`.
+- 1 new skill: `lazy-executor`.
+- 7 new metrics in `credit-risk.yaml`.
+- ~50 new tests. All 25 packages green. `go vet` clean.
+
+---
+
 ## [2.36.0] — 2026-06-28 — Dual-mode MCP backend: HTTP + MCP Sampling
 
 ### Added — `internal/llm/backend.go`

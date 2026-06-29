@@ -4,9 +4,10 @@
 > Shipped as a single binary — works with Claude Code, Cursor, Codex, Copilot, Gemini CLI, Windsurf, Hermes, and any MCP-compatible agent.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.36.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-22_packages_green-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.37.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-25_packages_green-brightgreen.svg)](CHANGELOG.md)
 [![MCP](https://img.shields.io/badge/MCP-radiant__run-purple.svg)](AGENTS.md)
+[![Modes](https://img.shields.io/badge/modes-light%20%7C%20full-blueviolet.svg)](docs/MODES.md)
 
 ---
 
@@ -21,9 +22,33 @@
 | **Loop Engine** | Crash-safe `Discover→Plan→Execute→Verify→Persist` cycle. Verifier is always a separate LLM call. |
 | **Fleet Engine** | Parallel multi-agent dispatch with conflict-safe shared state, concurrency cap, and auto-retry. |
 | **Context Engine** | Detects project domain and lazy-loads 3–10 relevant skills (~300 tokens vs 55K for all 60). |
+| **Semantic Model** | Curated "what it means here" layer — PD/LGD/EAD/RWA for credit-risk, with regulation references (CMN 4.966, IFRS 9, Basileia). |
 | **MCP Server** | Exposes the full harness as MCP tools — any MCP-compatible agent calls `radiant_run` and gets results back. |
 
 Works with any OpenAI-compatible API (Claude, GPT-4o, Gemini, Mistral, OpenRouter, local models).
+
+---
+
+## Choose your mode
+
+`radiant` runs in one of two modes. Pick the one that matches how you want inference to happen:
+
+| Mode | Who provides the LLM | When to use |
+|------|---------------------|-------------|
+| **Light** | Your host agent (Claude Code, Hermes, Cursor, ...) via MCP sampling | You're already paying for an agent. Zero new credentials. |
+| **Full**  | The harness, via direct HTTP to OpenRouter / OpenAI / Anthropic / Groq / Mistral / xAI / custom | CI, cron, batch, or any case where you don't have an agent session. |
+
+```bash
+# Light: harness possesses the agent
+radiant setup-mcp --agent=claude   # one-time
+# inside your agent: "use radiant-harness to: add input validation"
+
+# Full: autonomous, no agent
+export OPENROUTER_API_KEY=sk-...
+radiant loop start "add input validation to /api/users" --profile=standard
+```
+
+`radiant mode show` reports the active mode and where it was resolved from. See [`docs/MODES.md`](docs/MODES.md) for the full guide.
 
 ---
 
@@ -224,7 +249,48 @@ webhook_url: ""
 fleet_concurrency: 4
 fleet_max_retries: 2
 auto_route: true
+mode: full                # light | full | auto (default: auto-detect)
+intensity: full           # executor intensity for lazy-executor skill
 ```
+
+---
+
+## Mode, Pricing, and Semantic Commands
+
+```bash
+# Mode (Light/Full)
+radiant mode show                       # show resolved mode + source
+radiant mode set light                  # persist in .radiant.yaml
+radiant mode set full
+
+# Pricing
+radiant pricing list                    # tabulated model rates
+radiant pricing stale                   # warn if rates > 90 days old
+radiant pricing refresh                 # instructions to update rates
+
+# Semantic model (credit-risk, market-risk, ...)
+radiant semantic list                   # available domains
+radiant semantic show credit-risk       # full markdown of one domain
+radiant semantic resolve credit-risk RWA     # formula + regulation
+radiant semantic search credit-risk basileia # fuzzy search
+```
+
+## Lazy-executor skill
+
+The harness ships a `lazy-executor` skill (ported from the
+[ponytail ladder](https://github.com/DietrichGebert/ponytail)) that
+biases the executor toward the minimum code that works. Three
+intensities, default `full`:
+
+```bash
+radiant loop start "..." --intensity=lite   # build what was asked, suggest lazy alt
+radiant loop start "..." --intensity=full   # ladder enforced (default)
+radiant loop start "..." --intensity=ultra  # YAGNI extremist
+```
+
+In projects detected as `credit-risk`, the loop runner also
+auto-injects the semantic model (PD, LGD, EAD, RWA, IFRS 9
+provisioning formulas) into the executor system prompt.
 
 ---
 

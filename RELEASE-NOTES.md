@@ -1,3 +1,108 @@
+# Release Notes — v2.37.0 (Light/Full + Semantic + Lazy-Executor)
+
+> "Make it closed" — the release that turns radiant-harness from a
+> working prototype into a complete, vendable product.
+
+## Headlines
+
+### 1. Two operating modes (Light / Full)
+
+The harness can now be deployed two ways. The choice is a runtime
+decision, not a build-time one — same binary, same loop engine, same
+state machine, same verifier. What differs is who pays for the tokens.
+
+| Mode | Inference path | Setup |
+|------|---------------|-------|
+| **Light** | Harness calls MCP `sampling/createMessage` on the host agent | `radiant setup-mcp --agent=claude` |
+| **Full**  | Harness calls LLM HTTP endpoints directly | `export OPENROUTER_API_KEY=…` |
+
+`radiant mode show` reports the resolved mode and the source (flag,
+env, config, auto-detect). Auto-detect: presence of MCP config →
+Light; presence of API key → Full; default → Light (safe).
+
+### 2. Semantic model layer (credit-risk domain)
+
+The "what it means here" layer that fixes the failure mode described
+in the post that inspired this release: "instructions scale poorly,
+context drifts, answers go wrong".
+
+`internal/semantic/metrics/credit-risk.yaml` ships 7 metrics with
+formulas, scopes, and regulation references:
+
+- **PD** (Probability of Default) — CMN 4.966 §4.2.1
+- **LGD** (Loss Given Default) — CMN 4.966 §4.2.3
+- **EAD** (Exposure at Default) — CMN 4.966 §4.2.2
+- **RWA** (Risk-Weighted Assets) — CMN 4.966 §4.2.1.4
+- **ExpectedLoss** — IFRS 9 §5.5
+- **provision_min_ifrs9** — CMN 4.966 §4.4
+- **capital_required** — CMN 4.966 §4.1.1
+
+The loop runner auto-detects the project domain and injects the
+matching model's full markdown into the executor system prompt.
+`radiant semantic resolve credit-risk RWA` returns the formula and
+regulation inline.
+
+### 3. Lazy-executor skill
+
+Port of the [ponytail ladder](https://github.com/DietrichGebert/ponytail)
+in PT-BR, adapted to the radiant context where the verifier already
+cuts code that doesn't satisfy ACs. Three intensities:
+
+- `lite` — build what was asked, suggest lazy alt in one line
+- `full` — ladder enforced (default)
+- `ultra` — YAGNI extremist, challenge the request itself
+
+`--intensity=lite|full|ultra` on `radiant loop start`. Default `full`
+so the skill is always injected unless explicitly off.
+
+## Other changes
+
+- **Pricing catalog** — `internal/pricing/data/pricing.yaml` consolidates
+  the three duplicated rate tables. `radiant pricing list|stale|refresh`.
+- **pathIsSafe security fix** — resolves symlinks before the boundary
+  check. A symlink inside the project pointing outside is now rejected
+  (was a TOCTOU hole that a confused or hostile LLM could exploit).
+- **Documentation** — `docs/MODES.md` (full operator guide),
+  `docs/IMPLEMENTATION-PLAN.md` (the plan this release executed),
+  README updated, CHANGELOG with full diff.
+
+## Stats
+
+- 8 commits on branch `feature/light-full-release`.
+- 4 new packages: `internal/mode/`, `internal/pricing/`,
+  `internal/semantic/`, plus extensions to `internal/skill/`,
+  `internal/engine/`, `internal/loop/`.
+- 4 new CLI subcommands: `mode`, `pricing`, `semantic`,
+  plus `--intensity` flag.
+- 1 new skill: `lazy-executor`.
+- 7 new metrics in `credit-risk.yaml`.
+- ~50 new tests. All 25 packages green. `go vet` clean.
+
+## Compatibility
+
+- No breaking changes. `--mode` and `--intensity` default to auto/safe
+  values when not specified. `radiant mode show` and `radiant pricing
+  list` are pure read commands.
+- Existing `.radiant.yaml` files keep working — `mode:` and `intensity:`
+  are optional fields with sensible defaults.
+- Embed-based semantic YAML is read-only at runtime; user overrides
+  go in `<projectDir>/metrics/<domain>.yaml` and win over embedded.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.37.0
+# or:
+git pull
+make build
+./bin/radiant --version   # should report 2.37.0
+./bin/radiant doctor      # new mode check, new pricing freshness check
+./bin/radiant mode show   # see your active mode
+./bin/radiant pricing list # see the new canonical rates table
+```
+
+---
+
 # Release Notes — 0.2.0 (Go rewrite)
 
 > Vendor-neutral, multi-platform, multi-LLM. No agent is privileged.
