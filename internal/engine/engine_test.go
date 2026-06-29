@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -139,6 +141,49 @@ func TestPathIsSafe(t *testing.T) {
 		if got := pathIsSafe(dir, c.candidate); got != c.safe {
 			t.Errorf("pathIsSafe(%q, %q) = %v, want %v", dir, c.candidate, got, c.safe)
 		}
+	}
+}
+
+// TestPathIsSafe_SymlinkEscape verifies that a symlink inside the project
+// pointing outside the project is rejected. Without symlink resolution,
+// "../../etc/passwd" passes the textual check as long as the literal path
+// doesn't traverse — but a symlink renders that bypass obsolete.
+func TestPathIsSafe_SymlinkEscape(t *testing.T) {
+	project := t.TempDir()
+	outside := t.TempDir()
+
+	// Create a symlink inside project that targets outside.
+	linkPath := filepath.Join(project, "evil")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	// Writing through the symlink should be rejected even though the
+	// textual path "evil/target.txt" stays inside the project.
+	if pathIsSafe(project, "evil/target.txt") {
+		t.Errorf("pathIsSafe should reject writes through symlink that escapes project")
+	}
+
+	// Sanity: a normal in-project path still passes.
+	if !pathIsSafe(project, "src/main.go") {
+		t.Errorf("pathIsSafe should accept a normal in-project path")
+	}
+}
+
+// TestPathIsSafe_SymlinkedProjectRoot verifies that when the project root
+// itself is a symlink, the comparison happens on real paths.
+func TestPathIsSafe_SymlinkedProjectRoot(t *testing.T) {
+	realProject := t.TempDir()
+	linkDir := t.TempDir()
+	symlinkProject := filepath.Join(linkDir, "project-link")
+	if err := os.Symlink(realProject, symlinkProject); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// A path that's in the real project should be accepted when we
+	// pass the symlinked project root as projectDir.
+	if !pathIsSafe(symlinkProject, "src/main.go") {
+		t.Errorf("pathIsSafe should accept path under real root when given symlinked root")
 	}
 }
 
