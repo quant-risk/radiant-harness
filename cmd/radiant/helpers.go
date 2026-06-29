@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 import (
@@ -24,6 +26,12 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/quant-risk/radiant-harness/internal/skill"
 )
+
+func init() {
+	loop.SetHTTPBackendBuilder(func(m llm.Model) llm.Backend {
+		return llm.NewHTTPBackend(m)
+	})
+}
 
 func resolveAgents(flag string, yes bool) []radiant.AgentID {
 	if flag == "all" {

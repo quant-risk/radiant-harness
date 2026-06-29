@@ -1,3 +1,5 @@
+//go:build !light_only
+
 // Package main — ci.go: CI workflow generation for GitHub Actions,
 // GitLab CI, and CircleCI. Used by `radiant setup-ci`.
 //

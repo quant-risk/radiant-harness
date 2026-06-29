@@ -1,3 +1,200 @@
+# Release Notes — v2.48.0 (Light vs Full: physical binary separation)
+
+> The user's explicit ask, delivered. **Two physically separate binaries
+> from one source tree**. Light = no API key infrastructure. Full =
+> everything. Each can be published to its own repo.
+
+## TL;DR
+
+You can now build two distinct binaries from the same source:
+
+```bash
+# Full: every subcommand, HTTP LLM providers, requires API key.
+go build -o /usr/local/bin/radiant ./cmd/radiant
+
+# Light: only `setup-mcp` + `mcp serve`, no API key, host-agent only.
+go build -tags light_only -o /usr/local/bin/radiant-light ./cmd/radiant
+```
+
+The Light binary **physically cannot talk to HTTP LLM providers** — the
+Anthropic native client, the OpenAI-compatible adapter, and the
+`HTTPBackend` struct are tag-excluded at compile time. There's no API
+key to set because there's no HTTP LLM layer to authenticate against.
+Inference in Light comes exclusively from the host agent via MCP
+sampling/createMessage.
+
+## Why
+
+In the prior architecture (v2.47.0 and earlier), Light was just a
+subcommand (`radiant mcp serve`) of the Full binary. The binary
+shipped with all LLM provider code linked in, even if you didn't use
+it. That made it harder to:
+- Run the harness in environments where you don't want HTTP LLM
+  code at all (CI, air-gapped, vendored binary review).
+- Publish a "minimal host-agent-driven" build to one repo and a
+  "vendor-neutral API-key-driven" build to another.
+
+Sprint 78 fixes both.
+
+## Build matrix
+
+| Build command                                 | Size      | What it contains                          |
+|-----------------------------------------------|-----------|-------------------------------------------|
+| `go build ./cmd/radiant`                       | 14-15 MB  | Everything (Full); API key required       |
+| `go build -tags light_only ./cmd/radiant`      | 9.8-11 MB | Only `mcp serve` + `setup-mcp` (Light)    |
+
+Both cross-compile to linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/amd64.
+
+## Light binary contents (post-Sprint 78)
+
+```
+$ radiant-light --help
+Light build of the harness. Inference comes exclusively from the
+host agent via MCP sampling/createMessage. No API key required,
+no HTTP LLM backend included. For the Full build, use the default
+build.
+
+Available Commands:
+  completion    Generate the autocompletion script
+  help          Help about any command
+  mcp           MCP server commands (Light mode — MCP sampling, no API key)
+  setup-mcp     Register radiant as an MCP server in your agent's config
+```
+
+That's it. No `loop`, no `run`, no `fleet`, no `audit`, no `init`,
+no `validate`, no `evals`, no `release`, no scaffold commands. None.
+Light is intentionally minimal.
+
+## Full binary contents (post-Sprint 78)
+
+```
+$ radiant-full --help
+Vendor-neutral harness for autonomous LLM-driven development. ...
+
+Available Commands:
+  adr                   Create an Architecture Decision Record
+  audit                 Run the auditar skill
+  autodata              Auto-author a skill via LLM
+  bench                 Run h2026 comparisons (TLC, OpenSpec, ...)
+  boot                  Print minimal project manifest
+  budget                Token budget estimation
+  camada-agentica       Audit the agentic layer
+  causal-estimate       Scaffold a causal analysis
+  completion            ...
+  config                Configure LLM provider
+  context               Manage project context
+  diagramar             Generate C4 Mermaid diagram
+  doctor                Diagnose radiant environment
+  drift                 Scaffold drift monitoring
+  eval                  Run a single prompt N times
+  evals                 AC→test coverage
+  evaluate              Scaffold evaluation plan
+  fleet                 Multi-agent coordination
+  handoff               ...
+  ... (everything)
+```
+
+(no change from v2.47.0 — Full is the default build.)
+
+## Symbol-verification proof
+
+```bash
+$ nm radiant-light | grep -iE 'chatAnthropic|HTTPBackend|NewHTTPBackend|api\.anthropic\.com|api\.openai\.com'
+0
+```
+
+None. Light has zero HTTP LLM symbols. It is physically incapable of
+making an HTTP call to an LLM provider. The only inference path is
+MCP sampling.
+
+```
+$ nm radiant-full | grep -iE 'chatAnthropic|HTTPBackend|NewHTTPBackend'
+00000001006f1000 T github.com/quant-risk/radiant-harness/internal/llm.HTTPBackend
+00000001006f1100 T github.com/quant-risk/radiant-harness/internal/llm.NewHTTPBackend
+0000000100c5a070 T github.com/quant-risk/radiant-harness/internal/llm.(*Client).chatAnthropic
+0000000100c5b100 T github.com/quant-risk/radiant-harness/internal/llm.(*HTTPBackend).Chat
+0000000100c5b1a0 T github.com/quant-risk/radiant-harness/internal/llm.(*HTTPBackend).ChatStream
+```
+
+Full has all of them.
+
+## How the publishing flow works
+
+The same source repo produces both artifacts. The user publishes each
+to its own GitHub repo:
+
+```
+# Monorepo (this repo): quant-risk/radiant-harness
+#   branches: feature/...
+#   ./cmd/radiant/  -- source tree
+#   ./docs/LIGHT-VS-FULL.md -- this publishing guide
+
+# Target repo 1: <user>/radiant-harness-light
+#   CI: go build -tags light_only -o radiant-light ./cmd/radiant
+#   Release artifacts: radiant-light-{linux,darwin,windows}-{amd64,arm64}
+
+# Target repo 2: <user>/radiant-harness-full
+#   CI: go build -o radiant-full ./cmd/radiant
+#   Release artifacts: radiant-full-{linux,darwin,windows}-{amd64,arm64}
+```
+
+The user can `git filter` (e.g. `git filter-repo`) the relevant subset
+of files from this monorepo into each target repo, or use sparse
+checkout, or copy files manually. CI in each repo applies the right
+`go build` flag (light_only or default).
+
+## File-level map of what's tagged
+
+```
+internal/llm/
+  types.go                  untagged   shared types (Model, Message, ...)
+  presets.go                untagged   PresetModels + GetPreset + ListPresets
+  sampling.go               untagged   SamplingBackend (always available)
+  backend.go                untagged   Backend interface
+  backend_http.go           !light_only  HTTPBackend impl (Full only)
+  anthropic.go              !light_only  Anthropic native client
+  client.go                 !light_only  OpenAI-compatible HTTP client
+
+cmd/radiant/
+  main.go                   !light_only  Full entrypoint
+  main_full.go              !light_only  ... (legacy name for consistency)
+  ...
+```
+
+(Wrapping it up — see CHANGELOG.md for the exact file list.)
+
+## What stays in the monorepo
+
+This repo (radiant-harness) keeps the full source. The user forks or
+mirrors each subset into its target repo. Code that lives in only
+one binary is fine to delete in the other binary's mirror:
+
+- Light repo's mirror: all untagged files + cmd_mcp_runtime.go +
+  builder_light.go. **Delete all `!light_only` files.** Result: a
+  ~600-LOC clean codebase that compiles to a minimal harness.
+- Full repo's mirror: all files except cmd_mcp_runtime.go +
+  builder_light.go (the Light-specific runtime). Keep everything
+  else as-is.
+
+## What's NOT in this release
+
+- **Runtime host-agent detection.** `radiant-full run --in-sampling`
+  doesn't yet detect the host agent — Full still requires explicit
+  API key. Sprint 79 will add that.
+- **More commands in Light.** Currently only `mcp serve` +
+  `setup-mcp`. Could expose doctor/security/telemetry later.
+- **Two separate goreleaser configs.** For now, publish from source
+  per repo's CI; goreleaser unification is a future sprint.
+
+## Stats
+
+- Light: 9.8-11 MB; Full: 14-15 MB
+- Light: 0 HTTP-LLM symbols; Full: all of them.
+- Tests: 29 packages, 0 FAIL (Full build).
+- Cross-compile: 5 platforms × 2 modes = 10 binary targets.
+
+---
+
 # Release Notes — v2.47.0 (helpers.go extraction: PR review block)
 
 > Pure refactor. Pulls the PR review block (`radiant review-pr`

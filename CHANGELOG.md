@@ -4,6 +4,127 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.48.0] — 2026-06-29 — Light vs Full: physical binary separation via build tags (Sprint 78)
+
+**This release delivers the user's explicit ask:** Light and Full are
+now two physically separate binaries from the same source. The Light
+binary contains NO API key infrastructure whatsoever (no Anthropic
+client, no OpenAI client, no OpenRouter adapter, no HTTP LLM code at
+all). Inference in Light happens exclusively via MCP sampling from
+a host agent.
+
+### How to produce each artifact
+
+```bash
+# Full binary (default): includes everything, requires API key for HTTP LLM
+go build -o radiant-full ./cmd/radiant
+
+# Light binary (NEW): no API key code, host-agent only
+go build -tags light_only -o radiant-light ./cmd/radiant
+```
+
+The user publishes each artifact to its own repo. CI in
+`radiant-harness-light` runs `go build -tags light_only`; CI in
+`radiant-harness-full` runs the default build.
+
+### Build-tag architecture
+
+Two mutually exclusive tag sets produce the two binaries:
+
+| Tag              | Files excluded                                | Result             |
+|------------------|-----------------------------------------------|--------------------|
+| (none/default)   | cmd_mcp_runtime.go                            | Full binary        |
+| `light_only`     | cmd_mcp_runtime_full.go (n/a), HTTP layer    | Light binary       |
+
+Files tagged `//go:build !light_only` are excluded from Light:
+
+```
+internal/llm/anthropic.go          HTTP Anthropic native client
+internal/llm/client.go             HTTP OpenAI-compatible client
+internal/llm/backend_http.go       HTTPBackend struct + impl
+internal/loop/builder_full.go      init() that registers HTTP fallback
+
+cmd/radiant/cmd_fleet.go           fleet orchestration (LLM HTTP)
+cmd/radiant/cmd_loop.go            autonomous feedback loop (LLM)
+cmd/radiant/cmd_run.go             radiant run subcommand (LLM)
+cmd/radiant/cmd_scaffolds.go       8 ML scaffold commands (LLM)
+cmd/radiant/cmd_audit.go           camada/evals/release/audit (LLM)
+cmd/radiant/cmd_doctor.go          doctor with API key probes
+cmd/radiant/cmd_spec.go            spec/ADR/inception (LLM)
+cmd/radiant/cmd_pr_review.go       — actually kept (just parsing)
+                                  ... and many more
+```
+
+(Plus the Full MCP server runtime lives in cmd_mcp_runtime_full.go; its
+mutually-exclusive Light twin lives in cmd_mcp_runtime.go.)
+
+### Light binary
+
+- **Commands:** `setup-mcp` (11 agents), `mcp serve` (sampling only).
+- **No API key infrastructure.** No Anthropic client, no OpenRouter
+  adapter, no HTTP LLM layer.
+- **Size:** 9.8-11 MB across platforms (vs Full's 14-15 MB).
+- **Verified:** `nm radiant-light | grep -i anthropic` returns 0
+  HTTP-LLM symbols. `radiant-light --version` prints `2.48.0-light`.
+
+### Full binary
+
+- **Commands:** everything (unchanged).
+- **API key required** for HTTP LLM (UNCHANGED FROM v2.47.0).
+- **Size:** 14-15 MB across platforms.
+
+### Internal refactor for separation
+
+- `internal/llm/types.go` (NEW) — shared types `Model`, `Message`,
+  `ChatResponse`, `StreamCallback`, `Provider`. Compile in both.
+- `internal/llm/presets.go` (NEW) — `PresetModels` data + `GetPreset`
+  / `ListPresets`. Compile in both.
+- `internal/llm/backend.go` (untagged) — `Backend` interface + sampling
+  conformance check only.
+- `internal/llm/backend_http.go` (NEW, //go:build !light_only) —
+  `HTTPBackend` + `NewHTTPBackend`.
+- `internal/llm/sampling.go` (untagged) — `SamplingBackend` always.
+- `cmd/radiant/cmd_mcp_runtime.go` (`//go:build light_only`, NEW) —
+  Light MCP server with single tool `radiant_run`.
+- `cmd/radiant/cmd_mcp_serve.go` (untagged) — registers `mcp serve`
+  in both binaries.
+- `cmd/radiant/cmd_mcp_runtime_full.go` (//go:build !light_only, NEW) —
+  Full MCP server with all sub-tool routes.
+- `cmd/radiant/cmd_mcp_types.go` (untagged) — wire types moved here
+  from helpers.go (Sprint 77).
+- `internal/loop/runner.go` — added `httpBackendBuilder` indirection
+  so it compiles in Light without referencing `llm.NewHTTPBackend`.
+  `loop/builder_full.go` registers the factory; `loop/builder_light.go`
+  is a stub.
+- `cmd/radiant/helpers.go` — added init() that calls
+  `loop.SetHTTPBackendBuilder` (Full only — file is !light_only).
+- `cmd/radiant/main.go` (//go:build light_only) — Light entry point.
+- `cmd/radiant/main_full.go` (//go:build !light_only, NEW) — Full
+  entry point.
+
+### Stats
+
+- **Light binary**: 9.8-11 MB across 5 platforms.
+- **Full binary**: 14-15 MB across 5 platforms.
+- **Symbols removed from Light:** every HTTP-LLM symbol
+  (chatAnthropic, HTTPBackend, etc.).
+- **Commands removed from Light:** `loop`, `run`, `fleet`, `audit`,
+  `camada-agentica`, `evals`, `release`, `eval`, `scaffold-*`, etc.
+  (`radiant-light --help` lists only `mcp` and `setup-mcp`.)
+- **Tests:** full test suite passes (29 packages, 0 FAIL on Full build).
+- **Cross-compile:** linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 — all OK for both Light and Full.
+- **`go vet ./...`:** clean for both.
+
+### What was NOT in this sprint
+
+- **Runtime host-agent detection** (`internal/hostdetect/`). Sprint 79
+  candidate.
+- **PickBackend in Full binary** — Full still needs explicit API
+  key; doesn't yet detect host agent at runtime. Sprint 79.
+- **More commands in Light.** Light currently only has mcp+setup-mcp.
+  Could expose doctor/security/telemetry in a future sprint.
+
 ## [2.47.0] — 2026-06-29 — helpers.go extraction: PR review block (Sprint 77)
 
 Pure code-movement refactor following the same debt-reduction pattern

@@ -1,3 +1,5 @@
+//go:build !light_only
+
 // Package main — release.go: release workflow.
 //
 // Implements `radiant release <version>` plus all the helpers it needs:

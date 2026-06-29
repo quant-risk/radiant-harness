@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 // PR review worker functions. Extracted from helpers.go in

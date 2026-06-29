@@ -1,3 +1,5 @@
+//go:build !light_only
+
 package main
 
 // ── security posture audit ─────────────────────────────────────────────────
