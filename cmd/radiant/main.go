@@ -30,6 +30,7 @@ func main() {
 	registerSetupMCPCmd(root)
 	registerModeCmd(root)
 	registerPricingCmd(root)
+	registerSemanticCmd(root)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 

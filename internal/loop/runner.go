@@ -17,6 +17,7 @@ import (
 
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/semantic"
 	"github.com/quant-risk/radiant-harness/internal/skill"
 )
 
@@ -197,6 +198,12 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		projectCtxBlock = assembleContextBlock(projectDir, cfg.ContextBudgetTokens)
 	}
 
+	// Inject the semantic model for the detected domain, if any. This is
+	// the "what it means here" layer that fixes the drift problem described
+	// in the Ontology-vs-Semantic-Model post: instructions scale poorly, but
+	// a curated metric YAML does not drift.
+	semanticBlock := assembleSemanticBlock(projectDir)
+
 	// Build stall brake (disabled when patience == 0).
 	var stall *StallBrake
 	if cfg.StallPatience > 0 {
@@ -334,7 +341,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, planOutput, lastReviewFindings)
-		execSys := executorSystemPromptWithIntensity(projectCtxBlock, cfg.Intensity)
+		execSys := executorSystemPromptWithIntensity(projectCtxBlock, cfg.Intensity, semanticBlock)
 		var execOutput string
 		var execErr error
 		if cfg.Stream {
@@ -469,13 +476,14 @@ func estimateTokens(prompt, response string) int {
 // ── System prompts ────────────────────────────────────────────────────────────
 
 func executorSystemPrompt(contextBlock string) string {
-	return executorSystemPromptWithIntensity(contextBlock, "")
+	return executorSystemPromptWithIntensity(contextBlock, "", "")
 }
 
 // executorSystemPromptWithIntensity injects the lazy-executor skill filtered
-// to the requested intensity. Empty intensity defaults to "full" so the
-// skill is always present (only "off" disables it explicitly).
-func executorSystemPromptWithIntensity(contextBlock, intensity string) string {
+// to the requested intensity and the semantic-model block for the project's
+// domain. Empty intensity defaults to "full" so the skill is always present
+// (only "off" disables it explicitly).
+func executorSystemPromptWithIntensity(contextBlock, intensity, semanticBlock string) string {
 	base := `You are an expert software engineer implementing a goal autonomously.
 Read the goal and any prior context carefully.
 Produce a concrete, complete implementation. No stubs, no TODOs, no placeholders.
@@ -499,6 +507,10 @@ Output the result clearly so a separate verifier can assess it.`
 		b.WriteString(intensity)
 		b.WriteString(")\n\n")
 		b.WriteString(lazyBlock)
+	}
+	if semanticBlock != "" {
+		b.WriteString("\n\n")
+		b.WriteString(semanticBlock)
 	}
 	if contextBlock != "" {
 		b.WriteString("\n\n")
@@ -530,6 +542,31 @@ func assembleContextBlock(projectDir string, contextBudgetTokens int) string {
 		return ""
 	}
 	return "## PROJECT CONTEXT\n\n" + content
+}
+
+// assembleSemanticBlock loads the semantic-model YAML for the project's
+// detected domain, when one exists. The block is injected into the
+// executor system prompt so the LLM resolves business terms against the
+// curated formulas instead of fabricating them.
+//
+// Returns "" when:
+//   - domain detection fails
+//   - the detected domain has no semantic model
+//   - the YAML fails to parse
+// In all cases we fail open — missing semantic context is not a reason
+// to abort the run.
+func assembleSemanticBlock(projectDir string) string {
+	det, err := radctx.Detect(projectDir)
+	if err != nil {
+		return ""
+	}
+	loader := semantic.NewLoader("")
+	m, err := loader.LoadDomain(semantic.Domain(string(det.Domain)))
+	if err != nil {
+		// No semantic model for this domain — silent.
+		return ""
+	}
+	return m.RenderMarkdown()
 }
 
 func verifierSystemPrompt() string {
