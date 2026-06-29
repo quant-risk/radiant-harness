@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "2.49.0-light"
+var version = "3.0.0-light"
 
 func main() {
 	root := &cobra.Command{

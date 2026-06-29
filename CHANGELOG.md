@@ -4,6 +4,79 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-06-29 — First public release: Light as separate binary
+
+This is the **first public release** of `radiant-harness` as two
+distinct artifacts from one source tree. Prior versions were
+distributed as a single binary with Light/Full mode by subcommand;
+v3.0.0 splits them at **compile time** via Go build tags so each
+binary can be published to its own repository.
+
+### Highlights
+
+- **`radiant-light`** — no API key infrastructure whatsoever.
+  Possession via MCP sampling only. ~10 MB.
+- **`radiant-full`** — same as v2.47.0 onwards: HTTP LLM providers
+  + API key + every existing subcommand. ~14 MB.
+- **Auto-detection of 9 host agents** (Claude Code, Cursor, Hermes,
+  Kimi CLI, OpenClaw, Codex, Cline, OpenCode, VS Code Copilot) via
+  `radiant host-info`.
+- **Symbol-verified separation**: `nm radiant-light` shows zero
+  HTTP-LLM symbols. The Light binary is **physically incapable** of
+  contacting an LLM provider.
+- **Light setup is two commands**: `radiant setup-mcp` (writes
+  agent config) + `radiant mcp serve` (boots MCP server). Both work
+  inside any of the 11 supported agents.
+
+### Why a major version bump?
+
+Sprints 68-79 added enough new surface (auto-detection of host
+agents, a new `host-info` command, two-binary build) that this is
+the first version that ships something publishable. Bumping to
+3.0.0 signals: "what you're about to push to GitHub is the real
+thing."
+
+### Added — packaging & distribution
+
+- `README.md` — comprehensive top-level docs (was at v2.37.0).
+  Covers both binaries, command matrix, detection matrix, build
+  instructions, and architecture overview.
+- `LICENSE` — MIT.
+- `Makefile` — added `make light` (build Light binary),
+  `make light-all` (cross-platform Light release),
+  `make test-light` (Light-mode test suite),
+  `make light-smoke` (script-driven Light verification).
+- `scripts/smoke-test-light.sh` — verifies each Light binary:
+  - version reports `-light` suffix
+  - `nm | grep` finds no HTTP-LLM symbols (`chatAnthropic`,
+    `HTTPBackend`, `NewHTTPBackend`)
+  - `strings` finds no `api.anthropic.com` / `openai.com` / `openrouter.ai`
+  - `--help` contains no API key references
+  - commands `setup-mcp`, `mcp`, `host-info` all registered
+  - binary size ≤ 15 MB.
+
+### Added — `radiant host-info` command (Sprint 79)
+
+Detects and reports the host agent currently invoking the harness.
+Available in **both** binaries. See [`docs/HOST-AGENTS.md`](docs/HOST-AGENTS.md).
+
+### Verified
+
+- `go vet ./...` clean
+- `go vet -tags light_only ./...` clean
+- 31 packages OK (Full), 0 FAIL
+- 29 packages OK (Light), 0 FAIL
+- Light smoke test: 16 checks pass
+- Cross-compile: linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 for both modes (10 binaries)
+
+### Stats
+
+- **Light:** 10.6 MB on darwin/arm64. 0 HTTP-LLM symbols (verified).
+- **Full:** 14 MB on darwin/arm64. Unchanged from v2.47.0+ behaviour.
+- Source: 27 packages (added `internal/hostdetect` in Sprint 79).
+- 1190+ tests pass on Full; subset passes on Light.
+
 ## [2.49.0] — 2026-06-29 — `hostdetect` + `radiant host-info` (Sprint 79)
 
 Foundational sprint for "auto-detect which platform/agent is
