@@ -1,3 +1,164 @@
+# Release Notes — v2.45.0 (setup-mcp: Hermes + Kimi + OpenClaw + Cline)
+
+> `radiant setup-mcp` now covers **11 agents across 4 config formats**.
+> Each new agent was added after researching its real published config
+> shape — we don't fabricate "not supported" claims for major
+> MCP-capable agents.
+
+## Headlines
+
+### 1. Hermes Agent (NousResearch)
+
+```bash
+radiant setup-mcp        # auto-detects if .hermes/ or ~/.hermes/ exists
+radiant setup-mcp --agent=hermes
+radiant setup-mcp --global   # writes ~/.hermes/config.yaml
+```
+
+Writes YAML under `mcp_servers:` while preserving every other
+top-level key (model, terminal, browser, agent, ...) byte-for-byte.
+Implementation uses `gopkg.in/yaml.v3` (already a project dep).
+
+```yaml
+mcp_servers:
+  radiant:
+    command: /usr/local/bin/radiant
+    args:
+      - mcp
+      - serve
+```
+
+Hermes relaunches with the new entry the next time you start it
+(it watches `~/.hermes/config.yaml`).
+
+### 2. Kimi CLI (Moonshot AI)
+
+```bash
+radiant setup-mcp        # auto-detects if ~/.kimi/ exists
+radiant setup-mcp --agent=kimi
+```
+
+Writes JSON to the global config (Kimi has no project-level MCP
+support, so `--global` is always implicit):
+
+```json
+{
+  "mcpServers": {
+    "radiant": {
+      "command": "/usr/local/bin/radiant",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+`~/.kimi/mcp.json`. Pre-existing servers (e.g. `context7`) preserved.
+
+### 3. OpenClaw
+
+```bash
+radiant setup-mcp        # auto-detects if .openclaw/ or ~/.openclaw/ exists
+radiant setup-mcp --agent=openclaw
+radiant setup-mcp --global   # writes ~/.openclaw/openclaw.json
+```
+
+OpenClaw's MCP config is a nested object under `mcp.servers`, sitting
+alongside many siblings (`sessionIdleTtlMs`, future feature flags) and
+unrelated top-level keys (`channels`, `gateway`, …). All siblings
+and top-level keys are preserved byte-for-byte; only the `radiant`
+entry under `mcp.servers` is added/replaced.
+
+```json
+{
+  "channels": { "telegram": { ... } },
+  "gateway": { "port": 18789 },
+  "mcp": {
+    "sessionIdleTtlMs": 600000,
+    "servers": {
+      "context7": { "command": "uvx", "args": ["context7-mcp"] },
+      "radiant": {
+        "command": "/usr/local/bin/radiant",
+        "args": ["mcp", "serve"]
+      }
+    }
+  }
+}
+```
+
+### 4. Cline (CLI)
+
+```bash
+radiant setup-mcp        # auto-detects if ~/.cline/ exists
+radiant setup-mcp --agent=cline
+```
+
+Writes JSON to `~/.cline/mcp.json` with the official Cline shape
+(including `disabled` and `autoApprove` fields for parity with
+their examples):
+
+```json
+{
+  "mcpServers": {
+    "local-server": {
+      "command": "node",
+      "args": ["/path/to/server.js"],
+      "env": { "API_KEY": "..." },
+      "disabled": false,
+      "autoApprove": []
+    },
+    "radiant": {
+      "command": "/usr/local/bin/radiant",
+      "args": ["mcp", "serve"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+VS Code-extension users manage their config through the Cline UI
+panel; that file lives at a separate path and is intentionally NOT
+addressed by `radiant setup-mcp`.
+
+## Coverage matrix
+
+```
+$ radiant setup-mcp --agent=claude|cursor|windsurf|zed|vscode|
+                       codex|opencode|hermes|kimi|openclaw|cline
+```
+
+11 agents, 4 config formats (JSON-std, TOML, YAML, JSON-nested).
+
+## Why these four
+
+- **Hermes** — 205k stars, MCP-native, 18+ providers, the major
+  open-weights CLI agent of the NousResearch ecosystem.
+- **Kimi CLI** — 9.1k stars (and the commercial Kimi Code product
+  builds on top of this CLI). MCP support is first-class.
+- **OpenClaw** — 250k stars, embedded MCP runtimes, gateway-style
+  architecture. The MCP registry under `mcp.servers` is the
+  authoritative source.
+- **Cline** — Battle-tested VSCode MCP client; the CLI form writes
+  to a stable `~/.cline/mcp.json`.
+
+## Why NOT LangChain / LangGraph
+
+We explicitly skipped the two Python frameworks — they are
+**not** MCP hosts, they are libraries for building MCP clients /
+agents. Users wanting LangChain integration wrap `radiant mcp serve`
+from inside their LangChain agent (it's just a regular stdio MCP
+server, accessible from any framework).
+
+## Stats
+
+- 1 file extended: `cmd_setup_mcp.go` (+240 LOC).
+- 1 file extended: `cmd_setup_mcp_test.go` (+440 LOC, 18 new tests).
+- 1 plan doc added: `docs/SPRINT75-PLAN.md`.
+- 0 deps added.
+- **1189 tests passing** (counted across all packages).
+
+---
+
 # Release Notes — v2.43.0 (setup-mcp: Codex + OpenCode)
 
 > Two more agents in `radiant setup-mcp`. Codex (OpenAI) and

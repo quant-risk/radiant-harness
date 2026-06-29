@@ -4,6 +4,73 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.45.0] — 2026-06-29 — setup-mcp: Hermes + Kimi CLI + OpenClaw + Cline (Sprint 75)
+
+Four more MCP-capable agents added to `radiant setup-mcp`. Brings the
+total coverage from 7 agents to **11 agents across 4 config formats**
+(JSON-std, TOML, YAML, JSON-nested).
+
+### Added — `setup-mcp` agent coverage
+
+| Agent     | Stars  | Config file                                  | Format | Key              |
+|-----------|--------|----------------------------------------------|--------|------------------|
+| Hermes    | 205k   | `~/.hermes/config.yaml` / `.hermes/config.yaml` | YAML   | `mcp_servers`    |
+| Kimi CLI  | 9.1k   | `~/.kimi/mcp.json`                            | JSON   | `mcpServers`     |
+| OpenClaw  | 250k   | `~/.openclaw/openclaw.json` / `.openclaw/openclaw.json` | JSON | `mcp.servers` |
+| Cline     | —      | `~/.cline/mcp.json`                           | JSON   | `mcpServers`     |
+
+### Added — `cmd/radiant/cmd_setup_mcp.go`
+
+- 4 new handlers in `mcpConfigFor`: `hermes`, `kimi`, `openclaw`, `cline`.
+- 4 new merge functions:
+  - `mergeHermesConfig` — YAML via `gopkg.in/yaml.v3`; preserves the
+    full `~/.hermes/config.yaml` shape (model, terminal, browser,
+    agent, …) while only touching `mcp_servers`.
+  - `mergeKimiMCP` — JSON, global-only at `~/.kimi/mcp.json`.
+    Kimi does not support project-level MCP configs.
+  - `mergeOpenClawJSONConfig` — JSON, nested under `mcp.servers`.
+    Preserves unknown top-level keys (`channels`, `gateway`, …) and
+    siblings of `mcp.servers` (`sessionIdleTtlMs`, etc.).
+  - `mergeClineConfig` — JSON, global-only at `~/.cline/mcp.json`.
+    Emits `disabled: false` and `autoApprove: []` per the official
+    Cline examples.
+- 4 new detection cases in `resolveMCPAgents`:
+  - `hermes` and `openclaw` are project-local (presence of `.hermes/`
+    or `.openclaw/` dir).
+  - `kimi` and `cline` are global-only; detected by presence of
+    `~/.kimi/` or `~/.cline/` (used as a hint that the operator
+    installed the agent — `--global` is always implicit for them).
+- Updated `--agent` flag help, command `Long` description, and
+  unknown-agent error message.
+
+### Added — `cmd/radiant/cmd_setup_mcp_test.go`
+
+- 18 new tests covering all 4 agents: new-file, preserve-existing,
+  replace-existing, detection, `mcpConfigFor` routing (project +
+  global). YAML quote-style tolerant.
+
+### Stats
+
+- 1 file extended: `cmd_setup_mcp.go` (+240 LOC).
+- 1 file extended: `cmd_setup_mcp_test.go` (+440 LOC across 18 tests).
+- 1 file added: `docs/SPRINT75-PLAN.md`.
+- 0 deps added — `gopkg.in/yaml.v3` was already a project dep from
+  earlier sprints.
+- **1189 tests passing across 31 packages, 0 confirmed failures**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled` is
+  timing-dependent and unrelated; documented in
+  `validation-report-sprint-56-57.md`).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64, darwin/arm64, windows/amd64.
+
+### Compatibility
+
+- Existing agent configurations (claude/cursor/windsurf/zed/vscode/
+  codex/opencode) are untouched.
+- `setup-mcp --agent=…` continues to accept all 11 agent names.
+- Auto-detect order is project-local first, global-only fallback
+  second; this preserves existing behaviour for current users.
+
 ## [2.44.0] — 2026-06-29 — helpers.go extractions: security + scaffolds (Sprint 74)
 
 The "debt reduction" release. Pulls 946 lines of domain-specific code
