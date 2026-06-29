@@ -124,13 +124,20 @@ lazy-executor skill (ported from the ponytail ladder).
 - `.radiant-harness/` and `radiant` (root binary) added to `.gitignore`.
 
 ### Stats
-- 8 commits on branch `feature/light-full-release`.
-- 4 new packages: `internal/mode/`, `internal/pricing/`, `internal/semantic/`, plus
-  extensions to `internal/skill/`, `internal/engine/`, `internal/loop/`.
-- 4 new CLI subcommands: `mode`, `pricing`, `semantic`, plus `--intensity`.
-- 1 new skill: `lazy-executor`.
-- 7 new metrics in `credit-risk.yaml`.
-- ~50 new tests. All 25 packages green. `go vet` clean.
+- 9 commits on branch `feature/light-full-release` (8 features + 1 plan).
+- 5 new packages: `internal/mode/`, `internal/pricing/`, `internal/semantic/`,
+  `internal/tools/` (scaffold), plus extensions to `internal/skill/`,
+  `internal/engine/`, `internal/loop/`, `internal/cmd/`.
+- 4 new CLI subcommands: `mode`, `pricing`, `semantic`, plus `--intensity`
+  flag on `radiant loop start`.
+- 1 new skill: `lazy-executor` (PT-BR, port of the ponytail ladder).
+- 7 new metrics in `credit-risk.yaml` (PD, LGD, EAD, RWA, ExpectedLoss,
+  provision_min_ifrs9, capital_required) — references CMN 4.966 / IFRS 9 /
+  Basileia.
+- **921 tests passing across 26 packages, 0 failures** (validated with
+  `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB), windows/amd64 (15 MB).
+- 37 files changed: +4,747 / −1,050 LOC.
 
 ---
 
