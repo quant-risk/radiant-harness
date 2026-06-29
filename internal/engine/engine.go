@@ -1,3 +1,5 @@
+//go:build !light_only
+
 // Package engine implements the universal SDD harness engine.
 // It calls LLM APIs directly — no external agent dependency.
 // Works with any model via OpenRouter, OpenAI, Anthropic, or custom providers.

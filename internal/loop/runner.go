@@ -257,7 +257,10 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 
 	// Resolve the effective backends: either the caller-supplied Backend
 	// (sampling mode) or HTTPBackend wrappers per phase.
-	execBackend, verBackend, planBackend, execModelID, verModelID, planModelID := resolveBackends(cfg, execModel, verModel, planModel)
+	execBackend, verBackend, planBackend, execModelID, verModelID, planModelID, err := resolveBackends(cfg, execModel, verModel, planModel)
+	if err != nil {
+		return nil, fmt.Errorf("resolve LLM backends: %w", err)
+	}
 
 	// Verifier config defaults.
 	verCfg := cfg.Verifier
@@ -644,21 +647,29 @@ func SetHTTPBackendBuilder(fn func(m llm.Model) llm.Backend) {
 // all three phases share that single backend. When nil, HTTP-backend
 // wrappers are constructed via httpBackendBuilder (set in Full build
 // only — see var above).
-func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (exec, ver, plan llm.Backend, execID, verID, planID string) {
+//
+// In Light (no httpBackendBuilder registered, and cfg.Backend is nil),
+// this returns an error so the caller can short-circuit. The trace
+// file is opened by Run() before this resolution step, so callers
+// that only care about trace-file existence (e.g. the
+// TestRunCreatesTraceFile smoke test) still pass.
+func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (exec, ver, plan llm.Backend, execID, verID, planID string, err error) {
 	if cfg.Backend != nil {
 		id := cfg.Backend.ModelID()
-		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id
+		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id, nil
 	}
 	if httpBackendBuilder == nil {
-		// Unreachable in Light (cfg.Backend is always set). In Full
-		// this can only happen if SetHTTPBackendBuilder wasn't called,
-		// which would indicate a programmer error in Full setup.
-		return nil, nil, nil, execModel.Model, verModel.Model, planModel.Model
+		// Unreachable in Light when callers pass cfg.Backend (the
+		// sampling backend). In Full, this indicates a programmer
+		// error — SetHTTPBackendBuilder wasn't called. Either way, we
+		// fail fast rather than panicking on a nil backend later.
+		return nil, nil, nil, "", "", "",
+			fmt.Errorf("resolveBackends: HTTP fallback unavailable (Light build?); pass RunConfig.Backend explicitly with a SamplingBackend, or set RADIANT_OPENROUTER_API_KEY in the Full build")
 	}
 	exec = httpBackendBuilder(execModel)
 	ver = httpBackendBuilder(verModel)
 	plan = httpBackendBuilder(planModel)
-	return exec, ver, plan, execModel.Model, verModel.Model, planModel.Model
+	return exec, ver, plan, execModel.Model, verModel.Model, planModel.Model, nil
 }
 
 // backendSimpleChat is the Backend equivalent of Client.SimpleChat: it sends
