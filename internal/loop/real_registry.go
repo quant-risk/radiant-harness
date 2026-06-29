@@ -6,11 +6,14 @@ import (
 )
 
 // RealRegistry returns the registry with the concrete tools available
-// in the current release (Sprint 69 / v2.38.0 onwards). Callers wire
-// this into Engine.ToolRegistry to enable structured tool-use; the
-// dispatcher in internal/engine then routes ```tool_call``` fences
-// from LLM output through the registry instead of the legacy
-// code-block emission path.
+// in the current release. Callers wire this into Engine.ToolRegistry
+// to enable structured tool-use; the dispatcher in internal/engine
+// then routes ```tool_call``` fences from LLM output through the
+// registry instead of the legacy code-block emission path.
+//
+// Sprint 69 (v2.38.0): write_file (atomic write, fsutil.PathIsSafe).
+// Sprint 70 (v2.39.0): + read_file, search_code.
+// Sprint 71 (planned): + run_gate (requires gaterun wrapper + policy).
 //
 // The projectDir is captured by concrete tools (like fs.WriteFileTool)
 // that need it for boundary checks. Pass the project root — the same
@@ -25,6 +28,8 @@ import (
 func RealRegistry(projectDir string) *tools.Registry {
 	r := tools.NewRegistry()
 	r.Register(fs.WriteFileTool(projectDir))
+	r.Register(fs.ReadFileTool(projectDir))
+	r.Register(fs.SearchCodeTool(projectDir))
 	return r
 }
 

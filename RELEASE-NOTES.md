@@ -1,3 +1,83 @@
+# Release Notes — v2.39.0 (Tool Use Wire-up Parte 2)
+
+> "Read before you write." The LLM can now inspect state and grep
+> the project tree through the structured tool registry, without
+> round-tripping through the shell.
+
+## Headlines
+
+### 1. `read_file` tool
+
+```markdown
+```tool_call
+{"name": "read_file", "args": {"path": "internal/foo.go"}}
+```
+```
+
+Returns `{path, content, bytes, lines}`. Boundary-checked via
+`fsutil.PathIsSafe` (symlink-aware), capped at 4 MiB
+(symmetric with `write_file`).
+
+### 2. `search_code` tool
+
+```markdown
+```tool_call
+{"name": "search_code", "args": {"pattern": "TODO", "include": "*.go", "max_results": 100}}
+```
+```
+
+Returns `[{file, line, column, content}]` matches. Skips hidden
+directories (`.git`, `.radiant-harness`, `node_modules`, `vendor`,
+`.idea`, `.vscode`) and binary files. Default cap 1000 matches;
+`Truncated=true` indicates the cap was hit.
+
+### 3. `radiant tools list --real` now shows 3 tools
+
+```
+$ radiant tools list --real
+NAME            DESCRIPTION                                                  PARAMS
+----            -----------                                                  ------
+write_file      Write content to a file at the given path (project-relati... 2
+read_file       Read the contents of a file at the given path (project-re... 1
+search_code     Search the project for a regex pattern. Returns matching ... 4
+```
+
+`run_gate` remains a stub (lands in Sprint 71 with the `gaterun`
+wrapper).
+
+## Stats
+
+- 2 new concrete tools (`read_file`, `search_code`).
+- **969 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 5 new files, 1 modified. ~600 LOC.
+
+## Compatibility
+
+- No breaking changes. New tools are opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file` keep working
+  unchanged.
+- `--no-tools` still forces the legacy code-block path.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.39.0
+# or:
+git pull
+make build
+./bin/radiant --version             # should report 2.39.0
+./bin/radiant tools list --real     # 3 tools (was 1 in v2.38.0)
+```
+
+See [`docs/TOOL-USE.md`](docs/TOOL-USE.md) for the full operator
+guide.
+
+---
+
 # Release Notes — v2.38.0 (Tool Use Wire-up Parte 1)
 
 > "Stop regex-parsing code blocks." The first concrete structured

@@ -119,9 +119,9 @@ predictable outcome.
 
 ---
 
-## Tools registered in v2.38.0
+## Tools registered in v2.39.0
 
-### `write_file` (concrete, wired)
+### `write_file` (concrete, wired — Sprint 69)
 
 ```text
 NAME        write_file
@@ -156,22 +156,119 @@ rejected before any filesystem side effect. The cap is generous
 for source code and configuration; raise it in
 `internal/tools/fs/fs.go` if a real workload needs more.
 
-### `read_file` (stub, advertised)
+### `read_file` (concrete, wired — Sprint 70)
 
 ```text
 NAME        read_file
-DESCRIPTION Read the contents of a file at the given path.
-PARAMS      path (string, required)
-RETURNS     Not yet wired (Sprint 70).
+DESCRIPTION Read the contents of a file at the given path (project-relative).
+            Returns content, byte count, and line count. Path must resolve
+            inside the project directory after symlink resolution. Max 4 MiB.
+PARAMS      path (string, required)  Project-relative path to read
+RETURNS     {path, content, bytes, lines}
 ```
 
-### `search_code` (stub, advertised)
+#### Use cases
+
+- LLM wants to see existing code before editing (typical first step
+  of a refactor).
+- LLM wants to verify a `write_file` actually landed (read-back
+  confirmation).
+- LLM wants to inspect generated config, fixtures, or test data.
+
+#### Error surface
+
+| Condition | Error message |
+|-----------|---------------|
+| File doesn't exist | `read_file: file not found: <path>` |
+| Path is a directory | `read_file: <path> is a directory, not a file` |
+| File > 4 MiB | `read_file: file too large (X bytes; max 4194304)` |
+| Path resolves outside project | `read_file: refusing path "<p>" — resolves outside project` |
+| Empty / whitespace path | `read_file: path is required` |
+| Malformed args | `read_file: invalid args: <json error>` |
+
+#### Annotate contract
+
+```go
+func (r ReadResult) Annotate() map[string]any {
+    return map[string]any{
+        "path":  r.Path,
+        "bytes": r.Bytes,
+        "lines": r.Lines,
+    }
+}
+```
+
+The verifier sees path + size in the trace; the LLM can also
+inspect them via the structured tool-call record.
+
+### `search_code` (concrete, wired — Sprint 70)
 
 ```text
 NAME        search_code
-DESCRIPTION Search the project for a regex pattern.
-PARAMS      pattern (string, required), path (string)
-RETURNS     Not yet wired (Sprint 70).
+DESCRIPTION Search the project for a regex pattern. Returns matching lines
+            with {file, line, column, content}. Path defaults to project
+            root. Skips hidden directories (.git, .radiant-harness,
+            node_modules, vendor, .idea, .vscode) and binary files. Results
+            capped at 1000 matches by default; Truncated=true indicates
+            the cap was hit.
+PARAMS      pattern     (string, required)  Go regexp syntax
+            path        (string)             Project-relative search root; default "."
+            max_results (integer)            Default 1000
+            include     (string)             Glob filter, e.g. "*.go"
+RETURNS     {pattern, root, match_count, truncated, matches: [{file, line, column, content}]}
+```
+
+#### Use cases
+
+- LLM wants to find every reference to a deprecated function
+  before refactoring.
+- LLM wants to count occurrences of a pattern across the project
+  (test coverage, TODO inventory).
+- LLM wants to verify a previous edit landed correctly
+  (grep the result, no read-and-parse).
+
+#### Hidden directory skipping
+
+`.git`, `.radiant-harness`, `node_modules`, `vendor`, `.idea`,
+`.vscode` are skipped at the directory level (the traversal
+returns `filepath.SkipDir`). Hidden *files* (e.g. `.envrc`) are
+not skipped — only directories.
+
+#### Binary detection
+
+`http.DetectContentType` on the first 512 bytes. Files classified
+as anything other than `text/*`, `application/json`,
+`application/xml`, `application/x-sh`, `application/javascript`
+are skipped. The whitelist is conservative — when in doubt, skip.
+
+#### Result cap
+
+`DefaultSearchMaxResults = 1000`. When the cap is hit, traversal
+stops early (`filepath.SkipAll`) and `Truncated=true` is set so
+the LLM knows to narrow the search via `path`, `include`, or a
+more specific `pattern`.
+
+#### Error surface
+
+| Condition | Error message |
+|-----------|---------------|
+| Empty pattern | `search_code: pattern is required` |
+| Pattern > 4 KiB | `search_code: pattern too long (X bytes; max 4096)` |
+| Invalid regex | `search_code: invalid regex: <compile error>` |
+| `path` resolves outside project | `search_code: refusing search root "<p>" — resolves outside project` |
+| Max results ≤ 0 | Capped to default (1000) — not an error |
+
+#### Annotate contract
+
+```go
+func (r SearchResult) Annotate() map[string]any {
+    return map[string]any{
+        "pattern":     r.Pattern,
+        "root":        r.Root,
+        "match_count": r.MatchCount,
+        "truncated":   r.Truncated,
+    }
+}
 ```
 
 ### `run_gate` (stub, advertised)
@@ -183,9 +280,9 @@ PARAMS      command (string, required)
 RETURNS     Not yet wired (Sprint 71).
 ```
 
-The three stubs are registered so the surface area is visible
-before wiring. Calling them returns
-`"tools: <name> is registered but not yet wired..."` — the
+The stub is registered so the surface area is visible before
+wiring. Calling it returns
+`"tools: run_gate is registered but not yet wired..."` — the
 executor catches this in `applyToolCalls` and surfaces the error
 to the verifier, the same way a real tool failure is handled.
 

@@ -4,6 +4,96 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.39.0] — 2026-06-29 — Tool Use Wire-up Parte 2 (Sprint 70)
+
+The "read before you write" release. Two new concrete tools —
+`read_file` and `search_code` — close the read half of the
+read-write pair and add the first search primitive. The LLM can
+now inspect state before mutating it and grep the project tree
+without round-tripping through the shell.
+
+### Added — `read_file` tool (`internal/tools/fs/read_file.go`)
+
+- `ReadFileTool(projectDir)` returns a `*tools.Tool` that reads a
+  project-relative file and returns `{path, content, bytes, lines}`.
+- Boundary check via `fsutil.PathIsSafe` (symlink-aware, same as
+  `write_file`).
+- 4 MiB size cap (`MaxReadBytes`) — symmetric with `MaxWriteBytes`
+  so the LLM can read back what it just wrote.
+- `os.Stat` first to give a clear "file not found" or "is a
+  directory" error instead of `os.ReadFile`'s generic failure.
+- `ReadResult.Annotate()` satisfies the engine's duck-typed
+  `annotator` interface — verifier sees `path`/`bytes`/`lines`
+  without re-parsing content.
+- 12 unit tests: happy path, no-trailing-newline line counting,
+  empty file, missing file, directory rejection, unsafe paths,
+  symlink escape, oversize file, empty/whitespace path,
+  malformed JSON, Annotate, registry roundtrip.
+
+### Added — `search_code` tool (`internal/tools/fs/search_code.go`)
+
+- `SearchCodeTool(projectDir)` returns a `*tools.Tool` that does
+  regex search via `filepath.WalkDir` over a configurable search
+  root (defaults to project root).
+- Compile pattern first — bad regex surfaces as a structured
+  error before any disk I/O.
+- Skips hidden directories: `.git`, `.radiant-harness`,
+  `node_modules`, `vendor`, `.idea`, `.vscode`.
+- Skips binary files via `http.DetectContentType` on first 512
+  bytes — whitelist of `text/*`, `application/json`, `application/xml`,
+  `application/x-sh`, `application/javascript`.
+- Results capped at `DefaultSearchMaxResults = 1000`. `Truncated=true`
+  set when the cap is hit so the LLM knows to narrow the search.
+- `Include` glob filter (e.g. `*.go`) for narrowing without paying
+  the cost of irrelevant files.
+- 1 MiB per-line buffer cap in `bufio.Scanner` — blocks pathological
+  inputs (a single 100 MB line).
+- `SearchResult.Annotate()` surfaces `pattern`/`root`/`match_count`/
+  `truncated` to the verifier trace.
+- 11 unit tests: finds matches, multiple matches per line, no
+  matches, invalid regex, empty pattern, scope, include glob,
+  unsafe scope, max results cap, Annotate, registry roundtrip.
+
+### Added — Helpers (`internal/tools/fs/helper.go`)
+
+- `absProjectDir(projectDir)` — absolute, symlink-resolved path
+  of the project root. Shared by `read_file` and `search_code`.
+- `joinPath(absProject, candidate)` — joins the absolute root with
+  a project-relative candidate.
+
+### Changed — `RealRegistry` (`internal/loop/real_registry.go`)
+
+- Now registers 3 tools: `write_file`, `read_file`, `search_code`.
+- `run_gate` remains a stub (Sprint 71).
+
+### Documentation
+
+- `docs/SPRINT70-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/TOOL-USE.md` — updated with `read_file` and `search_code`
+  sections (params, behaviour, examples).
+
+### Stats
+
+- 2 new concrete tools: `read_file`, `search_code`.
+- **969 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 5 files added (2 source + 2 tests + 1 plan doc), 1 modified
+  (`real_registry.go`). ~600 LOC total.
+
+### Compatibility
+
+- No breaking changes. New tools are opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file` tool calls keep
+  working unchanged.
+- LLM can now emit `read_file` and `search_code` in addition to
+  or instead of `write_file`.
+
+---
+
 ## [2.38.0] — 2026-06-29 — Tool Use Wire-up Parte 1 (Sprint 69)
 
 The "stop regex-parsing code blocks" release. The first concrete
