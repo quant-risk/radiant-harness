@@ -387,6 +387,6 @@ MIT — see [LICENSE](LICENSE).
 
 **Built with care in 🇧🇷**
 
-[github.com/quant-risk/radiant-harness](https://github.com/quant-risk/radiant-harness) · [v3.0.0](https://github.com/quant-risk/radiant-harness/releases/tag/v3.0.0) · [report a bug](https://github.com/quant-risk/radiant-harness/issues)
+[github.com/quant-risk/radiant-harness](https://github.com/quant-risk/radiant-harness) · [v3.0.0](https://github.com/quant-risk/radiant-harness/releases/tag/v3.0.0) · [report a bug](https://github.com/quant-risk/radiant-harness/issues) · [Full repo](https://github.com/quant-risk/radiant-harness-full)
 
 </div>
