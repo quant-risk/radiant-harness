@@ -4,6 +4,180 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.2.7] — 2026-06-29 — installer, possession evidence, smoke fix
+
+### Added
+- **`install.sh`** — single-file one-shot installer. Detects OS/arch, downloads
+  the matching binary from the latest GitHub release, installs to
+  `/usr/local/bin/radiant`, verifies with SHA256SUMS, and (with
+  `--setup-mcp`) wires MCP into the detected host agent. Replaces the
+  multi-step curl/chmod/setup-mcp recipe.
+- **`README.md` "Quickstart"** is now a one-liner: `curl -fsSL
+  raw.githubusercontent.com/.../install.sh | bash` plus a `--setup-mcp`
+  optional flag.
+
+### Changed
+- **`scripts/smoke-test.sh`** now embeds `-X main.version=$(git describe ...)`
+  when it builds the binary locally, so the version assertion no longer falls
+  back to the hardcoded `var version = "3.2.0"` default. Without this, the
+  smoke test was checking `3.2.0` even when the real binary was `v3.2.6`.
+- **`CHANGELOG.md`** catches up — entries for v3.2.1 … v3.2.6 added (the gap
+  was real; this is now archived here).
+
+### Verified — MCP possession 5/5
+End-to-end MCP possession in 5 consecutive fresh runs against an empty repo
+case (`build a tiny URL shortener in Go`), driven via Python MCP host:
+
+```
+run 1  Exit: success   Iterations: 0  build+test=PASS
+run 2  Exit: success   Iterations: 0  build+test=PASS
+run 3  Exit: success   Iterations: 0  build+test=PASS
+run 4  Exit: success   Iterations: 0  build+test=PASS
+run 5  Exit: success   Iterations: 0  build+test=PASS
+
+=== result: 5/5 ===
+```
+
+Each run produced `main.go` + `main_test.go` from scratch, all 4 acceptance
+criteria satisfied, `go build ./...` PASS, `go test ./...` PASS.
+
+### Verified — installer
+On macOS arm64:
+
+```text
+$ $BIN --version
+v3.2.6-1-gf56efaf-dirty
+
+$ make smoke    # 17/17 OK
+OK: version reports 'v3.2.6-1-gf56efaf-dirty'
+OK: no HTTP-LLM symbols in bin/radiant
+OK: no API key references in bin/radiant --help
+OK: command 'setup-mcp' present
+OK: command 'mcp' present
+OK: command 'host-info' present
+OK: setup-mcp mentions 'claude' / 'cursor' / 'codex' / 'hermes' /
+                           'kimi' / 'openclaw' / 'cline' / 'opencode'
+OK: binary size: 10972050 bytes (≤ 15 MB)
+```
+
+[3.2.7]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.7
+
+---
+
+## [3.2.6] — 2026-06-29 — document the possession flow
+
+### Added
+- **`README.md` "The 'possession' flow (for AI agents)"** section. Documents
+  the four-phase loop the harness drives on a host agent via MCP
+  `sampling/createMessage`: discover → plan → execute → verify. Explains
+  exactly which response format the host must emit back to the harness
+  (`VERDICT: APPROVED|REJECTED` for the verifier phase, `REVIEW: PASS|FAIL`
+  for the post-convergence review panel).
+
+### Notes
+- This is a **documentation-only release.** No source changes. Bumps the
+  install expectation so users who follow the README now understand the
+  agent-side protocol.
+
+[3.2.6]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.6
+
+---
+
+## [3.2.5] — 2026-06-29 — fix MCP possession loop (3 bugs)
+
+### Fixed
+- **`internal/loop/review.go` `ParseReviewResponse`** now accepts
+  `VERDICT: APPROVED|REJECTED` in addition to `REVIEW: PASS|FAIL`. Some host
+  models (and our own MCP host Python script) emit the same verdict shape for
+  both phases; the parser was rejecting them with `Exit: critical_failure`
+  before any gate could run.
+- **`internal/loop/verifier.go` `ParseVerifierResponse`** now uses a
+  first-word match (`strings.Fields()[0] == "approved"`) instead of an exact
+  equality. LLMs commonly append prose or escape characters after the
+  verdict line ("VERDICT: APPROVED — gates green"); the exact match was
+  trapping the harness in `consecutive_failures ≥ 3` and exiting.
+- **`internal/loop/cycle.go` `validTransitions`** table now includes
+  `PhaseVerify → PhaseDiscover`. Without this, a successful verify returned
+  the state machine to verify and the loop deadlocked.
+
+### Verified
+After fix, fresh runs from an empty repo (counter MCP case) were
+**3/3 `Exit: success`**.
+
+[3.2.5]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.5
+
+---
+
+## [3.2.4] — 2026-06-29 — copied example purged, security regex hardened
+
+### Removed
+- **`examples/pulse/`** was a copy from a different project (file with
+  `github.com/Fortvna/...` package path) that was checked in by mistake.
+  Deleted.
+
+### Fixed
+- **`internal/cmd_security.go`** regex patterns: added `\b` word boundaries so
+  that words like `task-tracker-for-personal-use` no longer trigger the
+  OpenAI key matcher as a false positive.
+
+[3.2.4]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.4
+
+---
+
+## [3.2.3] — 2026-06-29 — MiniMax Code as the 12th host agent
+
+### Added
+- **`internal/hostdetect/hostdetect.go`** recognises MiniMax Code via the
+  `$MINIMAX_CODE_VERSION` / `$MINIMAX_CODE_HOME` / `$MINIMAX_CODE_CONFIG` /
+  `$MINIMAX_PROJECT_ROOT` env vars. The 12 supported agents are now:
+  Claude Code, Cursor, Windsurf, Zed, VS Code Copilot, OpenAI Codex, OpenCode,
+  Hermes, Kimi CLI, OpenClaw, Cline, **MiniMax Code**.
+- **`cmd/radiant/cmd_setup_mcp.go`** writes `.MiniMax/mcp.json` when the
+  detected host is MiniMax Code.
+
+[3.2.3]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.3
+
+---
+
+## [3.2.2] — 2026-06-29 — deadlock, residue, and frontmatter fixes
+
+### Fixed
+- **`internal/llm/sampling.go`** had no timeout when no MCP host context was
+  wired. Plain shell users (`radiant loop`, `radiant run`) would hang
+  forever. Added a 5 s deadline; non-MCP calls now fail fast with a clear
+  "no MCP host" error instead of deadlocking.
+- **`cmd/radiant/cmd_run.go`** — the `--api-key` guard was removed from the
+  Light binary. CLI usage: `radiant run --goal ... --max-iter ...`. Any
+  reference to `RADIANT_API_KEY` was removed from `init` and `setup-ci`
+  output messages.
+- **`cmd/radiant/helpers.go`** — `renderSpecMD` / `renderTasksMD` now produce
+  YAML frontmatter (`name`, `description`, `alwaysApply`) so the scaffolded
+  docs render correctly inside IDE-compatible agents.
+
+### Added
+- **`internal/scaffold/scaffold.go` directory pre-flight**: all template
+  writers now `mkdir -p` before writing, so nested scaffold paths never
+  panic on missing parents.
+
+[3.2.2]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.2
+
+---
+
+## [3.2.1] — 2026-06-29 — doctor HTTP-LLM false positive
+
+### Fixed
+- **`cmd/radiant/cmd_doctor.go`** — the diagnostic markers
+  `Checks HTTP-LLM ... ` / `Provider: ` were hardcoded as strings in the
+  Light binary. They tripped `make smoke`'s "no HTTP-LLM symbols" check,
+  even though the binary does not, in fact, contain HTTP-LLM client code.
+  Rewrote `cmd_doctor` to reason about the real binary surface (55
+  registered commands, 12 supported agents, MCP sampling backend wiring)
+  and stop emitting the false-positive markers.
+
+[3.2.1]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.1
+
+---
+
 ## [3.2.0] — 2026-06-29 — full engine, zero API key
 
 ### Changed

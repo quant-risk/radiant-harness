@@ -25,7 +25,8 @@ case "$BIN" in
     echo "==> building radiant"
     mkdir -p bin
     BIN="bin/radiant"
-    CGO_ENABLED=0 go build -ldflags "-s -w" -o "$BIN" ./cmd/radiant
+    VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+    CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$VERSION" -o "$BIN" ./cmd/radiant
     ;;
   /*) ;;
   *) BIN="$REPO_ROOT/$BIN" ;;

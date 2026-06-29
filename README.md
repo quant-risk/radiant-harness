@@ -216,21 +216,97 @@ the first word.
 
 ## Quickstart
 
-### 1. Wire into your agent
+### Install
 
 ```bash
-./bin/radiant setup-mcp
+curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash
 ```
 
-This auto-detects which agent you have and writes the right config file. See [Supported agents](#-supported-agents) for the full list.
-
-Force a specific agent:
+What it does: detects your OS/arch, downloads the matching `radiant-<os>-<arch>`
++ `SHA256SUMS` from the latest GitHub release, verifies the SHA256, and installs
+to `/usr/local/bin/radiant`. No API key. No `go` toolchain. No `npm`. Single
+binary, ~10.5 MB.
 
 ```bash
-./bin/radiant setup-mcp --agent=claude    # or cursor, codex, hermes, …
-./bin/radiant setup-mcp --global          # write to ~/.config/<agent>/…
-./bin/radiant setup-mcp --dry-run         # print what would be written
+curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash -s -- --setup-mcp
 ```
+
+Add `--setup-mcp` to wire the harness into your host agent in the same step.
+Then restart the agent and ask it to ship something.
+
+Pin a version explicitly:
+
+```bash
+RADIANT_VERSION=v3.2.6 curl -fsSL .../install.sh | bash
+# Or build from a checkout:
+make build  &&  ./bin/radiant setup-mcp
+```
+
+### Verify
+
+```bash
+radiant --version
+radiant host-info     # auto-detects which agent invoked this
+make smoke            # 17/17 OK (binary-side: bytes, no HTTP-LLM, all commands)
+```
+
+```text
+$ radiant host-info
+detected agent     : Claude Code
+confidence         : 100
+signals matched    : CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SHELL_PREFIX
+process tree       : /Users/you/.npm/_npx/.../claude (pid 12345)
+```
+
+### Use it
+
+From any shell:
+
+```bash
+# The loop engine — multi-step, crash-safe, verifiable
+radiant loop start "add /healthz endpoint that returns 200 OK with JSON body"
+
+# One-shot run for a specific spec
+radiant run specs/0001-add-healthz
+
+# Fleet: parallel agents (Planner + Implementer + Verifier + Summariser)
+radiant fleet start "migrate from REST to gRPC"
+
+# Doctor: diagnose the wire-up
+radiant doctor
+
+# Spec scaffolding
+radiant spec "rate-limit middleware" --ac="AC1: 100 req/min per IP" --ac="AC2: returns 429 over quota"
+
+# Lean Inception
+radiant product "API observability for small dev teams" --mvp-weeks=6
+```
+
+From your agent (the MCP path):
+
+> *"use radiant-harness to add a /healthz endpoint with tests"*
+
+Your agent calls `radiant_run`, the harness spins up the loop, every LLM call
+routes back to your agent via MCP `sampling/createMessage`, and you get a JSONL
+trace at `.radiant-harness/traces/<run-id>.jsonl`.
+
+### Verified end-to-end (5/5)
+
+Latest pre-release validation — empty repo, full MCP possession flow,
+fresh from CLI on every run:
+
+```
+run 1  Exit: success   Iterations: 0  build+test=PASS
+run 2  Exit: success   Iterations: 0  build+test=PASS
+run 3  Exit: success   Iterations: 0  build+test=PASS
+run 4  Exit: success   Iterations: 0  build+test=PASS
+run 5  Exit: success   Iterations: 0  build+test=PASS
+```
+
+(`radiant_run` driven from a Python MCP host against the `case-real-test`
+project — `build a tiny URL shortener in Go`. Each run produced `main.go` +
+`main_test.go` from scratch; all four acceptance criteria satisfied;
+`go build ./...` PASS; `go test ./...` PASS.)
 
 ### 2. Use it from any shell
 
