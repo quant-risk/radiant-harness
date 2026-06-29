@@ -119,7 +119,79 @@ predictable outcome.
 
 ---
 
-## Tools registered in v2.39.0
+## Tools registered in v2.40.0
+
+### `run_gate` (concrete, wired — Sprint 71)
+
+```text
+NAME        run_gate
+DESCRIPTION Run a quality gate command (go test, go vet, pytest, etc.) in
+            the project directory. Returns {command, exit_code, duration_ms,
+            output, output_bytes, truncated}. The command must use a binary
+            in the closed allowlist (no rm, mv, cp, chmod, curl, wget, etc.);
+            malicious or naive gates are rejected before execution. Output
+            capped at 10 MiB by default. Times out after 5 minutes.
+PARAMS      command     (string, required)  Shell command (e.g. "go test ./...")
+            max_output  (integer)            Output cap in bytes. Default 10 MiB.
+RETURNS     {command, exit_code, duration_ms, output, output_bytes, truncated}
+```
+
+#### Allowlist enforcement
+
+Every call runs through `policy.ValidateGateCommand` BEFORE any
+subprocess starts. The closed set (`policy.GateBinaries`) covers
+common toolchains:
+
+- **JS/TS**: `node`, `npm`, `pnpm`, `yarn`, `bun`, `deno`,
+  `jest`, `vitest`, `tsc`, `eslint`
+- **Go**: `go`, `make`
+- **Python**: `pytest`, `python`, `python3`, `pip`
+- **Rust**: `cargo`, `rustc`
+- **Shell lint**: `shellcheck`
+- **Read-only / no-side-effect**: `echo`, `printf`, `true`,
+  `false`, `pwd`, `cat`, `head`, `tail`, `wc`
+
+Plus the validator rejects dangerous shell operators outright:
+`;`, single `|`, single `&`, `<`, `>`. Only `&&` and `||` are
+allowed for chaining.
+
+This is the same allowlist the engine's `runGate` enforces — the
+LLM cannot escape the sandbox through this tool.
+
+#### Use cases
+
+- LLM wants to verify its `write_file` edits don't break tests.
+- LLM wants to run linters / type checkers before declaring done.
+- LLM wants to measure how long a command takes (verifier audit).
+
+#### Error surface
+
+| Condition | Error message |
+|-----------|---------------|
+| Empty / whitespace command | `run_gate: command is required` |
+| Binary not in allowlist | `run_gate: refusing command: gate binary "X" is not in the allowlist...` |
+| Forbidden shell operator | `run_gate: refusing command: gate contains forbidden operator "X"...` |
+| Malformed args | `run_gate: invalid args: <json error>` |
+| Gate timeout (5 min) | `run_gate: gate timeout after 5m0s` |
+| Non-zero exit | `run_gate: gate failed: exit status N` (with output still returned) |
+
+#### Annotate contract
+
+```go
+func (r RunGateResult) Annotate() map[string]any {
+    return map[string]any{
+        "command":      r.Command,
+        "exit_code":    r.ExitCode,
+        "duration_ms":  r.DurationMs,
+        "output_bytes": r.OutputBytes,
+        "truncated":    r.Truncated,
+    }
+}
+```
+
+`output` is intentionally excluded from Annotate — it can be
+megabytes and would bloat the verifier trace. The full output is
+still available in the result JSON the LLM receives.
 
 ### `write_file` (concrete, wired — Sprint 69)
 

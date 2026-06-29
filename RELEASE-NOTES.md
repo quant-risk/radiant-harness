@@ -1,3 +1,75 @@
+# Release Notes — v2.40.0 (Tool Use Wire-up Parte 3: run_gate)
+
+> "Close the trio." `run_gate` is now concrete. The RealRegistry
+> ships 4 structured tools; LLM can read, write, search, and gate
+> through a uniform `tool_call` interface.
+
+## Headlines
+
+### 1. `run_gate` tool
+
+```markdown
+```tool_call
+{"name": "run_gate", "args": {"command": "go test ./..."}}
+```
+```
+
+Returns `{command, exit_code, duration_ms, output, output_bytes,
+truncated}`. Allowlist-enforced via `policy.ValidateGateCommand`
+(closed set of binaries + no dangerous operators). Runs in the
+project directory; 5-minute timeout via `gaterun.Timeout`; output
+capped at 10 MiB (or per-call `max_output`).
+
+### 2. 4 concrete tools in the registry
+
+```
+$ radiant tools list --real
+NAME            DESCRIPTION                                                  PARAMS
+----            -----------                                                  ------
+write_file      Write content to a file at the given path (project-relati... 2
+read_file       Read the contents of a file at the given path (project-re... 1
+search_code     Search the project for a regex pattern. Returns matching ... 4
+run_gate        Run a quality gate command (go test, go vet, etc.).          3
+```
+
+The trio of read/write/gate is closed. Future tools (Sprint 72+)
+move to the next frontier: SDK-level function-call parsing, MCP
+tool-bridge adapter.
+
+## Stats
+
+- 1 new concrete tool (`run_gate`).
+- **~995 tests passing across 29 packages, 0 confirmed failures**
+  (validated with `go test -count=1 -v ./...`). `go vet ./...`
+  clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 4 new files, 2 modified. ~830 LOC.
+
+## Compatibility
+
+- No breaking changes. `run_gate` is opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file`/`read_file`/`search_code`
+  keep working unchanged.
+- `--no-tools` still forces the legacy code-block path.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.40.0
+# or:
+git pull
+make build
+./bin/radiant --version             # should report 2.40.0
+./bin/radiant tools list --real     # 4 tools (was 3 in v2.39.0)
+```
+
+See [`docs/TOOL-USE.md`](docs/TOOL-USE.md) for the full operator
+guide.
+
+---
+
 # Release Notes — v2.39.0 (Tool Use Wire-up Parte 2)
 
 > "Read before you write." The LLM can now inspect state and grep

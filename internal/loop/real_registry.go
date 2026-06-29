@@ -3,6 +3,7 @@ package loop
 import (
 	"github.com/quant-risk/radiant-harness/internal/tools"
 	"github.com/quant-risk/radiant-harness/internal/tools/fs"
+	"github.com/quant-risk/radiant-harness/internal/tools/gate"
 )
 
 // RealRegistry returns the registry with the concrete tools available
@@ -13,7 +14,7 @@ import (
 //
 // Sprint 69 (v2.38.0): write_file (atomic write, fsutil.PathIsSafe).
 // Sprint 70 (v2.39.0): + read_file, search_code.
-// Sprint 71 (planned): + run_gate (requires gaterun wrapper + policy).
+// Sprint 71 (v2.40.0): + run_gate (gaterun wrapper + policy allowlist).
 //
 // The projectDir is captured by concrete tools (like fs.WriteFileTool)
 // that need it for boundary checks. Pass the project root — the same
@@ -30,6 +31,7 @@ func RealRegistry(projectDir string) *tools.Registry {
 	r.Register(fs.WriteFileTool(projectDir))
 	r.Register(fs.ReadFileTool(projectDir))
 	r.Register(fs.SearchCodeTool(projectDir))
+	r.Register(gate.RunGateTool(projectDir))
 	return r
 }
 
