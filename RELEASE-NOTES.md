@@ -1,3 +1,97 @@
+# Release Notes — v2.42.0 (Light/Full by subcommand, not by flag)
+
+> "Behaviour emerges from the subcommand." v2.42.0 collapses the
+> Light/Full mode resolution chain into a single, unambiguous rule:
+> `radiant mcp serve` is always Light; everything else is always Full.
+
+## Headlines
+
+### 1. No more `--mode` flag
+
+v2.37.0 introduced Light and Full as runtime modes with a 4-level
+resolution chain (flag > env > config > auto-detect). Operators
+struggled with:
+- Forgetting to pass `--mode=light` when using Claude Code
+- Setting `RADIANT_MODE=full` on a host that expected sampling
+- Trying to run `radiant loop start --mode=light` (nonsensical — loop is Full)
+
+v2.42.0 fixes all of this by removing the choice entirely:
+
+```bash
+# Light — MCP sampling from host agent. No API key needed.
+radiant mcp serve
+
+# Full — autonomous HTTP to LLM providers. API key needed.
+radiant loop start "..."
+radiant run specs/...
+radiant fleet start "..." --agents 5
+```
+
+That's it. Two entry points, two behaviours, zero ambiguity.
+
+### 2. `radiant mcp serve` is always Light
+
+Removed the `--sampling` flag. The MCP server always uses sampling
+now — that was the only point of `mcp serve`. The harness emits
+`sampling/createMessage` to the host agent (Claude Code, Hermes,
+etc.) for every inference.
+
+If you run `radiant mcp serve` from a TTY (terminal), you get a
+warning that the server expects to be invoked from an MCP host.
+The process still runs (useful for debugging).
+
+### 3. Every other subcommand is always Full
+
+`radiant loop start`, `radiant run`, `radiant fleet start`, `radiant init`,
+`radiant validate`, ... all run in Full mode by default. They call
+LLM HTTP endpoints directly with the operator's API key.
+
+## Removed in v2.42.0
+
+| v2.37.0–v2.41.0 | v2.42.0 status |
+|----------------|----------------|
+| `radiant mode show` | **removed** — use `radiant --help` |
+| `radiant mode set light\|full` | **removed** — subcommand defines it |
+| `--mode` flag on `loop start` | **removed** — `loop` is always Full |
+| `--mode` flag on `fleet start` | **removed** — `fleet` is always Full |
+| `--sampling` flag on `mcp serve` | **removed** — `mcp serve` is always sampling |
+| `RADIANT_MODE` env var | **removed** — ignored if set |
+| `mode:` field in `.radiant.yaml` | **removed** — ignored if set |
+| `internal/mode.Resolve()` chain | **removed** — replaced by simple constants |
+
+## Stats
+
+- 1 file deleted (`cmd/radiant/cmd_mode.go`).
+- 1 file rewritten (`internal/mode/mode.go` — 215 → 50 LOC).
+- 4 files modified.
+- **982 tests passing across 30 packages, 0 failures**.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.42.0
+# or:
+git pull
+make build
+./bin/radiant --version                # should report 2.42.0
+./bin/radiant mcp serve --help         # Light path documented
+./bin/radiant loop start --help        # no --mode flag anymore
+./bin/radiant doctor                   # simplified mode check
+```
+
+If you were using `--mode=light` on `loop start` or `fleet start`:
+those subcommands are **always** Full now. Use `radiant mcp serve`
+for the Light path.
+
+If you were using `RADIANT_MODE=light` or `mode: light` in
+`.radiant.yaml`: silently ignored. Use `radiant mcp serve` instead.
+
+See [`docs/MODES.md`](docs/MODES.md) for the full guide.
+
+---
+
 # Release Notes — v2.41.0 (MCP Tool-Bridge Adapter)
 
 > "Any MCP server, any tool." Operators can now register external

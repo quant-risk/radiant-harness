@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/config"
-	"github.com/quant-risk/radiant-harness/internal/mode"
 	"github.com/spf13/cobra"
 )
 
@@ -100,18 +98,17 @@ Checks:
 			}
 
 			// ── mode ─────────────────────────────────────────────────────────
-			cwd, _ := os.Getwd()
-			cfg, _ := config.Load(cwd)
-			modeCfg := ""
-			if cfg != nil {
-				modeCfg = cfg.Mode
-			}
-			resolution := mode.Resolve("", cwd, modeCfg)
-			modeNote := fmt.Sprintf("%s (%s: %s)", resolution.Mode, resolution.Source, resolution.Reason)
+			// Mode is now derived from which subcommand you ran (no flag,
+			// env, or config field). The harness doesn't carry an
+			// "active mode" any more; report the expected mode based on
+			// whether an API key is present.
+			modeNote := ""
 			modeOK := true
-			if resolution.Mode == mode.Full && apiKey == "" {
+			if apiKey == "" {
+				modeNote = "Full mode (CLI subcommand) requires an API key — export OPENROUTER_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY, or set api_key in .radiant.yaml"
 				modeOK = false
-				modeNote += " — Full mode requires an API key"
+			} else {
+				modeNote = "Full mode (CLI subcommand) — API key present"
 			}
 			add("mode", modeOK, modeNote)
 

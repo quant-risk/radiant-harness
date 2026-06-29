@@ -15,7 +15,6 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/improve"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
-	"github.com/quant-risk/radiant-harness/internal/mode"
 	"github.com/quant-risk/radiant-harness/internal/webhook"
 	"github.com/quant-risk/radiant-harness/internal/worktree"
 	"github.com/spf13/cobra"
@@ -117,25 +116,11 @@ func registerFleetCmds(root *cobra.Command) {
 			cwd, _ := os.Getwd()
 			goal := args[0]
 			agentCount, _ := cmd.Flags().GetInt("agents")
-			modeFlag, _ := cmd.Flags().GetString("mode")
 
-			// Resolve operational mode (flag > env > config > auto-detect).
-			cfg, _ := config.Load(cwd)
-			modeCfg := ""
-			if cfg != nil {
-				modeCfg = cfg.Mode
-			}
-			modeResolution := mode.Resolve(modeFlag, cwd, modeCfg)
-			fmt.Printf("  Mode:    %s\n", modeResolution.Mode)
-			fmt.Printf("  Source:  %s (%s)\n", modeResolution.Source, modeResolution.Reason)
-
-			if modeResolution.Mode == mode.Light {
-				return fmt.Errorf(
-					"Light mode (%s) cannot run fleet from CLI directly — fleet agents must be "+
-						"driven via MCP sampling. Use `radiant setup-mcp --agent=claude` and invoke "+
-						"`radiant_fleet_start` from your agent, or pass --mode=full for autonomous agents.",
-					modeResolution.Source)
-			}
+			// `radiant fleet start` is always Full mode — fleet agents run
+			// autonomously with the operator's API key. For Light mode
+			// (MCP sampling), use `radiant mcp-serve` and let the host
+			// agent drive the fleet via sampling. No flag/env/config.
 
 			runID := fmt.Sprintf("fleet-%d", time.Now().Unix())
 			store, err := fleet.NewStore(cwd, runID, goal)
@@ -175,7 +160,6 @@ func registerFleetCmds(root *cobra.Command) {
 		},
 	}
 	fleetStartCmd.Flags().Int("agents", 3, "Number of implementer agents to run in parallel")
-	fleetStartCmd.Flags().String("mode", "", "Operational mode: light|full|auto. Light = each agent driven via MCP sampling (no API key). Full = each agent runs autonomously with its own API key.")
 
 	fleetStatusCmd := &cobra.Command{
 		Use:   "status <run-id>",

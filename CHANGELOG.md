@@ -4,6 +4,97 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.42.0] — 2026-06-29 — Light/Full by subcommand, not by flag
+
+The "no more mode flag" release. v2.37.0 introduced Light and Full
+as runtime modes with a 4-level resolution chain (flag > env >
+config > auto-detect). That was overengineered and a constant source
+of confusion. v2.42.0 collapses the dichotomy into the subcommand
+name itself:
+
+- `radiant mcp serve` is **always Light** — MCP sampling from the
+  host agent, no API key needed.
+- Every other subcommand (`loop start`, `run`, `fleet start`,
+  `init`, `validate`, ...) is **always Full** — direct HTTP to
+  LLM providers, API key required.
+
+No `--mode` flag. No `RADIANT_MODE` env var. No `mode:` field in
+`.radiant.yaml`. No `radiant mode show/set` subcommand. Behaviour
+emerges from which subcommand the operator invokes.
+
+### Removed — explicit mode selection
+
+- `--mode` flag on `loop start` and `fleet start`.
+- `RADIANT_MODE` env var (silently ignored if set).
+- `mode:` field in `.radiant.yaml` (silently ignored if set).
+- `radiant mode show` subcommand.
+- `radiant mode set light|full` subcommand.
+- `internal/mode.Resolve()` chain + `Source` enum (`flag`/`env`/
+  `config`/`detected`) + `Resolution` struct.
+- `internal/mode.Detect()` MCP-config-based auto-detection.
+
+### Changed — subcommand semantics
+
+- `radiant mcp serve` is now **always** Light. Removed the
+  `--sampling` flag (was needed to opt in to sampling); the
+  sampling path is now the default and only path.
+- `radiant mcp serve` from a TTY (terminal) prints a warning that
+  it expects to be invoked from an MCP host. Doesn't refuse — the
+  operator can still debug.
+- `radiant loop start`, `run`, `fleet start` are now **always**
+  Full. No flag/env/config to set. The harness calls LLM HTTP
+  endpoints directly with the operator's API key.
+
+### Changed — `internal/mode/`
+
+- Reduced to just the type definitions: `Light`, `Full`, `Mode`,
+  `Mode.String()`, `Mode.Description()`, `Mode.IsValid()`.
+- The `Resolve()` / `Detect()` / `Resolution` machinery is gone.
+- Used as trace metadata only (verifier prompts and `tools/list`).
+  Never read from user input.
+
+### Changed — `radiant doctor`
+
+- The "mode" check now reports "Full mode (CLI subcommand)"
+  because the operator is running CLI subcommands by definition.
+- Reports "requires API key" if no key is found (same as v2.37.0).
+- No more flag/env/config resolution — just the simple check.
+
+### Documentation
+
+- `docs/MODES.md` — complete rewrite. Now reads as a "behaviour
+  emerges from subcommand" guide instead of a resolution chain
+  reference.
+- README updated to reflect the simpler model.
+
+### Stats
+
+- 1 file deleted: `cmd/radiant/cmd_mode.go` (the `radiant mode`
+  subcommand).
+- 1 file rewritten: `internal/mode/mode.go` (215 LOC → 50 LOC).
+- 4 files modified: `cmd_loop.go`, `cmd_fleet.go`, `cmd_audit.go`,
+  `cmd_doctor.go`.
+- **982 tests passing across 30 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Migration
+
+| v2.37.0–v2.41.0 | v2.42.0 |
+|----------------|---------|
+| `radiant mode show` | (removed — use `radiant --help`) |
+| `radiant mode set light` | (removed — use `radiant mcp serve`) |
+| `radiant mode set full` | (removed — all other commands are Full) |
+| `--mode=light` on `loop start` | (removed — `loop` is always Full) |
+| `--mode=full` on `loop start` | (removed — `loop` is always Full) |
+| `RADIANT_MODE=light` env | (removed — use `radiant mcp serve`) |
+| `RADIANT_MODE=full` env | (removed — always Full on non-mcp subcommands) |
+| `mode: light` in `.radiant.yaml` | (removed — ignored if set) |
+| `mode: full` in `.radiant.yaml` | (removed — ignored if set) |
+
+---
+
 ## [2.41.0] — 2026-06-29 — MCP Tool-Bridge Adapter (Sprint 72)
 
 The "any MCP server, any tool" release. Operators can now register

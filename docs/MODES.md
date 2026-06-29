@@ -1,204 +1,154 @@
-# radiant-harness — Operating Modes
+# Light/Full — Operator Guide (v2.42.0)
 
-> Pick the mode that matches how you want inference to happen. Both modes
-> use the same `radiant` binary. The choice is a deployment-time decision,
-> not a build-time one.
+> **TL;DR:** Comportamento emerge do **subcomando**, não de flag.
+> - `radiant mcp serve` → **Light** (MCP sampling, sem API key)
+> - Qualquer outro subcomando (`loop start`, `run`, `fleet start`, `init`, ...) → **Full** (HTTP direto, API key necessária)
 
-The harness runs in one of two modes. Each has the same autonomous loop,
-the same state machine, the same budget brakes, the same verifier, the
-same skill system. What differs is **who provides the LLM inference**.
+Sem `--mode` flag. Sem `RADIANT_MODE` env. Sem `mode:` no `.radiant.yaml`. Sem `radiant mode show/set`.
 
-## Quick decision
+---
 
-```
-┌─ Are you already inside Claude Code / Cursor / Hermes / Codex / Copilot?
-│
-├─ YES → Light mode (zero setup beyond `radiant setup-mcp`)
-│        The host agent provides inference. No API key needed.
-│
-└─ NO  → Full mode (CI, cron, batch, or standalone)
-         You provide the API key. Harness calls the provider directly.
-```
+## O que é Light
 
-```
-You have an LLM API key but no agent session?
-  → Full mode. `export OPENROUTER_API_KEY=sk-...` and go.
+**Light** = "o harness possui o agente". Você roda o harness como MCP server, e quando ele precisa de inference ele pede via `sampling/createMessage` ao host agent (Claude Code, Hermes, Cursor, ...). **O host paga pelos tokens** — você não precisa de API key.
 
-You have an agent session (Claude Code etc.) and no API key?
-  → Light mode. `radiant setup-mcp` and call `radiant_run` from the agent.
+**Quando usar:** você já tem Claude Code (ou outro host MCP) rodando. Quer que o harness te ajude, mas sem configurar billing.
 
-You have both?
-  → Either works. Light is cheaper (no double-billing); Full is more
-    portable (works anywhere, no agent dependency).
-```
+**Como usar:**
 
-## Light — harness possesses the agent
-
-In Light mode the harness treats the host agent as its inference backend.
-The host agent (Claude Code, Hermes Agent, Cursor, Codex, Copilot) holds
-the credentials and runs the actual model call. The harness emits a JSON-RPC
-`sampling/createMessage` request over the MCP transport and waits for the
-host to do the inference and return the result.
-
-**Use Light when:**
-- You already pay for Claude Code, Cursor, or another MCP-capable agent.
-- You want zero new credentials.
-- You want the agent's existing context (recent files, open tabs, project
-  notes) to influence the harness's LLM calls naturally.
-- You're prototyping and want to skip API key plumbing.
-
-**Setup:**
 ```bash
-radiant setup-mcp --agent=claude   # one-time, registers MCP server
-# inside your agent session:
-> use radiant-harness to: add input validation to /api/users
-# the agent invokes radiant_run, which is in Light mode by default
+# 1. Registra o harness como MCP server no Claude Code
+claude mcp add radiant -- /usr/local/bin/radiant mcp serve
+
+# 2. Pronto. A partir daí o Claude Code spawna `radiant mcp serve`
+# automaticamente. Toda inference vem do Claude Code via sampling.
 ```
 
-**Architecture:**
-```
-User → Agent → radiant_run({ goal })
-                ↓
-             harness loop
-                ├─ DISCOVER → sampling/createMessage → Agent reasons → discovery
-                ├─ PLAN     → sampling/createMessage → Agent plans   → plan
-                ├─ EXECUTE  → sampling/createMessage → Agent codes   → code
-                └─ VERIFY   → sampling/createMessage → Agent checks  → verdict
-                ↓
-             returns full trace to Agent → User
-```
+**O que você NÃO pode fazer em Light:**
+- Rodar `radiant loop start`, `radiant run`, `radiant fleet start` direto do terminal. Essas subcomandos são **Full** — sempre.
 
-The harness owns the state machine and the orchestration. The agent
-provides the intelligence.
+---
 
-## Full — autonomous, no agent
+## O que é Full
 
-In Full mode the harness calls LLM HTTP endpoints directly. It owns its
-own credentials, its own cost tracking, its own budget brakes. The host
-agent (if any) is irrelevant to the harness's operation.
+**Full** = "o harness é autônomo". O harness chama LLM HTTP endpoints diretamente (OpenRouter, OpenAI, Anthropic, Groq, Mistral, xAI). **Você paga pelos tokens** — API key necessária.
 
-**Use Full when:**
-- Running in CI/CD without an interactive agent.
-- Running on a schedule (cron, systemd timer, Kubernetes CronJob).
-- You want full control over model selection, cost, and provider routing.
-- You're behind a firewall that only allows outbound HTTPS to specific
-  providers.
-- You need to audit each LLM call independently (compliance, CMN 4.966).
+**Quando usar:** CI/CD, scripts, automação, ou quando você quer que o harness rode standalone (sem Claude Code).
 
-**Setup:**
+**Como usar:**
+
 ```bash
-export OPENROUTER_API_KEY=sk-...   # or OPENAI_API_KEY, ANTHROPIC_API_KEY
-radiant config --provider=openrouter --model=claude-sonnet-4-6
-radiant loop start "fix the race condition in dispatch.go"
-```
-
-**Architecture:**
-```
-User → radiant loop start "<goal>"
-         ↓
-      harness loop (in-process, no agent involved)
-         ├─ DISCOVER → HTTP POST /v1/chat/completions → OpenRouter/Claude → discovery
-         ├─ PLAN     → HTTP POST → plan
-         ├─ EXECUTE  → HTTP POST → code
-         └─ VERIFY   → HTTP POST → verdict
-         ↓
-      persist + export trace
-```
-
-The harness owns everything end-to-end.
-
-## Resolution
-
-When you run `radiant loop start`, the mode is resolved in this order:
-
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | `--mode=light\|full\|auto` flag | `radiant loop start "..." --mode=full` |
-| 2 | `RADIANT_MODE` env var | `export RADIANT_MODE=full` |
-| 3 | `.radiant.yaml` `mode:` field | `mode: full` |
-| 4 | Auto-detect | See below |
-
-`radiant mode show` displays the resolved mode and where it came from.
-
-**Auto-detect logic (priority order):**
-1. If a radiant MCP config is found (project `.claude/settings.json`,
-   `~/.claude/settings.json`, project `.cursor/mcp.json`, `.windsurf/`,
-   `.zed/`, `.vscode/`) → **Light** (assume agent session).
-2. If any LLM API key is set in env (`OPENROUTER_API_KEY`,
-   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) → **Full**.
-3. Default → **Light** (safe: clearer error if no MCP available than
-   leaking an API key requirement).
-
-## What works in each mode
-
-| Capability | Light | Full |
-|------------|:-----:|:----:|
-| `radiant loop start` from CLI | ❌ (use MCP) | ✅ |
-| `radiant_run` from agent | ✅ | ❌ (won't be called) |
-| `radiant fleet start` from CLI | ❌ (use MCP) | ✅ |
-| `radiant_fleet_start` from agent | ✅ | ❌ |
-| `radiant doctor` | ✅ | ✅ |
-| `radiant boot` | ✅ | ✅ |
-| `radiant context detect` | ✅ (free, no LLM) | ✅ |
-| `radiant validate` | ✅ (free, no LLM) | ✅ |
-| `radiant views` | ✅ (free, no LLM) | ✅ |
-| `radiant setup-mcp` | ✅ | ✅ (after install) |
-| `radiant pricing` | ✅ | ✅ |
-| CI/cron usage | ❌ | ✅ |
-
-The CLI-only commands (`doctor`, `boot`, `context`, `validate`, `views`,
-`setup-mcp`, `pricing`) work in both modes because they don't issue
-LLM calls.
-
-## Pricing implications
-
-- **Light**: you pay your host agent's normal subscription (Claude Code,
-  Cursor Pro, etc.). The harness adds no LLM cost on top.
-- **Full**: you pay the provider directly per token. The harness tracks
-  every call and reports cost in `radiant loop status` and `radiant loop
-  export`.
-
-## Choosing per-task
-
-Sometimes a single project benefits from both modes. Examples:
-
-- **Local dev with an agent** → Light. Fast iteration, no key management.
-- **Nightly batch job** → Full. Runs without any agent session.
-- **Customer demo with human-in-loop** → Light. The demo operator is
-  in an agent; you want their context to inform the harness.
-- **Compliance audit on a regulated dataset** → Full. Every LLM call
-  is logged independently in your provider dashboard.
-
-You can configure each project independently via `.radiant.yaml`.
-
-## Forcing a mode
-
-To force Light mode regardless of environment:
-```bash
-export RADIANT_MODE=light
-radiant loop start "..."     # will require MCP context, errors otherwise
-```
-
-To force Full mode:
-```bash
-export RADIANT_MODE=full
+# Configure a API key
 export OPENROUTER_API_KEY=sk-...
-radiant loop start "..."
+# ou
+export OPENAI_API_KEY=sk-...
+# ou
+export ANTHROPIC_API_KEY=sk-...
+
+# Rode o que quiser
+radiant loop start "implement the login feature"
+radiant run specs/0001-foo
+radiant fleet start "migrate the auth system" --agents 5
 ```
 
-To set the default per-project:
-```bash
-radiant mode set full    # writes .radiant.yaml
+**O que você NÃO pode fazer em Full:**
+- Spawnar como MCP server. Se você quer MCP, use `radiant mcp serve` (sempre Light).
+
+---
+
+## Auto-detect na prática
+
+Não tem detecção. O subcomando já define tudo:
+
+| Subcomando | Mode | API key? |
+|------------|------|----------|
+| `radiant mcp serve` | Light (sampling) | Não |
+| `radiant loop start` | Full (HTTP) | Sim |
+| `radiant run` | Full (HTTP) | Sim |
+| `radiant fleet start` | Full (HTTP) | Sim |
+| `radiant init`, `validate`, `spec`, ... | Full | Não (não chamam LLM) |
+
+**Regra simples:** se o subcomando pode chamar LLM e não é `mcp serve`, é Full.
+
+---
+
+## Tentei misturar os dois — o que acontece?
+
+Se você rodar `radiant loop start` sem API key: erro claro no primeiro LLM call, dizendo qual env var setar.
+
+Se você rodar `radiant mcp serve` num TTY (terminal interativo): warning de "isso não vai receber JSON-RPC requests", mas o processo continua rodando. Útil pra debug.
+
+Se você tentar passar `--mode=light` ou `--mode=full`: erro "unknown flag". Não tem.
+
+Se você setar `RADIANT_MODE=light` no env: ignorado. Não tem.
+
+Se você setar `mode: light` no `.radiant.yaml`: ignorado. Não tem.
+
+---
+
+## Por que separamos Light e Full por subcomando?
+
+Antes (v2.37.0) era um único binário com mode flag + env var + config. Operador tinha que saber qual combinação usar. Cada um errava em lugares diferentes:
+- Alguns esqueciam de setar `--mode=light` quando queriam usar Claude Code
+- Outros setavam `RADIANT_MODE=full` num host onde Claude Code esperava sampling
+- A flag criava ambiguidade: `radiant loop start --mode=light` não fazia sentido (loop é Full)
+
+A solução: **o nome do subcomando já diz tudo**. Não tem como errar.
+
+- `radiant mcp serve` literalmente diz "esse comando é um MCP server" → sampling.
+- `radiant loop start` literalmente diz "esse comando roda um loop autônomo" → HTTP.
+
+---
+
+## Para MCP host authors (Claude Code, Hermes, ...)
+
+Se você está integrando `radiant` no seu host MCP via setup:
+
+```json
+{
+  "mcpServers": {
+    "radiant": {
+      "command": "radiant",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
 ```
 
-## What's next
+Quando o host invoca `radiant mcp serve`, o harness:
+1. Detecta que stdin é pipe (não TTY) → fica quieto
+2. Lê JSON-RPC do stdin
+3. Quando precisa de LLM, emite `sampling/createMessage` de volta
+4. Host responde com a completion
+5. Harness devolve o resultado pro host como `tools/call` response
 
-- `docs/MODES.md` (this file) — the user-facing mode guide
-- `internal/mode/mode.go` — the resolver (≤200 lines, fully tested)
-- `cmd/radiant/cmd_mode.go` — `radiant mode show|set`
-- `cmd/radiant/cmd_doctor.go` — mode shown in diagnostics
-- `cmd/radiant/cmd_loop.go` and `cmd_fleet.go` — `--mode` flag
+Não tem flag, não tem env. Funciona out-of-the-box.
 
-Both modes share the same loop engine, the same verifier, the same skill
-system, the same pricing. The only thing that differs is who pays for the
-tokens and which way the inference flows.
+---
+
+## FAQ
+
+**P: Por que remover `--mode`?**
+R: Era fonte constante de confusão. O subcomando já define o contexto.
+
+**P: E se eu quiser rodar `loop` mas em Light?**
+R: Não dá. `loop` precisa de LLM autônomo. Pra usar Claude Code como inference, rode `mcp serve` e use as tools expostas.
+
+**P: E se eu quiser que `mcp serve` use API key?**
+R: Não dá. `mcp serve` é sempre sampling. Se você quer autonomia, use `loop start` etc.
+
+**P: E se eu quiser 2 instâncias de `mcp serve` (uma em cada projeto)?**
+R: Funciona normalmente. Cada uma é um processo independente com seu próprio MCP server.
+
+**P: Backwards compatibility?**
+R: v2.42.0 remove `--mode`, `RADIANT_MODE`, `mode:`, e o subcomando `radiant mode`. Operadores que usavam esses precisam atualizar. Veja CHANGELOG v2.42.0 para a migration.
+
+---
+
+## See also
+
+- `docs/SPRINT72-PLAN.md` — implementation of related MCP sampling work
+- `internal/llm/sampling.go` — `SamplingBackend` implementation
+- `internal/llm/backend.go` — `Backend` interface (HTTPBackend + SamplingBackend)
+- `cmd/radiant/cmd_audit.go` — `mcp serve` registration
+- `internal/mode/mode.go` — Light/Full constants (used in trace metadata)

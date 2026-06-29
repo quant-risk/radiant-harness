@@ -1,10 +1,24 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 )
+
+// isCharDevice reports whether f is a character device (a terminal
+// or console). Used to detect when `radiant mcp serve` was invoked
+// from a TTY stdin (the wrong context — the MCP server expects to
+// read JSON-RPC from a pipe). Uses os.FileInfo.Mode() so it works
+// on Linux, macOS, and Windows without external deps.
+func isCharDevice(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
 
 func registerAuditCmds(root *cobra.Command) {
 	// ── camada-agentica (Sprint 13.4 — agentic layer audit) ──
@@ -120,24 +134,48 @@ func registerAuditCmds(root *cobra.Command) {
 	// Reads newline-delimited JSON-RPC from stdin; writes
 	// responses to stdout.
 	//
-	// --sampling: when set, the server uses MCP sampling/createMessage
-	// to request LLM inference from the calling agent (Claude Code,
-	// Hermes, etc.) instead of using its own API key. No API key
-	// required in this mode.
+	// `radiant mcp serve` is always Light mode — the harness uses
+	// MCP sampling/createMessage to request LLM inference from the
+	// calling agent (Claude Code, Hermes, etc.). No API key required.
+	// This is intentional: mcp-serve is the entry point for the
+	// Light half of the Light/Full dichotomy, so the behaviour
+	// emerges from the subcommand name rather than a flag.
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "MCP server commands",
 	}
-	var mcpSamplingFlag bool
 	mcpServeCmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the MCP server (stdio transport)",
+		Short: "Start the MCP server (Light mode — MCP sampling, no API key)",
+		Long: `Start the MCP server on stdio. The harness operates in
+Light mode: it uses MCP sampling/createMessage to request LLM inference
+from the calling agent (Claude Code, Hermes, Cursor, etc.). No API key
+is required — the host agent pays for the inference.
+
+This is one half of the Light/Full split. The other half (Full mode,
+autonomous HTTP calls) lives in the regular subcommands:
+  - radiant loop start
+  - radiant run
+  - radiant fleet start
+  - radiant init / validate / etc.
+
+Behaviour emerges from the subcommand. No --mode flag, no
+RADIANT_MODE env, no mode: field in .radiant.yaml.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPServe(os.Stdin, os.Stdout, mcpSamplingFlag)
+			// mcp serve is always Light — sampling always on.
+			// Sanity-check: if stdin is a TTY, the operator probably
+			// ran this from a terminal by accident. Warn but don't
+			// refuse — the MCP server can be useful for debugging.
+			if isCharDevice(os.Stdin) {
+				fmt.Fprintln(os.Stderr,
+					"warning: radiant mcp serve is intended to be invoked "+
+						"by an MCP host (e.g. Claude Code). Running from a "+
+						"terminal with a TTY stdin won't receive any JSON-RPC "+
+						"requests and will exit immediately.")
+			}
+			return runMCPServe(os.Stdin, os.Stdout, true)
 		},
 	}
-	mcpServeCmd.Flags().BoolVar(&mcpSamplingFlag, "sampling", false,
-		"Use MCP sampling/createMessage — the calling agent provides LLM inference (no API key needed)")
 	mcpCmd.AddCommand(mcpServeCmd)
 	root.AddCommand(mcpCmd)
 
