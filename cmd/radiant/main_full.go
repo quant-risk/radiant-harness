@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "2.48.0"
+var version = "2.49.0"
 
 func main() {
 	root := &cobra.Command{
@@ -44,6 +44,7 @@ func main() {
 	registerPricingCmd(root)
 	registerSemanticCmd(root)
 	registerToolsCmd(root)
+	registerHostInfoCmd(root) // show detected host agent (Sprint 79)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 

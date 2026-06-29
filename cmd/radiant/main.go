@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "2.48.0-light"
+var version = "2.49.0-light"
 
 func main() {
 	root := &cobra.Command{
@@ -35,6 +35,7 @@ func main() {
 	// Light command set: only MCP-related subcommands.
 	registerSetupMCPCmd(root) // 11 agents, vendor-neutral config writes
 	registerMCPServeCmd(root) // the MCP server itself (Light by definition)
+	registerHostInfoCmd(root) // show detected host agent (Sprint 79)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 

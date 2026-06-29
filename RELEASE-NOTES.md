@@ -1,3 +1,96 @@
+# Release Notes — v2.49.0 (`hostdetect` + `radiant host-info`)
+
+> Foundational sprint for auto-detecting which agent is currently
+> invoking radiant-harness. Detection is exposed today; automatic
+> possession follow in Sprint 80.
+
+## TL;DR
+
+A new `internal/hostdetect/` package identifies at runtime which
+agent host (if any) is running radiant-harness. The `radiant
+host-info` subcommand surfaces the result so the user (or an LLM)
+can verify what's happening.
+
+```
+$ CLAUDE_CODE_ENTRY=/entry/claude CLAUDE_CODE_SSE_PORT=8080 \
+  radiant host-info
+Detected host agent:  claude-code (High confidence)
+Sampling supported:  yes
+Detection source:    env
+PID:                  63894  PPID: 63857
+
+Host "claude-code" supports MCP sampling — possession is possible.
+
+$ radiant host-info --json
+{
+  "agent": "claude-code",
+  "confidence": 90,
+  "supports_sampling": true,
+  "sample_env_vars": ["CLAUDE_CODE_ENTRY", "CLAUDE_CODE_SSE_PORT"],
+  ...
+}
+```
+
+## Detection matrix
+
+Nine agents are detected. Each has at least one distinguishing
+env var. If multiple env vars match, confidence climbs.
+
+| Agent             | Env signature                                              | PPID fallback       | Sampling |
+|-------------------|------------------------------------------------------------|---------------------|----------|
+| Claude Code       | CLAUDE_CODE_ENTRY, CLAUDE_CODE_SSE_PORT, CLAUDE_CODE_PID   | claude-code          | yes      |
+| Cursor            | CURSOR_TRACE_ID, CURSOR_HOME, CURSOR_USER_DATA_DIR          | cursor               | yes      |
+| Hermes            | HERMES_VERSION, HERMES_HOME, HERMES_AGENT_HOME              | hermes-agent         | yes      |
+| Kimi CLI          | KIMI_SHARE_DIR, KIMI_VERSION, KIMI_CONFIG_DIR               | kimi                 | yes      |
+| OpenClaw          | OPENCLAW_GATEWAY_URL, OPENCLAW_VERSION, OPENCLAW_WORKSPACE  | openclaw             | yes      |
+| Codex             | CODEX_HOME, CODEX_THREAD_ID, CODEX_RUNTIME, CODEX_THREAD_ENV | codex                | yes      |
+| Cline             | CLINE_USER, CLINE_VERSION, CLINE_WORKSPACE                  | cline                | yes      |
+| OpenCode          | OPENCODE_HOME, OPENCODE_VERSION, OPENCODE_CONFIG            | opencode-cli         | yes      |
+| VS Code Copilot   | VSCODE_PID, VSCODE_IPC_HOOK_CLI, VSCODE_CWD                 | Code Helper          | yes      |
+
+All known agents support MCP sampling. (Sprint 80 will wire this.)
+
+## What's NOT in this release (deferred to Sprint 80)
+
+- **`PickBackend` with auto-possession** — currently `radiant
+  loop`, `radiant run`, `radiant fleet` require an API key even
+  if you're inside Claude Code. Sprint 80 introduces
+  `internal/llm/pick.go` and applies it to every Full subcommand:
+  ```
+  1. Host detected + supports sampling → SamplingBackend (no key)
+  2. Else API key set → HTTPBackend
+  3. Else clear error
+  ```
+- **Configurable precedence** — user override of the order above
+  (e.g. RADIANT_BACKEND_PREFERENCE=api-key to disable auto-possession).
+- **Deep process-tree walk** on Windows / BSD. Sprint 79 is
+  macOS/Linux focused.
+
+## How to use right now
+
+```bash
+# Verify your agent is detected:
+$ CLAUDE_CODE_ENTRY=... radiant host-info
+# You should see "Detected host agent: claude-code (High confidence)"
+
+# Or with JSON for tooling:
+$ CLAUDE_CODE_ENTRY=... radiant host-info --json | jq .
+```
+
+If detection is wrong (false positive or false negative), the env
+var list per agent lives in `internal/hostdetect/hostdetect.go` —
+edit the `signatures` map and add a test in `hostdetect_test.go`.
+
+## Stats
+
+- Light: 9.9-11 MB across 5 platforms.
+- Full: 14-15 MB across 5 platforms.
+- Light: 0 HTTP-LLM symbols.
+- Tests: 31 packages OK (Full), 29 OK (Light), 0 FAIL.
+- 24 hostdetect tests cover 9 agents + fallback cases.
+
+---
+
 # Release Notes — v2.48.0 (Light vs Full: physical binary separation)
 
 > The user's explicit ask, delivered. **Two physically separate binaries

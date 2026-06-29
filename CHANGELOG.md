@@ -4,6 +4,85 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.49.0] — 2026-06-29 — `hostdetect` + `radiant host-info` (Sprint 79)
+
+Foundational sprint for "auto-detect which platform/agent is
+executing radiant-harness" (the user's explicit ask). Adds the
+detection half; Sprint 80 will wire it into PickBackend so the
+Full binary uses host sampling when available (no API key
+required even in Full mode).
+
+### Added — `internal/hostdetect/` (new package)
+
+Two-layer detection:
+1. **Env-var fingerprint** (high confidence) — each agent exports
+   at least one distinguishing env var when running.
+2. **Parent-process walk fallback** (medium confidence) — when env
+   vars don't match, the parent PID's process name is matched.
+
+Detects 9 agents:
+
+| Agent             | Env signature                                                  | Sampling |
+|-------------------|----------------------------------------------------------------|-----------|
+| Claude Code       | CLAUDE_CODE_ENTRY, CLAUDE_CODE_SSE_PORT, CLAUDE_CODE_PID     | yes       |
+| Cursor            | CURSOR_TRACE_ID, CURSOR_HOME, CURSOR_USER_DATA_DIR            | yes       |
+| Hermes            | HERMES_VERSION, HERMES_HOME, HERMES_AGENT_HOME                | yes       |
+| Kimi CLI          | KIMI_SHARE_DIR, KIMI_VERSION, KIMI_CONFIG_DIR                 | yes       |
+| OpenClaw          | OPENCLAW_GATEWAY_URL, OPENCLAW_VERSION, OPENCLAW_WORKSPACE    | yes       |
+| Codex             | CODEX_HOME, CODEX_THREAD_ID, CODEX_RUNTIME, CODEX_THREAD_ENV  | yes       |
+| Cline             | CLINE_USER, CLINE_VERSION, CLINE_WORKSPACE                    | yes       |
+| OpenCode          | OPENCODE_HOME, OPENCODE_VERSION, OPENCODE_CONFIG              | yes       |
+| VS Code Copilot   | VSCODE_PID, VSCODE_IPC_HOOK_CLI, VSCODE_CWD                   | yes       |
+
+### Added — `radiant host-info` subcommand (both Light and Full)
+
+```
+$ radiant host-info
+Detected host agent:  claude-code (High confidence)
+Sampling supported:  yes
+Detection source:    env
+PID:                  63894  PPID: 63857
+
+Host "claude-code" supports MCP sampling — possession is possible.
+Sprint 80 will wire this into PickBackend for automatic inference routing.
+
+$ CLAUDE_CODE_ENTRY=... radiant host-info --json
+{
+  "agent": "claude-code",
+  "confidence": 90,
+  "supports_sampling": true,
+  "sample_env_vars": ["CLAUDE_CODE_ENTRY", "CLAUDE_CODE_SSE_PORT"],
+  "pid": 63923,
+  "ppid": 63921,
+  "detection_source": "env"
+}
+```
+
+Flags: `--json` (machine-readable), `--verbose` (show matched env vars).
+
+### Stats
+
+- New files: 3 (`internal/hostdetect/hostdetect.go`,
+  `internal/hostdetect/hostdetect_test.go`,
+  `cmd/radiant/cmd_host_info.go`).
+- New tests: 24 in `internal/hostdetect/` (9 per-agent + 5 mixed +
+  4 sanity). Plus 1 cmd-level smoke via `go run`.
+- Modified files: 4 (`main.go`, `main_full.go`, plus CHANGELOG +
+  RELEASE-NOTES — coming).
+- LOC: ~520 added.
+- Full mode: **31 packages OK, 0 FAIL.**
+- Light mode: **29 packages OK, 0 FAIL.**
+- Cross-compile OK: linux/{amd64,arm64}, darwin/{amd64,arm64},
+  windows/amd64 — both modes.
+
+### What Sprint 79 does NOT do
+
+- **`PickBackend` not added** — that's Sprint 80. Sprint 79 only
+  exposes the detection result via `radiant host-info`.
+- **No automatic possession** in `radiant loop`/`run`/`fleet` yet.
+  Today those require API key even inside an agent. Sprint 80
+  closes that gap.
+
 ## [2.48.0] — 2026-06-29 — Light vs Full: physical binary separation via build tags (Sprint 78)
 
 **This release delivers the user's explicit ask:** Light and Full are
