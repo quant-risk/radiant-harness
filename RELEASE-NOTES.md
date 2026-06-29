@@ -1,3 +1,78 @@
+# Release Notes — v2.41.0 (MCP Tool-Bridge Adapter)
+
+> "Any MCP server, any tool." Operators can now register external
+> MCP servers as tool sources. Tools from those servers appear in
+> the local registry alongside the built-in four.
+
+## Headlines
+
+### 1. `radiant run --mcp-bridge`
+
+Register an MCP server as a tool source. Repeatable.
+
+```bash
+radiant run specs/0001-foo \
+  --mcp-bridge "github:npx -y @modelcontextprotocol/server-github" \
+  --mcp-bridge "fs:npx -y @modelcontextprotocol/server-filesystem ."
+```
+
+The bridge dials the server, performs the `initialize` handshake,
+discovers the advertised tools via `tools/list`, and converts each
+into a `tools.Tool` bound to the local registry. Tools are
+namespaced as `<bridge>__<tool>` (e.g. `github__create_issue`).
+
+### 2. JSON-RPC 2.0 over stdio
+
+`internal/mcpbridge/` implements the MCP spec's stdio transport —
+the same wire format any MCP client speaks. The client:
+
+- Performs the `initialize` handshake on connect
+- Tracks pending responses by ID via `sync.Map`
+- Honours context cancellation and per-RPC timeouts
+- Surfaces `isError=true` results as structured errors
+- Closes gracefully (SIGTERM, then SIGKILL after 2s)
+
+### 3. MCP tool → tools.Tool conversion
+
+JSON Schema `inputSchema` is flattened into `tools.Param` slices.
+Type, description, and `required` are propagated. Complex nested
+schemas pass through as opaque `object` params so the LLM still
+sees the raw structure in the description.
+
+## Stats
+
+- 1 new package: `internal/mcpbridge/` (client + registry +
+  bridge + mock + tests, ~900 LOC).
+- **989 tests passing across 29 packages, 0 confirmed failures**
+  (1 pre-existing flaky documented).
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+- 1 new CLI flag: `--mcp-bridge` (repeatable).
+
+## Compatibility
+
+- No breaking changes. Built-in tools keep working unchanged.
+- `loop.RealRegistry` signature changed to `(*Registry, error)` —
+  callers via `tools.RealRegistry()` indirection are unaffected.
+- `--mcp-bridge` is opt-in. Default behaviour unchanged.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.41.0
+# or:
+git pull
+make build
+./bin/radiant --version                          # should report 2.41.0
+./bin/radiant run specs/0001-foo \
+  --mcp-bridge "github:npx -y @modelcontextprotocol/server-github"
+```
+
+See [`docs/TOOL-USE.md`](docs/TOOL-USE.md) for the full operator
+guide.
+
+---
+
 # Release Notes — v2.40.0 (Tool Use Wire-up Parte 3: run_gate)
 
 > "Close the trio." `run_gate` is now concrete. The RealRegistry

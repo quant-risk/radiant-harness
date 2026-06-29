@@ -4,6 +4,106 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.41.0] — 2026-06-29 — MCP Tool-Bridge Adapter (Sprint 72)
+
+The "any MCP server, any tool" release. Operators can now register
+external MCP servers as tool sources for the radiant harness. Tools
+from those servers appear in the local `tools.Registry` alongside
+the built-in four (`write_file`, `read_file`, `search_code`,
+`run_gate`), under `<bridge_name>__<tool_name>` namespaces.
+
+### Added — MCP stdio client (`internal/mcpbridge/client.go`)
+
+- New `internal/mcpbridge/` package — JSON-RPC 2.0 client over
+  stdio (the MCP spec's primary transport for local servers).
+- `Dial(ctx, name, command, args)` — spawns the server subprocess,
+  performs the `initialize` handshake + `notifications/initialized`
+  notification.
+- `ListTools(ctx)` — returns the tools advertised by the server.
+- `CallTool(ctx, name, args)` — invokes a tool, surfaces `isError`
+  results as structured errors.
+- `Close()` — graceful shutdown (SIGTERM, then SIGKILL after 2s).
+- `NewClientWithStdio(...)` — for tests and power users who want
+  to inject pre-wired streams.
+- Timeouts per RPC: `initialize` 10s, `tools/list` 30s, `tools/call`
+  60s. Cancellable via ctx.
+- Pending responses tracked via `sync.Map[int64]chan rpcResponse`,
+  matched by ID. Background reader goroutine drains stdout and
+  dispatches to waiters.
+- Protocol-level errors (`ErrTimeout`, `ErrServerCrash`,
+  `ErrProtocol`) surface as typed sentinels.
+
+### Added — Tool conversion (`internal/mcpbridge/registry.go`)
+
+- `MCPTool.ToLocalTool(client)` — converts an MCP `tools/list`
+  result into a `tools.Tool` bound to the client. Names are
+  namespaced: `<bridge>__<tool>` (e.g. `github__create_issue`).
+- `flattenSchema(schema)` — flattens MCP's JSON Schema
+  `inputSchema` into `tools.Param` slice (type, description,
+  required propagated). Complex nested schemas pass through as
+  opaque `object` params.
+
+### Added — Bridge helper (`internal/mcpbridge/bridge.go`)
+
+- `LoadTools(ctx, name, command, args)` — convenience that dials
+  + lists + converts in one call. Returns `(client, tools, err)`.
+- `ParseSpec(spec)` — parses CLI flag values like
+  `github:npx -y @modelcontextprotocol/server-github` into
+  `(name, command, args)`.
+
+### Added — Mock MCP server (`internal/mcpbridge/mock/main.go`)
+
+- Minimal in-tree mock for tests. Reads JSON-RPC from stdin,
+  handles `initialize` / `tools/list` / `tools/call`. Tool list
+  configurable via `MOCK_TOOLS` env var; the `fail_tool` name
+  triggers `isError=true` for error-path tests.
+
+### Changed — RealRegistry signature
+
+- `loop.RealRegistry(projectDir, mcpBridges...)` now accepts
+  optional `MCPSpec` slices. Returns `(*Registry, error)`. Built-in
+  tools never fail to register; an error means an MCP bridge
+  failed to dial.
+- `loop.RealRegistrySimple(projectDir)` is the convenience wrapper
+  for callers that don't need MCP integration.
+
+### Added — CLI flag `radiant run --mcp-bridge`
+
+- Repeatable: `--mcp-bridge "github:npx -y ..."` can appear
+  multiple times to register multiple bridges.
+- Spec format: `"name:command args..."`. Parser handles quoted
+  arguments.
+- Failures surface as CLI errors with the bridge name and the
+  underlying error.
+
+### Documentation
+
+- `docs/SPRINT72-PLAN.md` — the implementation plan this release
+  executed.
+- `docs/TOOL-USE.md` — MCP bridge section (CLI usage, semantics,
+  failure modes).
+- README updated with MCP bridge example.
+
+### Stats
+
+- 1 new package: `internal/mcpbridge/` (350 LOC client + 100 LOC
+  registry + 60 LOC bridge + 280 LOC tests).
+- 1 new mock: `internal/mcpbridge/mock/main.go` (120 LOC).
+- **989 tests passing across 29 packages, 0 confirmed failures**
+  (1 pre-existing flaky: `TestRunAllContextCanceled` in
+  `internal/fleet/`, documented in `validation-report-sprint-56-57.md`).
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. Built-in tools keep working unchanged.
+- New `loop.RealRegistry` signature change is internal — callers
+  via `tools.RealRegistry()` (the indirection) are unaffected.
+- `--mcp-bridge` is opt-in. Default behaviour unchanged.
+
+---
+
 ## [2.40.0] — 2026-06-29 — Tool Use Wire-up Parte 3: run_gate concrete (Sprint 71)
 
 The "close the trio" release. `run_gate` is now a concrete tool
