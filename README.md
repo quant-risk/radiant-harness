@@ -163,6 +163,57 @@ make release       # → bin/radiant-{linux,darwin,windows}-{amd64,arm64}
 
 ---
 
+## The "possession" flow (for AI agents)
+
+When a host agent (Claude Code, Cursor, Hermes, MiniMax Code, Cline, etc.) calls the `radiant_run` MCP tool, the harness drives a 4-phase loop — and the **host agent IS the executor**. Each phase calls `sampling/createMessage` back to the host, asking it to think and act.
+
+```
+┌─────────────────────────────────────┐
+│  host agent (Claude Code, Cursor…)   │ ← your agent does the thinking + tools
+│  thinking + reading + writing + bash │
+└──────────────┬──────────────────────┘
+               │ MCP stdio (JSON-RPC 2.0)
+               ▼
+┌─────────────────────────────────────┐
+│  radiant mcp serve                   │ ← drives the loop, verifies gates
+│  sampling/createMessage → host      │
+│  parse response → next phase        │
+└─────────────────────────────────────┘
+
+Phases:
+1. **discover** — host reads CONTEXT.md, project layout, bundled skills
+2. **plan** — host decomposes goal into ACs + tasks (uses nova-feature skill)
+3. **execute** — host writes code, runs gates (go build/test/etc.)
+4. **verify** — host reviews its own work; separate pass so the same
+   model doesn't approve its own output
+
+The host's `sampling/createMessage` response **MUST** end with one of:
+
+```
+VERDICT: APPROVED
+SCORE: 1.00
+EVIDENCE: <one sentence>
+ESCALATE: false
+ISSUES:
+```
+
+(reviewer phase — per-iteration check)
+
+```
+REVIEW: PASS
+SCORE: 1.00
+EVIDENCE: <one sentence>
+FINDINGS:
+```
+
+(post-convergence review panel)
+
+Anything else and the harness will retry. Trailing prose after the
+keyword (`VERDICT: APPROVED — gates green`) is fine; the parser reads
+the first word.
+
+---
+
 ## Quickstart
 
 ### 1. Wire into your agent
