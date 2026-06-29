@@ -127,14 +127,17 @@ func runSecurity(scope, outPath string, failOnWarning bool) error {
 // .test.go files (test fixtures commonly contain fake secrets).
 func scanSecrets() []securityFinding {
 	patterns := []secretPattern{
-		{Name: "AWS Access Key", Regex: regexp.MustCompile(`AKIA[0-9A-Z]{16}`), Description: "AWS access key ID"},
-		{Name: "GitHub Token", Regex: regexp.MustCompile(`ghp_[A-Za-z0-9]{36}`), Description: "GitHub personal access token"},
-		{Name: "GitHub Fine-Grained Token", Regex: regexp.MustCompile(`github_pat_[A-Za-z0-9_]{82}`), Description: "GitHub fine-grained PAT"},
-		{Name: "Slack Token", Regex: regexp.MustCompile(`xox[abpr]-[A-Za-z0-9-]{10,}`), Description: "Slack API token"},
-		{Name: "OpenAI Key", Regex: regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`), Description: "OpenAI / OpenAI-compatible API key"},
-		{Name: "Anthropic Key", Regex: regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{20,}`), Description: "Anthropic API key"},
-		{Name: "Google API Key", Regex: regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`), Description: "Google API key"},
-		{Name: "Generic Bearer", Regex: regexp.MustCompile(`Bearer\s+[A-Za-z0-9_\-\.=]{20,}`), Description: "Bearer token in source"},
+		// All secret regexes use \b (word boundary) where applicable so that
+		// legitimate words like "task-tracker-for-personal-use" don't trigger
+		// a match on the "sk-" or "ghp_" substrings inside them.
+		{Name: "AWS Access Key", Regex: regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), Description: "AWS access key ID"},
+		{Name: "GitHub Token", Regex: regexp.MustCompile(`\bghp_[A-Za-z0-9]{36}\b`), Description: "GitHub personal access token"},
+		{Name: "GitHub Fine-Grained Token", Regex: regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{82}\b`), Description: "GitHub fine-grained PAT"},
+		{Name: "Slack Token", Regex: regexp.MustCompile(`\bxox[abpr]-[A-Za-z0-9-]{10,}\b`), Description: "Slack API token"},
+		{Name: "OpenAI Key", Regex: regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), Description: "OpenAI / OpenAI-compatible API key"},
+		{Name: "Anthropic Key", Regex: regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}\b`), Description: "Anthropic API key"},
+		{Name: "Google API Key", Regex: regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`), Description: "Google API key"},
+		{Name: "Generic Bearer", Regex: regexp.MustCompile(`\bBearer\s+[A-Za-z0-9_\-\.=]{20,}\b`), Description: "Bearer token in source"},
 	}
 	skipDirs := map[string]bool{
 		".git":                    true,
