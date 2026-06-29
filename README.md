@@ -435,6 +435,44 @@ Your agent calls `radiant_run`, the harness spins up the loop, every LLM call ro
 
 ---
 
+## What if my agent doesn't implement sampling? (v3.6.0+)
+
+`mcp__radiant__possess` requires the host agent to implement
+`MCP sampling/createMessage`. As of mid-2026, **Codex GPT-5 does
+not** (it returns JSON-RPC `-32601`). Before v3.6.0 the harness
+silently exited 0 with empty `docs/`, `specs/`, `scripts/`.
+
+v3.6.0 fixes that. Two changes:
+
+1. **Self-driven scaffold mode.** When the harness detects — via
+   either an empirical probe (`~/.radiant-harness/agent-capabilities.json`)
+   or a hard-coded `knownSamplingUnsupported` list — that the host
+   doesn't sample, possession runs the same 4 phases
+   (`discover → plan → execute → verify`) but emits deterministic
+   **Markdown templates** with `[host-agent: fill in ...]`
+   markers. You replace the markers with real content using your
+   own tools (the scaffold is the artifact; the content is yours).
+2. **Public safe-CLI commands.** `radiant spec`, `radiant audit`,
+   `radiant skills`, `radiant context` no longer require
+   `RADIANT_INTERNAL=1`. Hosts with shell access can drive the SDD
+   pipeline directly — scaffold a spec, audit the layout, list
+   skills, assemble context — without the MCP loop.
+
+Codex is hard-coded in `knownSamplingUnsupported` as of v3.6.0, so
+the very first possession call on a fresh Codex box routes to
+self-driven with no probe latency. Cline, OpenCode, Kimi, OpenClaw,
+VSCode, and `mavis-code` are still `declared=true` on faith — if
+you observe a similar `-32601` on one of them, add it to the
+`knownSamplingUnsupported` map in `internal/hostdetect/probe.go` and
+open a PR.
+
+The full self-driven contract — what gets templated, what the
+markers mean, when the probe cache gets updated — lives in
+[`AGENTS-FOR-TASKS.md`](AGENTS-FOR-TASKS.md) § "self-driven
+scaffold mode".
+
+---
+
 ## How it works
 
 ```text

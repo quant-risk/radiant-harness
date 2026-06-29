@@ -27,6 +27,32 @@ path](#why-this-is-the-only-path).
 
 ---
 
+### Heads-up: self-driven scaffold mode (v3.6.0)
+
+If your host does NOT implement `sampling/createMessage` (Codex GPT-5
+first; Cline / OpenCode / Kimi / OpenClaw / VSCode / `mavis-code`
+next in line), `radiant_possess` will route to **self-driven scaffold
+mode** automatically — the same four phases run, but the harness
+emits deterministic Markdown templates (one per phase) with
+`[host-agent: fill in ...]` markers instead of relying on LLM
+sampling. The project scaffold (`docs/`, `specs/`, `scripts/`,
+`.radiant-harness/`) is built either way; only the **content** of
+each file comes from you instead of from sampling.
+
+When that happens, the next step is: read every templated file,
+replace the markers with real content using your own tools, and run
+`./scripts/run.sh` (or whatever the templated entrypoint says). Run
+`radiant_phase_status(task_id="…")` to see exactly which files are
+still templated.
+
+**Do not** try `RADIANT_INTERNAL=1 radiant possess` to bypass this —
+internal mode is for CI. The self-driven path is the supported
+behaviour on hosts that don't sample.
+
+
+
+---
+
 ## Install + wire MCP
 
 ```bash
@@ -149,7 +175,7 @@ the parser reads the first word.
 | `radiant_possess` not in your tool list              | The reload in [§ Reload](#reload-yourself) didn't run. Restart, re-check.             |
 | `radiant_possess` exits with `phase X FAILED: …`     | Re-call `radiant_possess(task=…, workdir=…)`. The harness resumes from the failed phase — you do **not** start over. |
 | `sampling/createMessage` returns timeout             | Raise `RADIANT_SAMPLING_TIMEOUT` to `180s` in the harness config, retry.               |
-| Host returns `JSON-RPC -32601` for sampling          | The host does not implement sampling. The harness falls back to deterministic stub mode and still scaffolds `specs/`, `docs/`, `AGENTS.md`. Read the stub prompts and apply them yourself with your own tools. |
+| Host returns `JSON-RPC -32601` for sampling          | The host does not implement sampling. **v3.6.0:** the harness now routes to *self-driven scaffold mode* automatically — it still fills `specs/0001-<slug>/spec.md`, `tasks.md`, `scripts/run.sh`, `docs/README.md`, `.radiant-harness/CONTEXT.md`, `handoff.md`, `verify.md` with deterministic templates. Each template carries a `[host-agent: fill in …]` marker pointing at the section you should replace. Persist this fact via the `~/.radiant-harness/agent-capabilities.json` probe cache so subsequent runs of the same host short-circuit to self-driven without paying the cost of another -32601. |
 | `radiant loop` shell command exits 1 with "internal helper" gate | Expected. Use `radiant_possess` instead. If you really need the CLI for scripting, the user must set `RADIANT_INTERNAL=1` themselves; do **not** try to bypass. |
 | Hallucinated `<function=…>` XML in `sampling/createMessage` response | The phase prompts are text-only by design (v3.5.1). If your host still emits XML, answer the prompt with Markdown and fenced code blocks, not tool-call syntax. The host agent (you) is meant to apply those with your own Read/Write/Bash tools. |
 

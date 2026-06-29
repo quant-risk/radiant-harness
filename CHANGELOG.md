@@ -4,6 +4,129 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.6.0] — 2026-06-29 — Self-driven possession for hosts without sampling
+
+v3.5.1 fixed the crash but left a **hollow stub** behind: when a host
+agent didn't implement `sampling/createMessage` (Codex GPT-5 first;
+Cline/OpenCode/Kimi/OpenClaw/VSCode/`mavis-code` next in line on
+faith-only defaults), `mcp__radiant__possess` exited 0 with empty
+`docs/`, `specs/`, `scripts/` directories. The host agent then had
+to fill them in by hand — exactly the work the harness is meant to
+absorb. v3.6.0 fixes the **promise gap**, not just the crash.
+
+### Added
+
+- **Persistent capability state** (`internal/hostdetect/probe.go`).
+  Empirical probe results now persist to
+  `~/.radiant-harness/agent-capabilities.json` (atomic rename,
+  schema-versioned). `hostdetect.ResolveSupport(agent)` returns the
+  probed value first, falls back to the declared constant, and
+  finally to the new `knownSamplingUnsupported` map. `Detect()`
+  reports a new `SamplingSource` field (`"probe" | "declared"`)
+  so the user can see whether the answer is empirical or aspirational.
+  Codex is pinned in `knownSamplingUnsupported` so the very first
+  `radiant_possess` call on a fresh Codex box dispatches to the
+  self-driven path with zero probe latency.
+- **Self-driven possession pipeline**
+  (`cmd/radiant/cmd_mcp_possess_self_driven.go`). When
+  `ResolveSupport` reports `false` (probe-verified or well-attested),
+  **or** when a live sampling call returns JSON-RPC `-32601`
+  mid-run, possession routes to a deterministic 4-phase pipeline
+  that emits **usable artifacts** instead of placeholders:
+  - `.radiant-harness/CONTEXT.md` — project fingerprint + suggested
+    bundled skills (matched against task keywords)
+  - `specs/0001-<slug>/spec.md` + `tasks.md` — templated with
+    `[host-agent: fill in ...]` markers so the next agent knows
+    exactly which sections need real content
+  - `scripts/run.sh` — templated entrypoint the host agent replaces
+  - `docs/README.md` — overview + layout map of every templated file
+  - `.radiant-harness/handoff.md` — instructions for the next agent
+  - `.radiant-harness/verify.md` — templated-vs-filled report so the
+    state file tells the truth about what still needs the host's
+    understanding
+
+  The state machine and `radiant_phase_status` shape are identical to
+  the LLM-driven path; downstream tools see the same `done` values.
+
+- **Safe CLI commands became public**
+  (`cmd/radiant/main.go::publicCommands`). `radiant spec`, `radiant
+  audit`, `radiant skills`, and `radiant context` no longer require
+  `RADIANT_INTERNAL=1`. Hosts with shell access (Hermes, Codex's
+  bash, any agent that runs shell) can now drive the SDD pipeline by
+  itself when MCP sampling is unavailable: scaffold `spec.md`, audit
+  the layout, list skills, assemble context — none of these touch
+  the LLM loop or bypass the harness contract. Dangerous surfaces
+  (`loop`, `run`, `fleet`, `eval`, `models`, `train`, `predict`,
+  `drift`, `profile`, `autodata`, `evaluate`, `incident`, `stats`,
+  `causal-estimate`, `integrate`, `improve`, `bench`, `budget`,
+  `worktree`, `state`, `handoff`, `tools`, `pricing`, `telemetry`)
+  remain gated.
+
+- **`setup-mcp` pre-flight warning**
+  (`cmd/radiant/cmd_setup_mcp.go`). Before writing the MCP config, if
+  `hostdetect.ResolveSupport` returns `probed=true && supports=false`
+  for the detected agent, the command now prints a 5-line warning
+  explaining that the harness will route to self-driven scaffolding
+  and pointing the user at `AGENTS-FOR-TASKS.md`.
+
+### Changed
+
+- **`runPossessWithBackend`** — pre-flight check against
+  `ResolveSupport` before any sampling call, plus graceful handoff
+  to `runSelfDrivenPossess` mid-run when a phase fails with
+  `-32601`. Previously it returned an error and exited; now it
+  records the probe evidence and switches to the deterministic
+  pipeline so the rest of the phases still produce real artifacts.
+- **`runPossessForCLI`** — the hidden debug mirror
+  (`radiant mcp possess --task=...`) now also honours
+  `hostdetect.ResolveSupport`. Override with
+  `RADIANT_FORCE_SAMPLING=1` to exercise the legacy stub path on
+  purpose.
+
+### Fixed
+
+- **`cmd_mcp_possess_test.go`** — rewrote the regression test
+  (`TestRunPossessWithBackendFallsBackToSelfDriven`) to assert the
+  v3.6.0 contract: every phase reaches `done`, no phase error is
+  left over, and `specs/0001-*/spec.md` contains the
+  `[host-agent: fill in ...]` marker. The previous test asserted the
+  v3.5.1 failure path; the rename is the contract change.
+- **`scripts/smoke-test.sh`** — version whitelist accepts
+  `v3.6.0` (was missing `v3.5.1` between v3.5.0 and this release).
+- **`cmd/radiant/cmd_setup_mcp.go`** — fixed a long-standing
+  `fmt.Printf` arity bug in the `--dry-run` branch (had 3 args, 2
+  expected — printed without ever surfacing the content).
+
+### Lesson (carried forward)
+
+**Graceful degrade is only graceful when the degraded path still
+does useful work.** v3.5.1 fell back to "echo the same thing and
+call it success" — the user discovered the lie 4 minutes later
+when their project had empty `docs/`, `specs/`, `scripts/`. Empty
+placeholders are worse than a clear failure: they produce the same
+surface area as a real scaffold without any of the payload.
+
+For every future fallback: ask "what does the user actually GET?"
+If the answer is "the same surface area with no payload", the
+fallback is a hollow stub masquerading as graceful — and it should
+not ship.
+
+### Verified
+
+- `go test ./...` — all packages PASS.
+- `go test -run TestRunPossessWithBackend` — PASS (regression for
+  the v3.5.1 failure).
+- `make smoke` → `17/17 OK` (whitelist bumped to v3.6.0).
+- `make test-agents` → `12/12 PASS` (cross-agent install matrix).
+- Hand-trace: `radiant mcp possess --task="…" --workdir=…` against
+  a `~/.radiant-harness/agent-capabilities.json` with
+  `codex.supports_sampling=false` produces the full templated
+  scaffold (`.radiant-harness/CONTEXT.md`, `spec.md`, `tasks.md`,
+  `scripts/run.sh`, `docs/README.md`, `.radiant-harness/handoff.md`,
+  `.radiant-harness/verify.md`); state machine reaches `done` for
+  every phase; spec.md carries the `[host-agent: fill in …]`
+  marker the next agent looks for.
+
 ## [3.5.1] — 2026-06-29 — Possession flow works on every host
 
 Two interlocking bugs surfaced in production on 2026-06-29 with
