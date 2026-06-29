@@ -3,10 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // SamplingOptions configures a SamplingBackend.
@@ -144,12 +146,33 @@ func (sb *SamplingBackend) ModelID() string {
 	return "mcp-sampling"
 }
 
+// defaultSamplingTimeout caps how long Chat() waits for a host-agent
+// response before returning a clear error. The Light build never sets a
+// deadline on the context for ordinary subcommand calls (loop, run,
+// fleet, eval, …); without this, running `radiant loop start X` from a
+// shell without a wired host agent would block forever until the
+// process is killed.
+const defaultSamplingTimeout = 5 * time.Second
+
 // Chat converts messages to the MCP sampling format, emits a
 // sampling/createMessage request to the host client, and blocks until the
 // correlated response arrives via Dispatch or the context is cancelled.
+//
+// If the context has no deadline, Chat enforces defaultSamplingTimeout so
+// standalone CLI invocations fail fast with ErrNoHostAgent instead of
+// hanging.
 func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatResponse, error) {
 	if sb.enc == nil {
 		return nil, fmt.Errorf("sampling backend: no output writer configured")
+	}
+
+	// Apply the default timeout only when the caller didn't set one. The
+	// MCP server runtime already uses contexts with its own deadlines
+	// (per-request); the CLI path uses context.Background().
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultSamplingTimeout)
+		defer cancel()
 	}
 
 	id := sb.nextID.Add(1)
@@ -187,6 +210,12 @@ func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatR
 		}
 		return samplingToChatResponse(res.text), nil
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf(
+				"%w: no host agent responded within %s — wire one via `radiant setup-mcp` "+
+					"from inside Claude Code / Cursor / Hermes, then retry",
+				ErrNoHostAgent, defaultSamplingTimeout)
+		}
 		return nil, fmt.Errorf("sampling: context cancelled: %w", ctx.Err())
 	}
 }

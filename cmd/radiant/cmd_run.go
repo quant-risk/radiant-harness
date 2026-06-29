@@ -75,9 +75,10 @@ func registerRunCmds(root *cobra.Command) {
 			}
 			fmt.Println()
 			fmt.Println("\n  Next steps:")
-			fmt.Println("    1. git init")
-			fmt.Println("    2. Configure your LLM: radiant config --provider=openrouter --model=deepseek-v4-pro --api-key=YOUR_KEY")
-			fmt.Println("    3. Run: radiant run specs/0001-feature/")
+			fmt.Println("    1. (already done — git was initialised during init)")
+			fmt.Println("    2. Wire your host agent:  radiant setup-mcp  (run from inside Claude Code, Cursor, Hermes, …)")
+			fmt.Println("    3. Cut a feature spec:    radiant spec \"<intent>\" --ac=\"...\" --task=\"...\" --gate=\"...\"")
+			fmt.Println("    4. Run the loop:          radiant loop start \"<goal>\"   (uses your host agent via MCP sampling)")
 			return nil
 		},
 	}
@@ -451,7 +452,7 @@ func registerRunCmds(root *cobra.Command) {
 				m, _ := llm.GetPreset(name, "")
 				fmt.Printf("    %-20s %s/%s\n", name, m.Provider, m.Model)
 			}
-			fmt.Println("\n  Use with: radiant run specs/0001/ --model=deepseek-v4-pro --api-key=YOUR_KEY")
+			fmt.Println("\n  Use with: radiant run specs/0001/ --model=claude-sonnet-4-6  (LLM is your host agent — no API key)")
 		},
 	}
 	root.AddCommand(modelsCmd)

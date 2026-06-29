@@ -67,17 +67,20 @@ func runSetupCI(provider, outPath, model string) error {
 // ciSecretsFor returns the list of secret names that the
 // generated workflow references. Used by runSetupCI to print
 // a helpful "set these secrets" reminder.
+//
+// Light build: no LLM API key is needed because every radiant
+// inference goes through MCP sampling to the host agent. The
+// only secret required is the provider's own SCM token.
 func ciSecretsFor(provider string) []string {
-	common := []string{"RADIANT_API_KEY"}
 	switch provider {
 	case "github":
-		return append(common, "GITHUB_TOKEN")
+		return []string{"GITHUB_TOKEN"}
 	case "gitlab":
-		return append(common, "GITLAB_TOKEN")
+		return []string{"GITLAB_TOKEN"}
 	case "circleci":
-		return append(common, "CIRCLE_TOKEN")
+		return []string{"CIRCLE_TOKEN"}
 	default:
-		return common
+		return []string{}
 	}
 }
 
@@ -109,8 +112,6 @@ jobs:
       - name: Install radiant
         run: go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
       - name: Validate (spec/code alignment)
-        env:
-          RADIANT_API_KEY: ${{ secrets.RADIANT_API_KEY }}
         run: |
 %s          radiant validate
       - name: Audit (project layout conformity)

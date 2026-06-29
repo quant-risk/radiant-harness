@@ -147,9 +147,21 @@ func nextSpecSeq(dir string) (int, error) {
 }
 
 // renderSpecMD produces spec.md from the interview answers. Follows
-// the nova-feature skill template: Why, What, ACs, Non-goals.
+// the nova-feature skill template: Why, What, ACs, Non-goals. The
+// frontmatter includes the fields required by radiant's quality
+// auditor (name, description, alwaysApply) so the spec validates
+// out-of-the-box.
 func renderSpecMD(seq int, slug, intent, tier string, acs []string) string {
 	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: spec-%04d-%s\n", seq, slug)
+	fmt.Fprintf(&b, "description: \"%s\"\n", strings.ReplaceAll(intent, `"`, `\"`))
+	fmt.Fprintf(&b, "id: %04d\n", seq)
+	fmt.Fprintf(&b, "slug: %s\n", slug)
+	fmt.Fprintf(&b, "tier: %s\n", tier)
+	b.WriteString("status: draft\n")
+	b.WriteString("alwaysApply: false\n")
+	b.WriteString("---\n\n")
 	fmt.Fprintf(&b, "# %04d — %s\n\n", seq, slug)
 	b.WriteString("## Why\n\n")
 	fmt.Fprintf(&b, "%s\n\n", intent)
@@ -157,7 +169,14 @@ func renderSpecMD(seq int, slug, intent, tier string, acs []string) string {
 	b.WriteString("[Describe the user-visible behavior introduced by this feature.]\n\n")
 	b.WriteString("## Acceptance criteria\n\n")
 	for i, ac := range acs {
-		fmt.Fprintf(&b, "### AC%d\n%s\n\n", i+1, ac)
+		// Header MUST include a title after the AC id (e.g. "### AC1: ...")
+		// so `parseAcceptanceCriteria` in cmd_pr_review.go recognises it.
+		// Body is on the next line.
+		shortTitle := ac
+		if len(shortTitle) > 80 {
+			shortTitle = shortTitle[:77] + "..."
+		}
+		fmt.Fprintf(&b, "### AC%d: %s\n\n%s\n\n", i+1, shortTitle, ac)
 	}
 	b.WriteString("## Non-goals\n\n")
 	b.WriteString("- [List what this feature does NOT do. Prevents scope creep.]\n\n")
@@ -167,9 +186,20 @@ func renderSpecMD(seq int, slug, intent, tier string, acs []string) string {
 
 // renderTasksMD produces tasks.md as a Markdown table with the AC
 // coverage column. The coverage gate is enforced at command time —
-// every task must declare which ACs it covers.
+// every task must declare which ACs it covers. The frontmatter
+// matches `radiant validate`'s quality schema (name, description,
+// alwaysApply).
 func renderTasksMD(seq int, slug, tier string, tasks, gates, covers, acs []string) string {
 	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: tasks-%04d-%s\n", seq, slug)
+	fmt.Fprintf(&b, "description: \"Tasks for spec %04d — %s\"\n", seq, slug)
+	fmt.Fprintf(&b, "id: %04d\n", seq)
+	fmt.Fprintf(&b, "slug: %s\n", slug)
+	fmt.Fprintf(&b, "tier: %s\n", tier)
+	b.WriteString("status: draft\n")
+	b.WriteString("alwaysApply: false\n")
+	b.WriteString("---\n\n")
 	fmt.Fprintf(&b, "# %04d — Tasks: %s\n\n", seq, slug)
 	fmt.Fprintf(&b, "_Tier: %s. Total ACs: %d. Total tasks: %d._\n\n", tier, len(acs), len(tasks))
 	b.WriteString("| # | Task | Covers | Gate |\n")
@@ -2418,18 +2448,14 @@ type evalResult struct {
 // latency / token / cost statistics. The output is a markdown table
 // plus an optional JSON file via --output for trend tracking.
 func runEval(ctx context.Context, model, prompt string, runs int, outputPath string) error {
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	if apiKey == "" {
-		return fmt.Errorf("no API key set; export OPENROUTER_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY) or pass --api-key to `radiant run`")
-	}
+	// Light build: never reads API key env vars. Inference is delegated
+	// to the host agent via MCP sampling/createMessage. If no agent is
+	// connected, the SamplingBackend returns a clear "no host agent"
+	// error after 5s (see internal/llm/sampling.go).
 
-	m, ok := llm.GetPreset(model, apiKey)
+	// Resolve model preset without an API key — the preset table is
+	// metadata (provider + model id + max tokens), not credentials.
+	m, ok := llm.GetPreset(model, "")
 	if !ok {
 		return fmt.Errorf("unknown model preset %q; run `radiant models` for the list", model)
 	}
@@ -2437,6 +2463,7 @@ func runEval(ctx context.Context, model, prompt string, runs int, outputPath str
 
 	fmt.Printf("  radiant eval — model=%s runs=%d\n", model, runs)
 	fmt.Printf("  prompt: %s\n\n", truncateForDisplay(prompt, 80))
+	fmt.Println("  (delegating to host agent via MCP sampling — no API key required)")
 
 	results := evalResult{Model: model, Runs: runs, Iterations: make([]evalRun, runs)}
 

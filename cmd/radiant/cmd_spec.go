@@ -179,6 +179,14 @@ func registerSpecCmds(root *cobra.Command) {
 				fmt.Print(diagram)
 				return nil
 			}
+			// Make sure the parent directory exists — atomicWrite writes to
+			// <out>.tmp first and would fail with "no such file or directory"
+			// otherwise.
+			if dir := filepath.Dir(out); dir != "" && dir != "." {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return fmt.Errorf("mkdir %s: %w", dir, err)
+				}
+			}
 			if err := atomicWrite(out, diagram); err != nil {
 				return fmt.Errorf("write %s: %w", out, err)
 			}
