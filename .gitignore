@@ -29,3 +29,6 @@ node_modules/
 /.cursor/
 /.windsurf/
 /.zed/
+
+# Local release tarballs (build artifacts)
+/radiant-v*.tar.gz
