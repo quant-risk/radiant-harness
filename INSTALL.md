@@ -1,12 +1,12 @@
 # Installation
 
-The Light binary is a single ~7.4 MB executable. No installer, no daemon, no
-runtime dependencies, no API key.
+Single ~11 MB binary. No installer, no daemon, no runtime dependencies,
+no API key.
 
 ## Quick install (recommended)
 
 ```bash
-go install github.com/quant-risk/radiant-harness/cmd/radiant@v3.0.1
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v3.2.0
 ```
 
 This installs the tagged release to `$GOPATH/bin` (usually `~/go/bin`).
@@ -17,7 +17,7 @@ Make sure `$GOPATH/bin` is on your `$PATH`:
 export PATH="$PATH:$(go env GOPATH)/bin"
 
 # verify
-radiant --version       # → radiant 3.0.1
+radiant --version       # → radiant 3.2.0
 ```
 
 ## Download a release binary
@@ -124,6 +124,13 @@ discover `radiant_run` and use it.
 ## Verify the install
 
 ```bash
+radiant doctor
+```
+
+Should print diagnostic results for: agent host detection, MCP config wiring,
+zero-HTTP-LLM guarantee, and the binary's command surface.
+
+```bash
 radiant host-info
 ```
 
@@ -149,7 +156,7 @@ nm bin/radiant | grep -iE 'chatAnthropic|HTTPBackend|NewHTTPBackend'
 strings bin/radiant | grep -iE 'anthropic|openai|openrouter'
 
 # Binary size:
-ls -lh bin/radiant    # ≈ 7.4 MB
+ls -lh bin/radiant    # ≈ 11 MB
 
 # 17/17 checks pass:
 make smoke
@@ -222,6 +229,17 @@ not your home directory.
 3. Open the agent's MCP config and confirm the `radiant` server is registered
    and points at the binary path you expect.
 
+### `radiant loop start` says "no host agent connected"
+
+The harness needs an MCP-compatible agent on the other end of stdio to
+satisfy LLM calls (via `sampling/createMessage`). Two options:
+
+1. Run `radiant setup-mcp` from inside your agent (Claude Code, Cursor,
+   Hermes, …), restart it, then re-run the loop. The agent becomes the
+   inference host.
+2. If you don't have an agent wired up yet, start one and ask it to
+   `radiant setup-mcp` — the harness will then drive its loop.
+
 ### Cross-compile fails on a non-Linux host
 
 The Makefile uses `GOOS` / `GOARCH` env vars. On Windows, use
@@ -229,7 +247,6 @@ The Makefile uses `GOOS` / `GOARCH` env vars. On Windows, use
 
 ## Next
 
-- [README](README.md) — overview
-- [EXAMPLES](EXAMPLES.md) — walkthrough: agent calls `radiant_run`
-- [Light vs Full](README.md#-light-vs-full) — what's in this binary vs the Full one
-- [`docs/TWO-REPOS.md`](docs/TWO-REPOS.md) — rationale for the dual-repo layout
+- [README](README.md) — overview + full command list
+- [EXAMPLES](EXAMPLES.md) — worked walkthroughs of every command family
+- [`docs/TWO-REPOS.md`](docs/TWO-REPOS.md) — why there are two repos

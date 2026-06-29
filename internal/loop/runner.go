@@ -629,21 +629,24 @@ Do not implement — only plan. Output a numbered list, one step per line.
 Keep it under 10 steps. Focus on what the executor needs to do next.`
 }
 
-// resolveBackends returns the per-phase LLM backends and model IDs to use.
-// httpBackendBuilder stays nil because radiant never opens an HTTP
-// connection to an LLM provider. Callers must supply cfg.Backend
-// (typically a SamplingBackend that routes via MCP to the host agent).
+// resolveBackends returns the per-phase LLM backends and model IDs to use
+// httpBackendBuilder is set by cmd/radiant/helpers.go's init() in the
+// Full build to llm.NewHTTPBackend. In the Light build it stays nil
+// because llm.NewHTTPBackend lives in a file tagged !light_only. Light
+// callers always supply cfg.Backend, so the HTTP fallback path is
+// unreachable in Light.
 var httpBackendBuilder func(m llm.Model) llm.Backend
 
-// SetHTTPBackendBuilder registers an alternative backend factory.
-// Reserved for future backends; not wired by default.
+// SetHTTPBackendBuilder registers the HTTP backend factory. Called
+// from cmd/radiant/helpers.go's init() in the Full build.
 func SetHTTPBackendBuilder(fn func(m llm.Model) llm.Backend) {
 	httpBackendBuilder = fn
 }
 
-// for trace/cost logging. When cfg.Backend is non-nil (the normal
-// sampling path), all three phases share that single backend. When
-// nil, resolveBackends returns an error — callers must supply one.
+// for trace/cost logging. When cfg.Backend is non-nil (sampling mode),
+// all three phases share that single backend. When nil, HTTP-backend
+// wrappers are constructed via httpBackendBuilder (set in Full build
+// only — see var above).
 //
 // In Light (no httpBackendBuilder registered, and cfg.Backend is nil),
 // this returns an error so the caller can short-circuit. The trace
@@ -656,11 +659,12 @@ func resolveBackends(cfg RunConfig, execModel, verModel, planModel llm.Model) (e
 		return cfg.Backend, cfg.Backend, cfg.Backend, id, id, id, nil
 	}
 	if httpBackendBuilder == nil {
-		// Fail fast rather than panicking on a nil backend later.
-		// The MCP server always supplies cfg.Backend (a SamplingBackend),
-		// so this branch is normally unreachable.
+		// Unreachable in Light when callers pass cfg.Backend (the
+		// sampling backend). In Full, this indicates a programmer
+		// error — SetHTTPBackendBuilder wasn't called. Either way, we
+		// fail fast rather than panicking on a nil backend later.
 		return nil, nil, nil, "", "", "",
-			fmt.Errorf("resolveBackends: no backend configured; pass RunConfig.Backend explicitly (a SamplingBackend that routes via MCP to the host agent)")
+			fmt.Errorf("resolveBackends: HTTP fallback unavailable (Light build?); pass RunConfig.Backend explicitly with a SamplingBackend, or set RADIANT_OPENROUTER_API_KEY in the Full build")
 	}
 	exec = httpBackendBuilder(execModel)
 	ver = httpBackendBuilder(verModel)
@@ -706,9 +710,11 @@ func backendChatStream(ctx context.Context, backend llm.Backend, systemPrompt, u
 	return sb.String(), err
 }
 
-// simpleChatStream (legacy shim around *llm.Client) was removed:
-// it was dead code that depended on the now-removed HTTP client.
-// Callers should use the backend-equivalent helpers above.
+// simpleChatStream (legacy shim around *llm.Client) was removed in
+// Sprint 78 — it was dead code, and the *llm.Client reference made it
+// impossible to compile internal/loop in the Light build (where
+// client.go is //go:build !with_full). Callers should use the
+// backend-equivalent helpers above.
 
 // traceCall records a single LLM call to the Tracer and optionally emits a
 // JSONL entry to logJSON when non-nil.

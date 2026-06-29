@@ -77,7 +77,7 @@ type HostInfo struct {
 // env-var keys and 1+ parent binary names that uniquely identify it.
 // SupportsSampling documents whether the agent can answer MCP
 // sampling/createMessage when it spawns the harness as an MCP
-// server child process.
+// server child process (Light mode).
 type agentSignature struct {
 	ID               AgentID
 	EnvVars          []string // any one matches → confidence boost

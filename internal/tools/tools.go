@@ -140,7 +140,7 @@ func Default() *Registry {
 		Description: "Write content to a file at the given path. Creates parent directories as needed. Path must be inside the project directory.",
 		Params: []Param{
 			{Name: "path", Type: "string", Required: true, Description: "Path to write to."},
-			{Name: "content", Type: "string", Required: true, Description: "complete file contents."},
+			{Name: "content", Type: "string", Required: true, Description: "Full file contents."},
 		},
 		Invoke: stubInvoke("write_file"),
 	})

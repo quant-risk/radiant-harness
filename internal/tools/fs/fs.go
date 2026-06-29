@@ -81,7 +81,7 @@ func WriteFileTool(projectDir string) *tools.Tool {
 			{Name: "path", Type: "string", Required: true,
 				Description: "Project-relative path (e.g. \"internal/foo/bar.go\")."},
 			{Name: "content", Type: "string", Required: true,
-				Description: "complete file contents (UTF-8). Max 4 MiB."},
+				Description: "Full file contents (UTF-8). Max 4 MiB."},
 		},
 		Invoke: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			return invokeWriteFile(ctx, projectDir, raw)

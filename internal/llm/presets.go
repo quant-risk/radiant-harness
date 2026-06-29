@@ -16,8 +16,10 @@ package llm
 // `Provider` field — e.g. set `mistral-large-2` to `Provider: ProviderMistral`
 // if the operator wants the Mistral-native endpoint with its own API key.
 //
-// PresetModels is a pure data table; always available for listing and
-// validation regardless of which backend is wired up.
+// Why this file is untagged: PresetModels is a pure data table — Model
+// type lives in types.go (untagged). Even though the HTTP paths in
+// client.go are tag-excluded on light_only, the presets themselves are
+// always available (used for sanity checks and listing).
 
 var PresetModels = map[string]Model{
 	// ── Anthropic (3 tiers) ──
@@ -190,7 +192,8 @@ func GetPreset(name string, apiKey string) (Model, bool) {
 }
 
 // ListPresets returns all available preset names in sorted order for
-// stable output.
+// stable output. Both Light and Full builds use this (Light for any
+// `radiant` invocation that wants to list models; Full for the same).
 func ListPresets() []string {
 	names := make([]string, 0, len(PresetModels))
 	for name := range PresetModels {

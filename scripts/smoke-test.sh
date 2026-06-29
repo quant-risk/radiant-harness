@@ -5,7 +5,7 @@
 # Verifies the three core properties at the artifact level:
 #   1. Binary compiles.
 #   2. Binary has NO HTTP-LLM symbols (chatAnthropic, HTTPBackend, api.*).
-#   3. The binary self-reports its version as 3.0.1.
+#   3. The binary self-reports its version as 3.2.0.
 #
 # Usage:
 #   scripts/smoke-test.sh                          # build + test
@@ -41,11 +41,11 @@ ok()   { echo "$(green OK): $*"; }
 [ -x "$BIN" ] || fail "$BIN is missing or not executable"
 ok "$BIN exists and is executable"
 
-# 2. Version is exactly 3.0.1.
+# 2. Version is exactly 3.2.0.
 V="$("$BIN" --version 2>&1 || true)"
 case "$V" in
-  *"3.0.1"*) ok "version reports '$V'" ;;
-  *)         fail "expected version to contain '3.0.1', got: $V" ;;
+  *"3.2.0"*) ok "version reports '$V'" ;;
+  *)         fail "expected version to contain '3.2.0', got: $V" ;;
 esac
 
 # 3. NO HTTP-LLM symbols.
