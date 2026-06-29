@@ -1,11 +1,13 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,10 +89,12 @@ func NewSamplingBackend(opts SamplingOptions) *SamplingBackend {
 	return sb
 }
 
-// samplingResult carries the outcome of a sampling request.
+// samplingResult carries the outcome of a sampling request. Exactly
+// one of text / rendered / err is non-zero.
 type samplingResult struct {
-	text string
-	err  error
+	text     string      // pure-text path (legacy)
+	rendered renderedContent // mixed text + tool_use path (v3.7.0+)
+	err      error
 }
 
 // ── MCP sampling wire types ──────────────────────────────────────────────────
@@ -103,10 +107,60 @@ type samplingRequest struct {
 	Params  samplingParams  `json:"params"`
 }
 
+// samplingParams is the body of a sampling/createMessage. v3.7.0 adds
+// Tools/ToolChoice so the harness can offer native tool-use to the
+// host agent's model. Hosts that don't pass `tools` see the prior
+// text-only shape — Tool calls on the wire are opt-in by the caller.
 type samplingParams struct {
 	Messages         []samplingMessage  `json:"messages"`
 	ModelPreferences *modelPreferences  `json:"modelPreferences,omitempty"`
 	MaxTokens        int                `json:"maxTokens"`
+	Tools            []samplingTool     `json:"tools,omitempty"`
+	ToolChoice       *samplingChoice    `json:"tool_choice,omitempty"`
+}
+
+// samplingTool is the wire format of one offered tool. Mirrors the
+// Anthropic / OpenAI function-calling shape so any host MCP client
+// that already supports tool-use passes this through transparently.
+// Hosts that don't understand `tools` get an empty slice and behave
+// identically to the prior text-only contract.
+type samplingTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// samplingChoice is the wire format of tool_choice (auto|any|tool).
+type samplingChoice struct {
+	Type string `json:"type"` // "auto" | "any" | "tool"
+	Name string `json:"name,omitempty"`
+}
+
+type modelPreferences struct {
+	Hints []modelHintEntry `json:"hints,omitempty"`
+}
+
+type modelHintEntry struct {
+	Name string `json:"name"`
+}
+
+// samplingToolUse is one tool-use block in the assistant response.
+// We render it as content: [{type: "tool_use", id, name, input}] in
+// the wire — the format Anthropic and most MCP-host proxies emit.
+type samplingToolUse struct {
+	Type  string          `json:"type"`  // "tool_use"
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// samplingToolResult is the assistant-side echo of a tool result the
+// driver feeds back as the next user message.
+type samplingToolResult struct {
+	Type      string          `json:"type"` // "tool_result"
+	ToolUseID string          `json:"tool_use_id"`
+	Content   samplingContent `json:"content"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 type samplingMessage struct {
@@ -117,14 +171,6 @@ type samplingMessage struct {
 type samplingContent struct {
 	Type string `json:"type"` // "text"
 	Text string `json:"text"`
-}
-
-type modelPreferences struct {
-	Hints []modelHintEntry `json:"hints,omitempty"`
-}
-
-type modelHintEntry struct {
-	Name string `json:"name"`
 }
 
 // samplingResponse is the JSON-RPC response received from the host client.
@@ -138,9 +184,24 @@ type samplingResponse struct {
 
 type samplingResultBody struct {
 	Role        string          `json:"role"`
-	Content     samplingContent `json:"content"`
+	// Content is raw JSON so we can decode the response lazily —
+	// hosts that emit a single string field render the same shape
+	// as prior versions, while hosts that emit an array of
+	// mixed {type, ...} blocks (Anthropic tool_use interleaved with
+	// text) still parse. See parseSamplingContent.
+	Content     json.RawMessage `json:"content"`
 	Model       string          `json:"model"`
 	StopReason  string          `json:"stopReason"`
+}
+
+// renderedContent is the post-decode shape produced by parseSamplingContent.
+// Stored as a slice of {type, payload} pairs so text + tool_use blocks
+// can travel together; the ChatWithTools dispatcher flattens text into
+// ChatResponse.Choices[i].Message.Content and tool_use into
+// ChatResponse.Choices[i].Message.ToolCalls.
+type renderedContent struct {
+	Text     []string
+	ToolUse  []samplingToolUse
 }
 
 type samplingRespError struct {
@@ -290,7 +351,15 @@ func (sb *SamplingBackend) Dispatch(raw []byte) {
 		ch <- samplingResult{err: fmt.Errorf("sampling: empty result for id %d", id)}
 		return
 	}
-	ch <- samplingResult{text: resp.Result.Content.Text}
+	// Lazy-decode content (text | text-array | text+tool_use mixed).
+	// We always populate `text` with the concatenated text blocks so
+	// the legacy Chat() path keeps working unchanged; the `rendered`
+	// field carries the parsed tool_use blocks for ChatWithTools().
+	rendered := parseSamplingContent(resp.Result.Content)
+	ch <- samplingResult{
+		text:     strings.Join(rendered.Text, ""),
+		rendered: rendered,
+	}
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -359,21 +428,14 @@ func parseResponseID(raw json.RawMessage) (int64, bool) {
 }
 
 // samplingToChatResponse builds a ChatResponse from a sampling result text,
-// matching the ChatResponse shape the runner expects.
+// matching the ChatResponse shape the runner expects. Legacy
+// text-only path used by Chat() — ChatWithTools uses
+// samplingRenderedToChatResponse to also capture tool_use blocks.
 func samplingToChatResponse(text string) *ChatResponse {
 	return &ChatResponse{
-		Choices: []struct {
-			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		}{
+		Choices: []ChatResponseChoice{
 			{
-				Message: struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				}{
+				Message: ChatResponseMessage{
 					Role:    "assistant",
 					Content: text,
 				},
@@ -411,3 +473,197 @@ func IsSamplingResponse(raw []byte) bool {
 	}
 	return probe.Method == "" && (len(probe.Result) > 0 || len(probe.Error) > 0)
 }
+
+// ── Tool-calling surface (v3.7.0+) ────────────────────────────────────────────
+
+// ChatWithTools sends messages + an offered tool set to the host's
+// sampling model and returns a ChatResponse whose Message.ToolCalls
+// carries any native tool_use blocks the model emitted. The text
+// portion of the response (if any) lands in Message.Content as before.
+//
+// Hosts that don't implement tool calling simply return a normal
+// text-only ChatResponse — ChatWithTools degrades silently because
+// the driver treats an empty ToolCalls slice as "model didn't want
+// to call any tool this round".
+//
+// This method is the ToolCapable surface that internal/possess/driver
+// looks for via type-assertion. Not on the Backend interface so old
+// callers that build a Backend from a text-only path keep compiling.
+func (sb *SamplingBackend) ChatWithTools(ctx context.Context, messages []Message, tools []Tool, choice *ToolChoice) (*ChatResponse, error) {
+	if sb.enc == nil {
+		return nil, fmt.Errorf("sampling backend: no output writer configured")
+	}
+
+	// Apply the default timeout only when the caller didn't set one.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		timeout := sb.timeout
+		if timeout <= 0 {
+			timeout = defaultSamplingTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	id := sb.nextID.Add(1)
+	ch := make(chan samplingResult, 1)
+	sb.pending.Store(id, ch)
+	defer sb.pending.Delete(id)
+
+	// Translate llm.Tool → samplingTool (different field names: the
+	// public llm.Tool uses snake_case "input_schema"; the wire shape
+	// uses Anthropic-style snake-case too so most hosts accept it
+	// transparently).
+	wireTools := make([]samplingTool, 0, len(tools))
+	for _, t := range tools {
+		wireTools = append(wireTools, samplingTool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		})
+	}
+	var wireChoice *samplingChoice
+	if choice != nil {
+		wireChoice = &samplingChoice{Type: choice.Type, Name: choice.Name}
+	}
+
+	req := samplingRequest{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  "sampling/createMessage",
+		Params: samplingParams{
+			Messages:  toSamplingMessages(messages),
+			MaxTokens: sb.maxTokens,
+			Tools:     wireTools,
+			ToolChoice: wireChoice,
+		},
+	}
+	if sb.modelHint != "" {
+		req.Params.ModelPreferences = &modelPreferences{
+			Hints: []modelHintEntry{{Name: sb.modelHint}},
+		}
+	}
+
+	mu := sb.writeMu()
+	mu.Lock()
+	err := sb.enc.Encode(req)
+	mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("sampling: write request: %w", err)
+	}
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return samplingRenderedToChatResponse(res.rendered), nil
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			timeout := sb.timeout
+			if timeout <= 0 {
+				timeout = defaultSamplingTimeout
+			}
+			return nil, fmt.Errorf(
+				"%w: no host agent responded within %s — wire one via `radiant setup-mcp` "+
+					"from inside Claude Code / Cursor / Hermes, then retry",
+				ErrNoHostAgent, timeout)
+		}
+		return nil, fmt.Errorf("sampling: context cancelled: %w", ctx.Err())
+	}
+}
+
+// parseSamplingContent lazily decodes the `content` field of a
+// sampling/createMessage response. Three shapes are observed in the
+// wild:
+//
+//   1. Plain text → just a JSON string.
+//   2. Array of plain-text blocks (Anthropic shape with no tools).
+//   3. Array of mixed text + tool_use blocks.
+//
+// Anything we can't parse falls back to "treat the raw bytes as a
+// text block" so the driver still gets a useful answer (the tool_use
+// won't be detected but the model can keep going in prose).
+func parseSamplingContent(raw json.RawMessage) renderedContent {
+	out := renderedContent{}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return out
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+			out.Text = append(out.Text, s)
+		}
+		return out
+	}
+	if trimmed[0] != '[' {
+		// Unknown shape — fall through with empty out; the legacy
+		// text-channel will be empty and the driver should retry /
+		// fall back to self-driven.
+		return out
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		// Treat as plain text in case the host returned a non-array blob.
+		out.Text = append(out.Text, string(raw))
+		return out
+	}
+	for _, b := range blocks {
+		probe := struct {
+			Type string          `json:"type"`
+			Text string          `json:"text"`
+			ID   string          `json:"id"`
+			Name string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		}{}
+		if err := json.Unmarshal(b, &probe); err != nil {
+			continue
+		}
+		switch probe.Type {
+		case "text":
+			if probe.Text != "" {
+				out.Text = append(out.Text, probe.Text)
+			}
+		case "tool_use":
+			if probe.Name == "" {
+				continue
+			}
+			out.ToolUse = append(out.ToolUse, samplingToolUse{
+				Type:  "tool_use",
+				ID:    probe.ID,
+				Name:  probe.Name,
+				Input: probe.Input,
+			})
+		}
+	}
+	return out
+}
+
+// samplingRenderedToChatResponse produces a ChatResponse from a parsed
+// rendered content. Text blocks are concatenated into
+// Message.Content; tool_use blocks populate Message.ToolCalls with
+// Anthropic-style IDs so the driver can correlate tool_result echoes
+// back to the originating assistant message.
+func samplingRenderedToChatResponse(r renderedContent) *ChatResponse {
+	resp := &ChatResponse{}
+	resp.Choices = append(resp.Choices, ChatResponseChoice{})
+	choice := &resp.Choices[0]
+	choice.Message.Role = "assistant"
+	choice.Message.Content = strings.Join(r.Text, "")
+	for _, tu := range r.ToolUse {
+		choice.Message.ToolCalls = append(choice.Message.ToolCalls, ToolCall{
+			ID:    tu.ID,
+			Name:  tu.Name,
+			Input: tu.Input,
+		})
+	}
+	choice.FinishReason = "tool_use"
+	if len(r.ToolUse) == 0 {
+		choice.FinishReason = "stop"
+	}
+	return resp
+}
+
+// Compile-time check that SamplingBackend satisfies ToolCapable.
+var _ ToolCapable = (*SamplingBackend)(nil)

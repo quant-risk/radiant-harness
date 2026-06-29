@@ -1,5 +1,7 @@
 package llm
 
+import "encoding/json"
+
 // Shared LLM types — used by both sampling (Light + Full) and HTTP (Full
 // only). These types are intentionally LLM-agnostic so the Light build
 // can compile them without the HTTP client code.
@@ -41,17 +43,40 @@ type ChatRequest struct {
 	Stream      bool      `json:"stream,omitempty"`
 }
 
+// ChatResponseMessage is the assistant message returned in a chat
+// completion. v3.7.0 adds ToolCalls for backends that emit native
+// function-calling output; the Content field carries any text the
+// model emitted alongside the tool calls.
+type ChatResponseMessage struct {
+	Role    string     `json:"role"`
+	Content string     `json:"content"`
+	// ToolCalls is populated when the model emits native
+	// function-calling output. Each call has a stable ID
+	// (Anthropic: "toolu_xxx"; OpenAI: "call_xxx") so the
+	// driver can correlate tool_result messages back to
+	// the originating assistant turn.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// ChatResponseChoice wraps one assistant message with its finish
+// reason. Pulled out of the inline anonymous struct in v3.7.0 so
+// callers (and other packages) can name the type when needed.
+type ChatResponseChoice struct {
+	Message      ChatResponseMessage `json:"message"`
+	FinishReason string             `json:"finish_reason"`
+}
+
 // ChatResponse is the parsed response from /chat/completions.
+//
+// v3.7.0: Choices is now a named type carrying ToolCalls to support
+// agentic backends. Field access (`resp.Choices[0].Message.Content`,
+// `resp.Choices[0].Message.ToolCalls`) keeps the same shape as the
+// previous anonymous-struct layout so existing call sites compile
+// unchanged.
 type ChatResponse struct {
-	ID      string `json:"id"`
-	Choices []struct {
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
+	ID      string              `json:"id"`
+	Choices []ChatResponseChoice `json:"choices"`
+	Usage   struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
@@ -60,6 +85,37 @@ type ChatResponse struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
+}
+
+// Tool is the wire shape of a tool offered to the model. Mirrors
+// the Anthropic / OpenAI function-calling format so the same payload
+// works on most hosted backends. InputSchema is JSON-schema-shaped
+// (object with properties / required); backends that require a
+// different shape (e.g. flat parameters) translate at the boundary.
+type Tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// ToolCall is a single tool-use block emitted by the model. ID lets
+// the driver pass a tool_result back correlated to the request;
+// Name + Args drive the actual Registry.Call.
+type ToolCall struct {
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// ToolChoice controls which tool the model picks.
+//
+//   - {Type: "auto"}  ← default; model decides whether to call
+//   - {Type: "any"}   ← model MUST call one of the offered tools
+//   - {Type: "tool", Name: "x"}  ← model MUST call tool x
+//   - nil             ← host backend default (usually "auto")
+type ToolChoice struct {
+	Type string `json:"type,omitempty"` // "auto" | "any" | "tool"
+	Name string `json:"name,omitempty"`
 }
 
 // StreamCallback is called for each chunk of a streaming response.

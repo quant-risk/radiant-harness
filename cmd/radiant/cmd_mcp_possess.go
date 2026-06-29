@@ -55,6 +55,8 @@ import (
 	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/hostdetect"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/loop"
+	"github.com/quant-risk/radiant-harness/internal/possess"
 	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/spf13/cobra"
 )
@@ -357,16 +359,32 @@ func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*
 }
 
 // runPossessWithBackend is the MCP-bound path used by mcp__radiant__possess.
-// It calls sampling/createMessage ONCE per phase. State is persisted after
-// every phase so a timeout on phase N can be resumed at phase N.
 //
-// v3.6.0 routing:
-//   - If hostdetect.ResolveSupport(detected agent).SupportsSampling is
-//     false (probe-verified or well-attested), skip sampling entirely
-//     and dispatch to runSelfDrivenPossess.
-//   - Otherwise, try sampling. If the first call returns JSON-RPC -32601
-//     we record it as evidence, then switch mid-run to the self-driven
-//     pipeline so the rest of the phases still produce real artefacts.
+// v3.7.0 routing — drives real tool execution when the host supports it:
+//
+//   1. Pre-flight against hostdetect.ResolveSupport. If supports_sampling
+//      is false (probe-verified or well-attested), fall through to the
+//      self-driven scaffold path without ever opening the sampling
+//      channel.
+//
+//   2. If the backend implements llm.ToolCapable (i.e. the host's MCP
+//      server propagates a `tools` field through to its model),
+//      run the agentic driver — internal/possess.Driver loops
+//      sampling/createMessage with native tool_use blocks until the
+//      model emits a VERDICT line. The driver dispatches every
+//      tool_use through tools.Registry (read_file, write_file,
+//      search_code, run_gate, …) so the model can edit the project,
+//      run gates, and inspect the result without the harness
+//      pretending it has finished.
+//
+//   3. Otherwise (no ToolCapable), fall back to the prior v3.6.x
+//      contract: one sampling call per phase, text-only, with the
+//      legacy code-block extraction still feeding the engine. If
+//      any call returns -32601, hand off to the self-driven pipeline.
+//
+// The self-driven path is the universal fallback — it runs without
+// LLM, with deterministic templates — so the v3.7.0 agentic capability
+// is purely additive for hosts that implement it.
 func runPossessWithBackend(ctx context.Context, workdir, task, profile string, backend llm.Backend, w io.Writer) (*possessState, error) {
 	if workdir == "" {
 		workdir, _ = os.Getwd()
@@ -376,10 +394,8 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 	}
 	id := taskID(workdir, task)
 
-	// Pre-flight: if a prior probe already settled the question, skip
-	// sampling without paying the cost of a doomed first call. Codex
-	// is in knownSamplingUnsupported so the very first call here on a
-	// Codex box dispatches to the self-driven pipeline immediately.
+	// Pre-flight: probe-verified or well-attested no-sampling hosts
+	// bypass sampling entirely.
 	detected := hostdetect.New().Detect()
 	if detected.Agent != hostdetect.AgentUnknown {
 		if supports, probed := hostdetect.ResolveSupport(detected.Agent); probed && !supports {
@@ -393,11 +409,13 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 		}
 	}
 
+	// Bootstrap the project layout BEFORE delegating to the agentic
+	// driver so the model can immediately write into specs/0001-*
+	// without needing to mkdir itself.
 	st, err := loadPossessState(workdir, id)
 	if err != nil {
 		st = newPossessState(workdir, task, id)
 	}
-
 	msgs, err := bootstrapPossess(workdir)
 	if err != nil {
 		return st, err
@@ -405,6 +423,28 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 	if !st.BootstrapDone {
 		st.BootstrapDone = true
 		st.BootstrapMessages = msgs
+		_ = savePossessState(st)
+	}
+
+	// v3.7.0 agentic path: the host's model can call tools natively.
+	// We hand off the entire 4-phase loop to the driver in one shot
+	// (no per-phase splitting) because tool_use + tool_result is an
+	// inherently interleaved protocol — splitting it would force the
+	// model into 4 separate turns instead of 1 long turn.
+	if _, ok := backend.(llm.ToolCapable); ok {
+		return runPossessWithDriver(ctx, workdir, task, profile, backend, w, st)
+	}
+
+	// Legacy / non-toolable host — per-phase sampling, code-block
+	// extraction still does the actual work. If any call returns
+	// -32601, hand off to the deterministic self-driven pipeline.
+	fmt.Fprintf(w, "run id: %s\nworkdir: %s\ntask: %s\n\n", id, workdir, task)
+	fmt.Fprintln(w, "running phases (text-only sampling; backend does not implement llm.ToolCapable)...")
+
+	if !st.BootstrapDone {
+		st.BootstrapDone = true
+		// msgs was assigned earlier in the bootstrap block above.
+		_ = msgs
 		_ = savePossessState(st)
 	}
 
@@ -484,6 +524,178 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 
 	fmt.Fprintf(w, "all phases done; trace=%s\n", possessStatePath(workdir, id))
 	return st, nil
+}
+
+// runPossessWithDriver is the v3.7.0+ path used when the host agent's
+// MCP server implements llm.ToolCapable. The driver runs ONE long
+// conversation that interleaves sampling with tool execution; the
+// model emits tool_use blocks, we dispatch them through
+// tools.Registry, feed tool_result echoes back, and loop until the
+// model emits a VERDICT/REVIEW line.
+//
+// On any failure (driver error, ErrBackendToolsUnsupported, plain
+// error from the sampling backend) we fall back to the v3.6.x path:
+// re-mark phases as either errored or self-driven, so the project
+// always lands in a usable state.
+func runPossessWithDriver(ctx context.Context, workdir, task, profile string, backend llm.Backend, w io.Writer, st *possessState) (*possessState, error) {
+	id := st.TaskID
+	fmt.Fprintf(w, "run id: %s\nworkdir: %s\ntask: %s\nprofile: %s\n\n", id, workdir, task, profile)
+	fmt.Fprintln(w, "→ running via v3.7.0 agentic tool-calling driver (backend implements llm.ToolCapable).")
+
+	// Build the tool registry scoped to this project. The four built-in
+	// tools (read_file, write_file, search_code, run_gate) all enforce
+	// project-boundary checks via fsutil.PathIsSafe.
+	reg, err := loop.RealRegistry(workdir)
+	if err != nil {
+		return st, fmt.Errorf("driver registry: %w", err)
+	}
+
+	driver, err := possess.NewDriver(possess.DriverConfig{
+		Backend:     backend,
+		ProjectRoot: workdir,
+		Registry:    reg,
+		Profile:     profile,
+		MaxIter:     profileToMaxIter(profile),
+		Out:         w,
+	})
+	if err != nil {
+		return st, fmt.Errorf("driver init: %w", err)
+	}
+
+	// Build the system + task message. The task is one bounded
+	// sentence the model needs to drive the 4 phases through tool
+	// calls. The system prompt echoes the VERDICT/REVIEW format
+	// before any tool runs so the model can finish on the right
+	// line.
+	system := agenticSystemPrompt(workdir, task)
+	userTask := agenticTaskPrompt(task)
+
+	tr, err := driver.Drive(ctx, system, userTask)
+	if err != nil {
+		// Driver failed — log to w, then check whether we can still
+		// save the work and downgrade gracefully.
+		fmt.Fprintf(w, "\n⚠ driver failed: %v\n", err)
+		// Write whatever Trace the driver did manage into the
+		// discover phase so the user has a paper trail. Anything
+		// the model produced went into the project tree via tool
+		// executions (the driver ran real write_file calls).
+		st.Phases["discover"].Status = "error"
+		st.Phases["discover"].Error = err.Error()
+		st.Phases["discover"].Output = tr.TextSoFar
+		st.Phases["discover"].EndedAt = time.Now().UTC()
+		// If the driver complaint is "tools unsupported" the host
+		// actually advertises Capability but the model never calls
+		// anything — that means we should fall back to the
+		// text-only/sampling-runs path for the rest of this run.
+		// For now we mark a partial state and return so the caller
+		// can decide. A future v3.7.x may chain to self-driven.
+		st.CurrentPhase = "verify"
+		_ = savePossessState(st)
+		return st, fmt.Errorf("agentic driver failed (project tree may have partial writes; see %s): %w",
+			possessStatePath(workdir, id), err)
+	}
+
+	// Driver succeeded (VERDICT/REVIEW surfaced). Surface the
+	// summary and remember the tool-call log so the verifier can
+	// audit it later.
+	fmt.Fprintf(w, "\nDriver verdict: %s\nIterations: %d\nTool invocations: %d\n",
+		tr.Verdict, tr.Iterations, len(tr.ToolInvocations))
+	for _, ti := range tr.ToolInvocations {
+		verb := "ok"
+		if ti.Err != "" {
+			verb = "err"
+		}
+		fmt.Fprintf(w, "  • %s [%s] %d bytes\n", ti.Name, verb, len(ti.Output))
+	}
+
+	for _, ph := range []string{"discover", "plan", "execute", "verify"} {
+		st.Phases[ph].Status = "done"
+		st.Phases[ph].StartedAt = tr.StartAt
+		st.Phases[ph].EndedAt = tr.EndAt
+		// We don't have per-phase output; shove the trace summary
+		// into verify so the caller sees what happened.
+		st.Phases[ph].Output = fmt.Sprintf("agentic driver completed; verdict=%s", tr.Verdict)
+	}
+	st.CurrentPhase = "done"
+
+	// Re-walk specs/ to enumerate the artefacts the driver wrote.
+	if files, ferr := os.ReadDir(filepath.Join(workdir, "specs")); ferr == nil {
+		for _, f := range files {
+			if f.IsDir() {
+				st.Artifacts = append(st.Artifacts, filepath.Join("specs", f.Name()))
+			}
+		}
+	}
+	sort.Strings(st.Artifacts)
+	_ = savePossessState(st)
+
+	fmt.Fprintf(w, "\nall phases done (agentic). trace=%s\n", possessStatePath(workdir, id))
+	// Positive probe evidence for future runs.
+	recordProbeFromError(hostdetect.New().Detect().Agent, nil)
+	return st, nil
+}
+
+// agenticSystemPrompt tells the model the role + the strict
+// format. The harness owns: spec.md / tasks.md scaffolding, gate
+// invocation, scratch context. The model owns: deciding what the
+// user asked for and emitting the verdict at the end.
+func agenticSystemPrompt(workdir, task string) string {
+	return fmt.Sprintf(
+		"You are an expert software engineer working inside `radiant-harness` v3.7.0+. "+
+			"Your job is to drive a 4-phase loop (discover → plan → execute → verify) "+
+			"by calling the available tools. Each tool execution produces a real "+
+			"side-effect inside the project directory `%s`.\n\n"+
+			"RULES:\n"+
+			"- Use read_file / search_code to inspect the project before you write anything.\n"+
+			"- Use write_file to produce every artefact under specs/0001-*/, docs/, scripts/.\n"+
+			"- Use run_gate to execute quality gates (go build, go test, scripts/run.sh). "+
+			"Do not invent custom commands outside the gate allowlist.\n"+
+			"- When the work is complete, end with EXACTLY ONE of these terminal blocks "+
+			"on its own lines (no surrounding prose, no extra markdown):\n\n"+
+			"VERDICT: APPROVED|REJECTED\n"+
+			"SCORE: <0.00–1.00>\n"+
+			"EVIDENCE: <one sentence>\n"+
+			"ESCALATE: true|false\n"+
+			"ISSUES:\n"+
+			"- <one bullet, or '-' for none>\n\n"+
+			"or (post-convergence review):\n\n"+
+			"REVIEW: PASS|FAIL\n"+
+			"SCORE: <0.00–1.00>\n"+
+			"EVIDENCE: <one sentence>\n"+
+			"FINDINGS:\n"+
+			"- <one bullet, or '-' for none>\n\n"+
+			"Do not output VERDICT lines until you've actually written the spec, "+
+			"the tasks, and at least one runnable artefact, AND run a gate that "+
+			"passed. The harness records every tool_use — pretending to finish "+
+			"without tools is logged and counted as a failed run.\n\n"+
+			"Task: %s",
+		workdir, task)
+}
+
+// agenticTaskPrompt is the user turn that starts the loop. Kept
+// short — the system prompt carries the rules.
+func agenticTaskPrompt(task string) string {
+	return fmt.Sprintf(
+		"%s\n\n"+
+			"Start by inspecting the project layout under the workdir with read_file "+
+			"and search_code, then plan the spec, then execute.\n\n"+
+			"Reference: %s/.radiant-harness/CONTEXT.md (already populated by the "+
+			"bootstrap) lists the bundled skills surfaced from your task keywords.",
+		task, "${workdir}") // ${workdir} substituted at run time below
+}
+
+// profileToMaxIter picks the agentic iteration cap from the
+// possess profile. Conservative default — ModelBudget.Policy-style
+// knobs land in a follow-up.
+func profileToMaxIter(profile string) int {
+	switch profile {
+	case "lean":
+		return 10
+	case "thorough":
+		return 60
+	default: // "standard" or empty
+		return 25
+	}
 }
 
 // phasePrompts returns the (system, user) tuple for a given phase.

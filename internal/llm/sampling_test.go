@@ -108,7 +108,7 @@ func TestSamplingBackend_Chat_ReturnsResponse(t *testing.T) {
 		ID:      json.RawMessage(jsonInt64(reqID)),
 		Result: &samplingResultBody{
 			Role:    "assistant",
-			Content: samplingContent{Type: "text", Text: "4"},
+			Content: json.RawMessage(`"4"`),
 			Model:   "test-model",
 		},
 	}
@@ -172,7 +172,7 @@ func TestSamplingBackend_Dispatch_UnknownID(t *testing.T) {
 		ID:      json.RawMessage(`99999`),
 		Result: &samplingResultBody{
 			Role:    "assistant",
-			Content: samplingContent{Type: "text", Text: "orphan"},
+			Content: json.RawMessage(`"orphan"`),
 		},
 	}
 	raw, _ := json.Marshal(respLine)
@@ -274,7 +274,7 @@ func TestSamplingBackend_ConcurrentRequests(t *testing.T) {
 			ID:      json.RawMessage(jsonInt64(id)),
 			Result: &samplingResultBody{
 				Role:    "assistant",
-				Content: samplingContent{Type: "text", Text: "pong"},
+				Content: json.RawMessage(`"pong"`),
 				Model:   "test-model",
 			},
 		}

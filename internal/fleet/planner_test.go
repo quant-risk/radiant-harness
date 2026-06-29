@@ -99,17 +99,8 @@ type stubClient struct{ json string }
 
 func (s *stubClient) Chat(_ context.Context, _ []llm.Message) (*llm.ChatResponse, error) {
 	return &llm.ChatResponse{
-		Choices: []struct {
-			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		}{
-			{Message: struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{Role: "assistant", Content: s.json}},
+		Choices: []llm.ChatResponseChoice{
+			{Message: llm.ChatResponseMessage{Role: "assistant", Content: s.json}},
 		},
 	}, nil
 }
