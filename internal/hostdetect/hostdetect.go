@@ -68,10 +68,16 @@ var knownAgents = []AgentID{
 // "no signal at all". SupportsSampling reflects whether the agent
 // can answer MCP sampling/createMessage requests — if true, the
 // harness can possess the agent without an API key.
+//
+// SamplingSource distinguishes a probe-verified value ("probe") from
+// a declared-but-unverified constant ("declared"). v3.6.0+ writes
+// probe results to ~/.radiant-harness/agent-capabilities.json and
+// prefers them on subsequent runs.
 type HostInfo struct {
 	Agent            AgentID `json:"agent"`
 	Confidence       int      `json:"confidence"`
 	SupportsSampling bool     `json:"supports_sampling"`
+	SamplingSource   string   `json:"sampling_source,omitempty"` // "probe" | "declared" | ""
 	SampleEnvVars    []string `json:"sample_env_vars,omitempty"`
 	PID              int      `json:"pid"`
 	PPID             int      `json:"ppid"`
@@ -246,10 +252,16 @@ func (d *Detector) Detect() HostInfo {
 		if confidence > 100 {
 			confidence = 100
 		}
+		supports, probed := ResolveSupport(bestEnv)
+		source := "declared"
+		if probed {
+			source = "probe"
+		}
 		return HostInfo{
 			Agent:            bestEnv,
 			Confidence:       confidence,
-			SupportsSampling: signatures[bestEnv].SupportsSampling,
+			SupportsSampling: supports,
+			SamplingSource:   source,
 			SampleEnvVars:    bestEnvVars,
 			PID:              pid,
 			PPID:             ppid,
@@ -265,10 +277,16 @@ func (d *Detector) Detect() HostInfo {
 			sig := signatures[id]
 			for _, pb := range sig.ParentBinaries {
 				if strings.EqualFold(strings.TrimSuffix(parentCmd, filepath.Ext(parentCmd)), pb) {
+					supports, probed := ResolveSupport(id)
+					source := "declared"
+					if probed {
+						source = "probe"
+					}
 					return HostInfo{
 						Agent:            id,
 						Confidence:       50,
-						SupportsSampling: sig.SupportsSampling,
+						SupportsSampling: supports,
+						SamplingSource:   source,
 						PID:              pid,
 						PPID:             ppid,
 						ParentCmd:        parentCmd,

@@ -25,25 +25,63 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "3.5.1"
+var version = "3.6.0"
 
 // publicCommands is the closed set of CLI subcommands that the Light
-// binary exposes without RADIANT_INTERNAL=1. Anything that the host agent
-// would otherwise use to bypass the MCP path (scaffold, scaffold-run
-// helpers, audit, telemetry, validate, etc.) lives in the internal
-// complement and is gated by requireInternal().
+// binary exposes without RADIANT_INTERNAL=1.
 //
-// List rationale: these are the commands an AI agent (or a human) needs
-// to install + diagnose the harness. The MCP-driven loop, possession,
-// and skill loading are exposed as MCP tools and as such do not need a
-// CLI counterpart under a public subcommand.
+// Anything that would otherwise be used by a host agent to bypass the
+// MCP path (loop, run, fleet, scaffold-run helpers, telemetry, etc.)
+// lives in the internal complement and is gated by requireInternal().
+//
+// The commands listed here are safe for any caller — including a host
+// agent — to invoke directly:
+//
+//   - **setup-mcp / doctor / host-info / mcp / update / test-case**:
+//     install + diagnose + serve + drive a case end-to-end with
+//     simulated sampling latency.
+//   - **spec** (and adr, diagramar, product, integrations, views,
+//     review-pr, setup-ci under it): scaffold spec.md / tasks.md /
+//     architecture docs. Pure templates — no LLM, no API calls.
+//   - **audit** (and camada-agentica, evals, release, security under
+//     it): read-only project auditing. Lets the host agent verify
+//     its own work without going through the MCP loop.
+//   - **skills** (and boot under it): list bundled skills + emit the
+//     project manifest. Lets the host agent discover methodology.
+//   - **context** (and ontology under it): assemble + compress
+//     CONTEXT.md. Lets the host agent narrow the project context.
+//
+// The dangerous surfaces — `loop start`, `run`, `fleet`, `eval`,
+// `models`, `train`, `predict`, `evaluate`, `drift`, `model`,
+// `profile`, `stats`, `causal-estimate`, `autodata`, `improve`,
+// `integrate`, `semantic`, `incident`, `bench`, `budget`, `improve`,
+// `worktree`, `state`, `handoff`, `tools`, `pricing`, `telemetry` —
+// stay gated. They either drive an LLM loop or touch project state in
+// ways that should remain under CI / harness control.
+//
+// List rationale: a host agent (Codex / Claude Code / Hermes / …) that
+// gets a task in a project with radiant-harness installed should be
+// able to drive the SDD scaffolding, audit its own work, and load
+// skills — all without going through the MCP `radiant_possess` call,
+// which may not be wired (or supported) on every host.
 var publicCommands = map[string]bool{
+	// install + diagnose + serve
 	"setup-mcp": true, // wire MCP into a host agent
 	"mcp":       true, // serve + self-test + possess
 	"host-info": true, // show detected host agent
 	"doctor":    true, // diagnose wiring + agent config
 	"update":    true, // self-update the binary
 	"test-case": true, // drive a real case with simulated sampling latency
+
+	// SDD scaffolding (templates, no LLM)
+	"spec": true, // radiant spec / adr / diagramar / product / integrations / views / review-pr / setup-ci
+
+	// Verification (read-only)
+	"audit": true, // radiant audit / camada-agentica / evals / release / security
+
+	// Methodology discoverability
+	"skills": true, // radiant skills list / validate / boot
+	"context": true, // radiant context detect / assemble / compress / ontology
 }
 
 func main() {

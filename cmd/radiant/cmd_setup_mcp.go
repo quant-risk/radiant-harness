@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/quant-risk/radiant-harness/internal/hostdetect"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +53,28 @@ Supported agents (auto-detected):
 					"hermes|kimi|openclaw|cline|MiniMax to specify one", cwd)
 			}
 
+			// Pre-flight: if the resolved host agent does not support
+			// sampling/createMessage, surface that BEFORE writing the MCP
+			// config. v3.6.0 ships a self-driven scaffold mode that
+			// works without sampling, but the user should know up front
+			// that their agent will not be driving the loop.
+			detectedInfo := hostdetect.New().Detect()
+			if detectedInfo.Agent != hostdetect.AgentUnknown {
+				if supports, probed := hostdetect.ResolveSupport(detectedInfo.Agent); probed && !supports {
+					src := "probe"
+					if _, ok := hostdetect.LoadCapabilities()[detectedInfo.Agent]; !ok {
+						src = "known list (no probe yet)"
+					}
+					fmt.Printf("⚠ detected host %q: sampling/createMessage is NOT supported (%s).\n",
+						detectedInfo.Agent, src)
+					fmt.Printf("  The harness will run in SELF-DRIVEN mode: it scaffolds the\n")
+					fmt.Printf("  project (AGENTS.md, docs/, specs/, scripts/, .radiant-harness/),\n")
+					fmt.Printf("  drives the loop with templates, and invokes your agent's native\n")
+					fmt.Printf("  tools for the actual code-writing. See AGENTS-FOR-TASKS.md §\n")
+					fmt.Printf("  'MCP tools' for the wire-up contract.\n\n")
+				}
+			}
+
 			for _, a := range agents {
 				target, content, writeErr := mcpConfigFor(a, binaryPath, cwd, globalFlag)
 				if writeErr != nil {
@@ -60,7 +83,7 @@ Supported agents (auto-detected):
 				}
 
 				if dryRunFlag {
-					fmt.Printf("  [dry-run] %s → %s\n%s\n", a, target, content)
+					fmt.Printf("  [dry-run] %s → %s\n\n%s\n", a, target, content)
 					continue
 				}
 

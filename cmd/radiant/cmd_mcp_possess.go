@@ -52,7 +52,10 @@ import (
 	"strings"
 	"time"
 
+	radiant "github.com/quant-risk/radiant-harness/internal"
+	"github.com/quant-risk/radiant-harness/internal/hostdetect"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -167,10 +170,25 @@ from the shell for debugging or one-off runs. Each phase is run inline
 	parent.AddCommand(cmd)
 }
 
-// bootstrapPossess scaffolds the minimum project layout needed for
-// radiant-possession to proceed: AGENTS.md, docs/, specs/, scripts/.
+// bootstrapPossess scaffolds the project layout needed for radiant-possession
+// to proceed. It delegates to the canonical scaffold.Init path so MCP
+// possession produces the same skills, manifest, state, docs/, specs/, and
+// scripts/ structure as `radiant init`, then fills the task handoff file.
 // Idempotent (only writes files that don't exist).
 func bootstrapPossess(workdir string) ([]string, error) {
+	res := scaffold.Init(scaffold.Config{
+		TargetDir: workdir,
+		Agents:    []radiant.AgentID{},
+		Force:     false,
+		Version:   version,
+	})
+	msgs := []string{
+		fmt.Sprintf("scaffold init: written=%d skipped=%d", res.Written, res.Skipped),
+	}
+	if len(res.Errors) > 0 {
+		return msgs, fmt.Errorf("scaffold init: %s", strings.Join(res.Errors, "; "))
+	}
+
 	dirs := []string{
 		filepath.Join(workdir, ".radiant-harness"),
 		filepath.Join(workdir, "docs"),
@@ -178,7 +196,6 @@ func bootstrapPossess(workdir string) ([]string, error) {
 		filepath.Join(workdir, "scripts"),
 		filepath.Join(workdir, ".agent-context"),
 	}
-	var msgs []string
 	for _, d := range dirs {
 		if _, err := os.Stat(d); os.IsNotExist(err) {
 			if err := os.MkdirAll(d, 0o755); err != nil {
@@ -247,14 +264,33 @@ func callSamplingOnce(ctx context.Context, backend llm.Backend, phase, system, u
 }
 
 // runPossessForCLI is the entry point used by `radiant mcp possess --task=...`.
-// It does NOT do sampling (CI mode); it walks every phase and writes the
-// trace file. The MCP tool path uses runPossessWithBackend which can
-// drive real sampling.
+// In v3.6.0 it honours hostdetect.ResolveSupport the same way the MCP path
+// does, so debugging the harness on a Codex box (or any host that we
+// already know lacks sampling) produces the same self-driven scaffold
+// instead of empty placeholders.
+//
+// The `RADIANT_FORCE_SAMPLING=1` env var escapes self-driven mode and
+// runs the deterministic stub path — useful for verifying the stub
+// output shape in a unit test or smoke run.
 func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*possessState, error) {
 	if workdir == "" {
 		workdir, _ = os.Getwd()
 	}
 	id := taskID(workdir, task)
+
+	if os.Getenv("RADIANT_FORCE_SAMPLING") != "1" {
+		detected := hostdetect.New().Detect()
+		if detected.Agent != hostdetect.AgentUnknown {
+			if supports, probed := hostdetect.ResolveSupport(detected.Agent); probed && !supports {
+				fmt.Fprintf(w, "⚠ host %q has no sampling — routing `radiant mcp possess` to self-driven mode.\n",
+					detected.Agent)
+				fmt.Fprintln(w, "  Set RADIANT_FORCE_SAMPLING=1 to bypass and exercise the stub path.")
+				fmt.Fprintln(w)
+				return runSelfDrivenPossess(ctx, workdir, task, "standard", w,
+					fmt.Sprintf("probe says %s has no sampling", detected.Agent))
+			}
+		}
+	}
 
 	st, err := loadPossessState(workdir, id)
 	if err != nil {
@@ -284,7 +320,7 @@ func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*
 		st.Phases[ph].StartedAt = time.Now().UTC()
 		st.Phases[ph].Status = "done"
 		st.Phases[ph].EndedAt = time.Now().UTC()
-		st.Phases[ph].Output = "[stub mode — set RADIANT_MCP=1 and rerun via MCP for real sampling]\n\n" + descs[ph]
+		st.Phases[ph].Output = "[stub mode — set RADIANT_FORCE_SAMPLING=1 or wire MCP with sampling]\n\n" + descs[ph]
 		st.CurrentPhase = ph
 		_ = savePossessState(st)
 		fmt.Fprintf(w, "  ✓ %s\n", ph)
@@ -299,6 +335,14 @@ func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*
 // runPossessWithBackend is the MCP-bound path used by mcp__radiant__possess.
 // It calls sampling/createMessage ONCE per phase. State is persisted after
 // every phase so a timeout on phase N can be resumed at phase N.
+//
+// v3.6.0 routing:
+//   - If hostdetect.ResolveSupport(detected agent).SupportsSampling is
+//     false (probe-verified or well-attested), skip sampling entirely
+//     and dispatch to runSelfDrivenPossess.
+//   - Otherwise, try sampling. If the first call returns JSON-RPC -32601
+//     we record it as evidence, then switch mid-run to the self-driven
+//     pipeline so the rest of the phases still produce real artefacts.
 func runPossessWithBackend(ctx context.Context, workdir, task, profile string, backend llm.Backend, w io.Writer) (*possessState, error) {
 	if workdir == "" {
 		workdir, _ = os.Getwd()
@@ -307,6 +351,23 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 		profile = "standard"
 	}
 	id := taskID(workdir, task)
+
+	// Pre-flight: if a prior probe already settled the question, skip
+	// sampling without paying the cost of a doomed first call. Codex
+	// is in knownSamplingUnsupported so the very first call here on a
+	// Codex box dispatches to the self-driven pipeline immediately.
+	detected := hostdetect.New().Detect()
+	if detected.Agent != hostdetect.AgentUnknown {
+		if supports, probed := hostdetect.ResolveSupport(detected.Agent); probed && !supports {
+			fmt.Fprintf(w,
+				"⚠ host %q does not implement sampling/createMessage "+
+					"(probe-verified or well-attested; see hostdetect.ResolveSupport).\n"+
+					"  Routing to self-driven pipeline.\n\n",
+				detected.Agent)
+			return runSelfDrivenPossess(ctx, workdir, task, profile, w,
+				fmt.Sprintf("probe says %s has no sampling", detected.Agent))
+		}
+	}
 
 	st, err := loadPossessState(workdir, id)
 	if err != nil {
@@ -325,11 +386,9 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 
 	phases := []string{"discover", "plan", "execute", "verify"}
 	// samplingUnsupportedLogged gates the warning so it only prints once
-	// per possession run. Once we see ErrSamplingUnsupported, every
-	// subsequent phase short-circuits to a deterministic placeholder so
-	// the run still completes structurally (state file, AGENTS.md,
-	// specs/, etc.) and the host agent can drive the actual work via
-	// its own tools.
+	// per possession run. After the first -32601 we hand off to the
+	// self-driven pipeline, which still scaffolds a usable project
+	// (spec.md, tasks.md, scripts/, docs/) instead of leaving it empty.
 	samplingUnsupportedLogged := false
 	for _, ph := range phases {
 		r := st.Phases[ph]
@@ -345,33 +404,30 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 		out, err := callSamplingOnce(ctx, backend, ph, system, userText)
 		if err != nil {
 			if llm.IsSamplingUnsupported(err) {
+				// Persist the failure as probe evidence so the NEXT
+				// run's pre-flight short-circuits to self-driven
+				// without paying the cost of this doomed call.
+				recordProbeFromError(detected.Agent, err)
 				if !samplingUnsupportedLogged {
 					fmt.Fprintf(w,
 						"\n⚠ sampling/createMessage is not implemented on this host "+
 							"(JSON-RPC -32601).\n"+
-							"  Falling back to stub mode for remaining phases — the harness will\n"+
-							"  still scaffold specs/, docs/, AGENTS.md and persist state, but the\n"+
-							"  LLM-driven phases will be deterministic placeholders. The host agent\n"+
-							"  (you) can drive the real work using its own tools.\n\n")
+							"  Switching to self-driven pipeline — the harness will scaffold\n"+
+							"  spec.md, tasks.md, scripts/, docs/, .radiant-harness/ so the\n"+
+							"  project is usable; the host agent (you) fills the\n"+
+							"  [host-agent: fill in] markers with its own tools.\n\n")
 					samplingUnsupportedLogged = true
 				}
-				// Stub the phase: deterministic Markdown so the state
-				// machine still advances and downstream tools
-				// (radiant_phase_status, reset) work as expected.
-				r.Output = fmt.Sprintf(
-					"[stub — host sampling unsupported]\n\n"+
-						"This phase would normally prompt an LLM via sampling/createMessage. "+
-						"The host agent's MCP server does not implement that method, so the "+
-						"harness recorded a placeholder for you to fill in using your own "+
-						"tools (Read, Write, Bash).\n\n"+
-						"## Phase: %s\n\nApply the same intent as the prompt using your own tools.\n",
-					ph)
-				r.Status = "done"
+				// Mark the current phase as errored so the state file
+				// tells the truth, then hand off to the deterministic
+				// pipeline for the remaining work.
+				r.Status = "error"
+				r.Error = "host sampling unsupported: sampling/createMessage returned JSON-RPC -32601"
 				r.EndedAt = time.Now().UTC()
 				st.CurrentPhase = ph
 				_ = savePossessState(st)
-				fmt.Fprintf(w, "  • %s → stub (host has no sampling)\n", ph)
-				continue
+				return runSelfDrivenPossess(ctx, workdir, task, profile, w,
+					"sampling unsupported mid-run")
 			}
 			r.Status = "error"
 			r.Error = err.Error()
@@ -380,6 +436,9 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 			fmt.Fprintf(w, "phase %s FAILED: %s\n", ph, err)
 			return st, err
 		}
+		// Phase succeeded via sampling — record a positive probe so
+		// future runs don't have to ask again.
+		recordProbeFromError(detected.Agent, nil)
 		r.Output = out
 		r.Status = "done"
 		r.EndedAt = time.Now().UTC()
