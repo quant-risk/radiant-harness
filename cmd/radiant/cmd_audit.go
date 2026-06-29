@@ -180,26 +180,8 @@ RADIANT_MODE env, no mode: field in .radiant.yaml.`,
 	root.AddCommand(mcpCmd)
 
 	// ── security (Sprint 16 — security posture audit) ──
-	// `radiant security [--scope=secrets|perms|all] [--output=...]`
-	// scans the project for common security issues:
-	//   - Hardcoded secrets (API keys, tokens) in source code
-	//   - Sensitive files with overly permissive file permissions
-	//
-	// MVP scope: secrets + permissions. Dependency-CVE scanning and
-	// config-CORS checks are deferred to future work.
-	securityCmd := &cobra.Command{
-		Use:   "security",
-		Short: "Security posture audit: hardcoded secrets + sensitive file perms",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			scope, _ := cmd.Flags().GetString("scope")
-			outPath, _ := cmd.Flags().GetString("output")
-			failOnWarn, _ := cmd.Flags().GetBool("fail-on-warning")
-			return runSecurity(scope, outPath, failOnWarn)
-		},
-	}
-	securityCmd.Flags().String("scope", "all", "scan scope: secrets | perms | all")
-	securityCmd.Flags().StringP("output", "o", "", "output path (default: docs/security-report.md)")
-	securityCmd.Flags().Bool("fail-on-warning", false, "exit non-zero on warnings (default: only errors)")
-	root.AddCommand(securityCmd)
+	// Implementation moved to cmd_security.go in Sprint 74. This
+	// registration just wires the cobra command into the root tree.
+	registerSecurityCmd(root)
 
 }

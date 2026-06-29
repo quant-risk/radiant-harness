@@ -4,6 +4,79 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.44.0] — 2026-06-29 — helpers.go extractions: security + scaffolds (Sprint 74)
+
+The "debt reduction" release. Pulls 946 lines of domain-specific code
+out of the 3894-line `cmd/radiant/helpers.go` into two themed files
+alongside their command registrations.
+
+### Added — `cmd/radiant/cmd_security.go` (NEW)
+
+- `securityFinding`, `secretPattern`, `runSecurity`, `scanSecrets`,
+  `scanPerms`, `renderSecurityReport` — extracted from helpers.go.
+- `registerSecurityCmd(root *cobra.Command)` — replaces the inline
+  security command registration that previously lived in
+  `cmd_audit.go`. Same flags (`--scope`, `--output`, `--fail-on-warning`),
+  same behaviour.
+
+### Changed — `cmd/radiant/cmd_audit.go`
+
+- Removed the inline security command registration (~25 LOC).
+- Replaced with `registerSecurityCmd(root)` call.
+- File now focused on its actual purpose: registering the `mcp`
+  command tree.
+
+### Added — `cmd/radiant/cmd_scaffolds.go` (NEW)
+
+- Eight `run*Scaffold` functions extracted from helpers.go:
+  `runStatsScaffold`, `runCausalEstimateScaffold`, `runModelScaffold`,
+  `runPredictScaffold`, `runTrainScaffold`, `runEvaluateScaffold`,
+  `runDriftScaffold`, `runProfileScaffold`.
+- ~750 LOC of ML scaffold templates. Each function generates a
+  markdown planning doc that the operator (or LLM via the relevant
+  skill) fills in.
+
+### Changed — `cmd/radiant/helpers.go`
+
+- Removed `securityFinding`, `secretPattern`, `runSecurity`,
+  `scanSecrets`, `scanPerms`, `renderSecurityReport` (~215 LOC).
+- Removed the eight `run*Scaffold` functions (~730 LOC).
+- Removed the now-unused `regexp` import (only used by security).
+- File shrank from 3894 → **2948 lines** (−946 LOC, −24%).
+
+### Stats
+
+- 2 new files: `cmd_security.go` (272 LOC), `cmd_scaffolds.go` (752 LOC).
+- 1 modified file: `cmd_audit.go` (−25 LOC inline registration).
+- 1 file trimmed: `helpers.go` (−946 LOC).
+- Net total: `cmd/radiant/` shrank by ~71 LOC (counting comments and
+  imports in the new files).
+- **997 tests passing across 30 packages, 0 confirmed failures**.
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. `runSecurity`, `run*Scaffold` keep the same
+  signatures and behaviour — only their physical location changed.
+- `radiant security` output is byte-identical to v2.43.0.
+- All scaffold commands produce byte-identical output to v2.43.0.
+
+### Out of scope (Sprint 75+)
+
+The helpers.go debt-reduction continues:
+
+- PR review extraction (`runReviewPR` + helpers, ~400 LOC)
+- Integrations extraction (`runIntegrationsList`, ~150 LOC)
+- Incident extraction (`runIncident`, ~150 LOC)
+- Product inception extraction (`renderInception`, `renderPersonasTemplate`)
+- ADR extraction (`nextADRSequence`, `renderADR`)
+- Evals extraction (`runEvals`, `computeFeatureCoverage`, `renderEvalsReport`)
+- MCP plumbing extraction (`runMCPServe` etc., ~900 LOC) — biggest
+
+---
+
 ## [2.43.0] — 2026-06-29 — setup-mcp: Codex + OpenCode auto-detect (Sprint 73)
 
 Adds support for two more MCP-capable agents in `radiant setup-mcp`:
