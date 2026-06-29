@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "2.36.0"
+var version = "2.37.0"
 
 func main() {
 	root := &cobra.Command{
@@ -28,6 +28,7 @@ func main() {
 	registerLoopCmds(root)
 	registerDoctorCmd(root)
 	registerSetupMCPCmd(root)
+	registerModeCmd(root)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 

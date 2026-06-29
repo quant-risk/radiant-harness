@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/quant-risk/radiant-harness/internal/config"
+	"github.com/quant-risk/radiant-harness/internal/mode"
 	"github.com/spf13/cobra"
 )
 
@@ -96,6 +98,22 @@ Checks:
 			} else {
 				add("radiant binary", true, self)
 			}
+
+			// ── mode ─────────────────────────────────────────────────────────
+			cwd, _ := os.Getwd()
+			cfg, _ := config.Load(cwd)
+			modeCfg := ""
+			if cfg != nil {
+				modeCfg = cfg.Mode
+			}
+			resolution := mode.Resolve("", cwd, modeCfg)
+			modeNote := fmt.Sprintf("%s (%s: %s)", resolution.Mode, resolution.Source, resolution.Reason)
+			modeOK := true
+			if resolution.Mode == mode.Full && apiKey == "" {
+				modeOK = false
+				modeNote += " — Full mode requires an API key"
+			}
+			add("mode", modeOK, modeNote)
 
 			// ── print results ────────────────────────────────────────────────
 			fmt.Println("radiant doctor")

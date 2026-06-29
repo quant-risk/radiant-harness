@@ -23,4 +23,4 @@ vendor/
 node_modules/
 *.tsbuildinfo
 .radiant-harness/
-radiant
+/radiant

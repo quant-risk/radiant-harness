@@ -11,6 +11,7 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/config"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/loop"
+	"github.com/quant-risk/radiant-harness/internal/mode"
 	"github.com/quant-risk/radiant-harness/internal/schedule"
 	"github.com/quant-risk/radiant-harness/internal/webhook"
 	"github.com/spf13/cobra"
@@ -65,6 +66,25 @@ func registerLoopCmds(root *cobra.Command) {
 			plan, _ := cmd.Flags().GetBool("plan")
 			autoRoute, _ := cmd.Flags().GetBool("auto-route")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			modeFlag, _ := cmd.Flags().GetString("mode")
+
+			// Resolve operational mode (flag > env > config > auto-detect).
+			modeResolution := mode.Resolve(modeFlag, cwd, cfg.Mode)
+			fmt.Printf("  Mode:    %s\n", modeResolution.Mode)
+			fmt.Printf("  Source:  %s (%s)\n", modeResolution.Source, modeResolution.Reason)
+
+			if modeResolution.Mode == mode.Light && !dryRun {
+				// Light mode requires the loop to be driven via MCP sampling.
+				// Direct CLI invocation in Light mode is not supported — the
+				// user is expected to be inside an MCP-capable agent session.
+				return fmt.Errorf(
+					"Light mode (%s) cannot run from the CLI directly — it requires "+
+						"the loop to be driven via MCP sampling. Use one of:\n"+
+						"  • `radiant setup-mcp --agent=claude` and invoke `radiant_run` from your agent\n"+
+						"  • pass --mode=full to run autonomously with an API key\n"+
+						"  • pass --mode=auto (default) to let radiant pick based on environment",
+					modeResolution.Source)
+			}
 
 			// Resolve API key from env (vendor-neutral order).
 			apiKey, resolvedBaseURL := resolveLoopLLMCreds(baseURL)
@@ -226,6 +246,7 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().Bool("plan", false, "Call the LLM in the Plan phase to decompose the goal before each executor call")
 	loopStartCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model; a cheaper model like haiku is often sufficient)")
 	loopStartCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family (research→top-tier, plan→mid, execute→anchor)")
+	loopStartCmd.Flags().String("mode", "", "Operational mode: light|full|auto. light = harness possesses the agent via MCP sampling (no API key). full = autonomous HTTP to LLM providers (API key required). Default: auto-detect.")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status [run-id]",
