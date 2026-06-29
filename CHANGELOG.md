@@ -4,6 +4,91 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.2.8] — 2026-06-29 — Hermes: works out of the box
+
+### Changed
+- **`cmd/radiant/cmd_mcp_serve.go`** adds three new flags:
+  - `--cwd=<path>` — set the working directory before booting the loop.
+    Empty (default) auto-detects project root by walking up from `$PWD`
+    looking for `rad.yaml`, `.git`, `go.mod`, `package.json`,
+    `Cargo.toml`, `pyproject.toml`, `setup.py`, `pom.xml`, `build.gradle`,
+    `Gemfile`, or `composer.json`. Replaces the per-agent
+    `radiant-mcp-<project>` shell wrapper every Hermes user had to write
+    manually.
+  - `--sampling-timeout=<duration>` — per-call timeout for
+    sampling/createMessage. Go duration syntax (`90s`, `2m`, `1500ms`).
+    Default: **120 s when an MCP host is wired** (was 5 s — that 5 s
+    fallback was killing the 3rd call of any long possession loop when
+    Hermes' underlying model had cumulative latency). Override via
+    `RADIANT_SAMPLING_TIMEOUT` env var. Without an MCP host wired the
+    legacy 5 s fallback still applies so plain CLI invocations fail fast.
+  - `--model-hint=<name>` — MCP `modelPreferences.hint.name` (equivalent
+    to `$RADIANT_MODEL`). Empty by default.
+- **`internal/llm/sampling.go`** — `SamplingOptions` gains a `Timeout
+  time.Duration`. The legacy `defaultSamplingTimeout = 5s` is still the
+  fallback when this is zero, so non-MCP callers (`radiant loop`,
+  `radiant run` from a shell) fail fast as before. The error message now
+  uses whatever timeout was actually applied.
+
+### Fixed
+- **`cmd_setup_mcp.go` case `"hermes"`** + **`mergeHermesConfig`** now
+  write the full Hermes sampling block (`sampling.enabled: true`,
+  `sampling.timeout: 120`, `sampling.max_tokens_cap: 8192`,
+  `sampling.max_tool_rounds: 5`) + outer `timeout: 300` to
+  `~/.hermes/config.yaml`. Before this fix, the user had to edit
+  `config.yaml` manually (via `pip install pyyaml` + a Python one-liner)
+  to enable sampling — without it, Hermes silently drops
+  `sampling/createMessage` calls and the harness exits with
+  `critical_failure`. `radiant setup-mcp --agent=hermes --global` now
+  produces a configuration that works on the first restart.
+- **`cmd_setup_mcp_per_agent.go`** — `hermesEntry` struct gains
+  `Timeout`, `Cwd`, `Sampling` fields (YAML-tagged so they round-trip).
+
+### Verified — MCP possession 5/5
+End-to-end MCP possession in 5 consecutive fresh runs against an empty
+repo case (`build a tiny URL shortener in Go`), driven via Python MCP
+host:
+
+```
+run 1  Exit: success   build+test=PASS
+run 2  Exit: success   build+test=PASS
+run 3  Exit: success   build+test=PASS
+run 4  Exit: success   build+test=PASS
+run 5  Exit: success   build+test=PASS
+
+=== result: 5/5 ===
+```
+
+### Verified — Hermes setup-mcp dry-run + real write
+Given a pre-existing `~/.hermes/config.yaml` with `model: xiaomi`,
+`terminal: …`, `browser: …`, `radiant setup-mcp --agent=hermes --global`
+now writes:
+
+```yaml
+mcp_servers:
+  radiant:
+    command: /usr/local/bin/radiant
+    args: [mcp, serve]
+    timeout: 300
+    sampling:
+      enabled: true
+      timeout: 120
+      max_tokens_cap: 8192
+      max_tool_rounds: 5
+```
+
+…while preserving every other top-level key. No YAML editor required, no
+Python needed.
+
+### Docs
+- **`README.md`** new **"Hermes quickstart"** section at the top of
+  Installation — one copyable section with the exact 3-step recipe,
+  including the resulting YAML.
+
+[3.2.8]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.8
+
+---
+
 ## [3.2.7] — 2026-06-29 — installer, possession evidence, smoke fix
 
 ### Added

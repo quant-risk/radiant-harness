@@ -214,16 +214,51 @@ func mergeOpenCodeConfig(path string, entry mcpEntry) (string, error) {
 // verbatim because yaml.v3 round-trips through `map[string]any`.
 
 // hermesEntry is the YAML shape of one MCP server. Hermes uses the same
-// `command` + `args` shape as the stdio MCP standard.
+// `command` + `args` shape as the stdio MCP standard, plus optional
+// `timeout` (outer MCP server timeout), `cwd` (working directory), and
+// a nested `sampling:` block (Hermes Nous Research's MCP sampling config)
+// that the host reads to decide whether to respond to
+// sampling/createMessage calls. Without that block the host silently
+// drops the request, the harness times out, and the loop exits with
+// `critical_failure`.
 type hermesEntry struct {
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args,omitempty"`
+	Command  string         `yaml:"command"`
+	Args     []string       `yaml:"args,omitempty"`
+	Timeout  int            `yaml:"timeout,omitempty"`
+	Cwd      string         `yaml:"cwd,omitempty"`
+	Sampling map[string]any `yaml:"sampling,omitempty"`
+}
+
+// hermesSamplingEnabled returns the default Hermes sampling block for the
+// radiant MCP server. The defaults are calibrated to keep a long-running
+// possession loop happy when the host (Hermes + xiaomi / mimo /
+// OpenRouter) occasionally takes 30–40 s on a single sampling call (cold
+// start or cumulative latency). Anything lower and the third call of a
+// 3-call loop will time out, and the harness exits with critical_failure.
+//
+// To override per-user, edit ~/.hermes/config.yaml directly:
+//
+//	sampling:
+//	  model: openrouter/google/gemini-2.5-flash  # force a faster model
+//	  timeout: 60                                 # tighter cap
+func hermesSamplingEnabled() map[string]any {
+	return map[string]any{
+		"enabled":         true,
+		"timeout":         120,
+		"max_tokens_cap":  8192,
+		"max_tool_rounds": 5,
+	}
 }
 
 // mergeHermesConfig reads the existing YAML config (if any), inserts or
 // replaces `mcp_servers.radiant`, and returns the merged YAML content.
 // Every other top-level key (model, terminal, browser, ...) is preserved.
-func mergeHermesConfig(path string, entry mcpEntry) (string, error) {
+//
+// When `writeSamplingBlock` is true (the default for `radiant setup-mcp`),
+// the `sampling:` nested key is populated with the defaults from
+// hermesSamplingEnabled(). This is what makes the host respond to
+// sampling/createMessage instead of failing with "sampling not enabled".
+func mergeHermesConfig(path string, entry mcpEntry, writeSamplingBlock bool) (string, error) {
 	root := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if len(data) > 0 {
@@ -240,10 +275,15 @@ func mergeHermesConfig(path string, entry mcpEntry) (string, error) {
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	servers["radiant"] = hermesEntry{
+	he := hermesEntry{
 		Command: entry.Command,
 		Args:    entry.Args,
+		Timeout: 300, // outer MCP server timeout (long enough for a full radiant_run)
 	}
+	if writeSamplingBlock {
+		he.Sampling = hermesSamplingEnabled()
+	}
+	servers["radiant"] = he
 	root["mcp_servers"] = servers
 
 	out, err := yaml.Marshal(root)

@@ -236,7 +236,7 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		// Hermes Agent (NousResearch) uses a YAML config file
 		//   (~/.hermes/config.yaml or .hermes/config.yaml) with an
 		//   `mcp_servers` top-level key whose value is a map of
-		//   server-name → {command, args}.
+		//   server-name → {command, args, sampling: {...}}.
 		var target string
 		if global {
 			home, _ := os.UserHomeDir()
@@ -244,7 +244,12 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		} else {
 			target = filepath.Join(cwd, ".hermes", "config.yaml")
 		}
-		content, err := mergeHermesConfig(target, entry)
+		// Write the sampling block by default — without it Hermes silently
+		// drops sampling/createMessage and the harness exits with
+		// critical_failure even though MCP + stdio are otherwise working.
+		// Override with `radiant setup-mcp --no-sampling` (or remove the
+		// `sampling:` block from the YAML after the fact).
+		content, err := mergeHermesConfig(target, entry, true)
 		return target, content, err
 
 	case "kimi":

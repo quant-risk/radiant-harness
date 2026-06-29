@@ -23,6 +23,16 @@ type SamplingOptions struct {
 	// Out is where JSON-RPC sampling/createMessage requests are written.
 	// Typically os.Stdout of the MCP server process.
 	Out io.Writer
+
+	// Timeout is the maximum wait for a host response when the caller did
+	// not set a context deadline. Zero means legacy default (5 s, suitable
+	// for plain CLI invocations that will deadlock otherwise). Set to a
+	// larger value (e.g. 120 s) when the MCP host is known to occasionally
+	// take long to cold-start its underlying model — Hermes' mimo / xiaomi /
+	// OpenRouter-backed sampling can take 20–40 s on the first call of a
+	// session, and the third call of a long run can take a similar amount
+	// due to cumulative latency. The MCP server runtime sets this to 120 s.
+	Timeout time.Duration
 }
 
 // SamplingBackend implements Backend using the MCP sampling/createMessage
@@ -38,6 +48,7 @@ type SamplingBackend struct {
 	modelHint string
 	maxTokens int
 	out       io.Writer
+	timeout   time.Duration
 
 	muPtr   *sync.Mutex  // external mutex shared with the MCP write loop (set via SetWriteMu)
 	mu      sync.Mutex   // fallback mutex used when muPtr is nil
@@ -68,6 +79,7 @@ func NewSamplingBackend(opts SamplingOptions) *SamplingBackend {
 		modelHint: opts.ModelHint,
 		maxTokens: opts.MaxTokens,
 		out:       opts.Out,
+		timeout:   opts.Timeout,
 	}
 	if opts.Out != nil {
 		sb.enc = json.NewEncoder(opts.Out)
@@ -158,9 +170,11 @@ const defaultSamplingTimeout = 5 * time.Second
 // sampling/createMessage request to the host client, and blocks until the
 // correlated response arrives via Dispatch or the context is cancelled.
 //
-// If the context has no deadline, Chat enforces defaultSamplingTimeout so
+// If the context has no deadline, Chat enforces the configured timeout so
 // standalone CLI invocations fail fast with ErrNoHostAgent instead of
-// hanging.
+// hanging. The timeout comes from SamplingOptions.Timeout; if that is zero
+// (legacy behaviour for non-MCP callers), Chat falls back to
+// defaultSamplingTimeout (5 s).
 func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatResponse, error) {
 	if sb.enc == nil {
 		return nil, fmt.Errorf("sampling backend: no output writer configured")
@@ -170,8 +184,12 @@ func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatR
 	// MCP server runtime already uses contexts with its own deadlines
 	// (per-request); the CLI path uses context.Background().
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		timeout := sb.timeout
+		if timeout <= 0 {
+			timeout = defaultSamplingTimeout
+		}
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, defaultSamplingTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 
@@ -211,10 +229,14 @@ func (sb *SamplingBackend) Chat(ctx context.Context, messages []Message) (*ChatR
 		return samplingToChatResponse(res.text), nil
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			timeout := sb.timeout
+			if timeout <= 0 {
+				timeout = defaultSamplingTimeout
+			}
 			return nil, fmt.Errorf(
 				"%w: no host agent responded within %s — wire one via `radiant setup-mcp` "+
 					"from inside Claude Code / Cursor / Hermes, then retry",
-				ErrNoHostAgent, defaultSamplingTimeout)
+				ErrNoHostAgent, timeout)
 		}
 		return nil, fmt.Errorf("sampling: context cancelled: %w", ctx.Err())
 	}

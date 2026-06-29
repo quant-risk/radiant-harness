@@ -99,9 +99,69 @@ The unique constraint: **no API key**. radiant never talks to an LLM provider di
 
 ## Installation
 
+### One-liner installer (Linux/macOS/WSL/git-bash)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash
+```
+
+Downloads the matching `radiant-<os>-<arch>` + `SHA256SUMS` from the latest
+GitHub release, verifies the SHA256, and installs to `/usr/local/bin/radiant`.
+No API key, no `go` toolchain, no `npm`. ~10 MB.
+
+Pin a version: `RADIANT_VERSION=v3.2.8 curl -fsSL ... | bash`
+
+### Hermes quickstart
+
+Hermes (Nous Research / OpenClaw / Nous) is the most common ask and the
+trickiest to wire in. After `curl … | bash`:
+
+```bash
+# 1. Wire MCP — writes ~/.hermes/config.yaml with sampling block enabled.
+radiant setup-mcp --agent=hermes --global
+
+# 2. Restart Hermes (or /reload-mcp in chat).
+
+# 3. Ask:
+#    > "use radiant-harness to <your goal>"
+```
+
+`setup-mcp --agent=hermes` writes the full sampling block to
+`~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  radiant:
+    command: /usr/local/bin/radiant
+    args: [mcp, serve]
+    timeout: 300
+    sampling:
+      enabled: true
+      timeout: 120
+      max_tokens_cap: 8192
+      max_tool_rounds: 5
+```
+
+No `pip install pyyaml`, no manual Python edit of `~/.hermes/config.yaml`
+required. The defaults are calibrated for the 30–40 s cold-start latency
+Hermes' `xiaomi`/`mimo`/OpenRouter-backed sampling can hit on the first
+3 sampling calls of a long run.
+
+Override per-user in the same file:
+
+```yaml
+sampling:
+  model: openrouter/google/gemini-2.5-flash    # force a faster model
+  timeout: 60                                  # tighter cap
+```
+
+If Hermes fails to start the MCP server, see `radiant setup-mcp
+--agent=hermes --dry-run` to preview what would be written without
+editing the file.
+
 ### Download a release
 
-Pre-built binaries are available on the
+Pre-built binaries are also available on the
 [releases page](https://github.com/quant-risk/radiant-harness/releases).
 Six targets are supported:
 

@@ -22,12 +22,13 @@ import (
 
 // MCP server. Single tool: radiant_run (host-agent driven via
 // sampling/createMessage). No HTTP LLM, no API keys.
-func runMCPServe(in io.Reader, out io.Writer, samplingMode bool) error {
+func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout time.Duration, modelHint string) error {
 	d := &mcpDispatcher{}
 	if samplingMode {
 		d.sampling = llm.NewSamplingBackend(llm.SamplingOptions{
-			ModelHint: os.Getenv("RADIANT_MODEL"),
+			ModelHint: modelHint,
 			MaxTokens: 8192,
+			Timeout:   samplingTimeout,
 			Out:       out,
 		})
 	}

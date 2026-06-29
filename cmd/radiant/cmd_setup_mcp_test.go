@@ -403,7 +403,7 @@ func TestMergeHermesConfig_NewFile(t *testing.T) {
 	content, err := mergeHermesConfig(target, mcpEntry{
 		Command: "/usr/local/bin/radiant",
 		Args:    []string{"mcp", "serve"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("mergeHermesConfig: %v", err)
 	}
@@ -451,7 +451,7 @@ mcp_servers:
 	content, err := mergeHermesConfig(target, mcpEntry{
 		Command: "/usr/local/bin/radiant",
 		Args:    []string{"mcp", "serve"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("mergeHermesConfig: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestMergeHermesConfig_ReplacesExisting(t *testing.T) {
 	content, err := mergeHermesConfig(target, mcpEntry{
 		Command: "/usr/local/bin/radiant",
 		Args:    []string{"mcp", "serve"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("mergeHermesConfig: %v", err)
 	}
