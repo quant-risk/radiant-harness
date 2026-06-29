@@ -1,11 +1,7 @@
-//go:build !with_full
 
-// Light-only MCP runtime. Compiles in only when building
-// `go build ./cmd/radiant`.
-//
-// runMCPServe here is the sole MCP server entry point. It dispatches every
-// tool call through `callMCPTool`, which routes inference via MCP
-// sampling/createMessage back to the host agent.
+// MCP runtime. runMCPServe here is the sole MCP server entry point.
+// It dispatches every tool call through `callMCPTool`, which routes
+// inference via MCP sampling/createMessage back to the host agent.
 
 package main
 
@@ -24,11 +20,8 @@ import (
 	"github.com/quant-risk/radiant-harness/internal/loop"
 )
 
-// Light MCP server. Single tool: radiant_run (host-agent driven
-// via sampling/createMessage). No HTTP LLM, no API keys, no
-// exec.Command to sub-binaries (those sub-binaries don't exist in
-// Light). The Full binary in cmd_mcp_runtime_full.go adds
-// spec/adr/product/evals/audit/release/loop-* routes that shell out.
+// MCP server. Single tool: radiant_run (host-agent driven via
+// sampling/createMessage). No HTTP LLM, no API keys.
 func runMCPServe(in io.Reader, out io.Writer, samplingMode bool) error {
 	d := &mcpDispatcher{}
 	if samplingMode {

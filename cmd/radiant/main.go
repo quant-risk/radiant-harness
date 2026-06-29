@@ -1,4 +1,3 @@
-//go:build !with_full
 
 // radiant entrypoint. Inference comes exclusively from the host agent via
 // MCP sampling/createMessage — no API key, no HTTP LLM client.
@@ -26,10 +25,10 @@ func main() {
 		Version: version,
 	}
 
-	// Light command set: only MCP-related subcommands.
+	// Command set: setup-mcp, mcp serve, host-info.
 	registerSetupMCPCmd(root) // 11 agents, vendor-neutral config writes
-	registerMCPServeCmd(root) // the MCP server itself (Light by definition)
-	registerHostInfoCmd(root) // show detected host agent (Sprint 79)
+	registerMCPServeCmd(root) // the MCP server itself
+	registerHostInfoCmd(root) // show detected host agent
 
 	root.SetVersionTemplate("{{.Version}}\n")
 

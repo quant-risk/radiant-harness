@@ -1,16 +1,9 @@
 package llm
 
-// Shared LLM types — used by both sampling (Light + Full) and HTTP (Full
-// only). These types are intentionally LLM-agnostic so the Light build
-// can compile them without the HTTP client code.
-//
-// Model/Provider live alongside these types because the Backend
-// interface (in backend.go) uses Model.ModelID. The HTTPBackend (in
-// backend_http.go, Full only) extends Client which carries Model.
-//
-// Splitting these out of client.go keeps client.go tag-excludable on
-// light_only without breaking sampling.go (which depends on Message +
-// ChatResponse).
+// Shared LLM types. LLM-agnostic so the same Message / ChatResponse /
+// Model types flow through both the sampling backend (host-agent) and
+// any future backend implementation, without coupling them to a
+// specific HTTP provider.
 
 // MaxRetries caps automatic retries on transient failures (5xx, network
 // resets, timeouts). Each retry uses exponential backoff with full jitter.

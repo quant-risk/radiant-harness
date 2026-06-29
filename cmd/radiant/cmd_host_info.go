@@ -1,9 +1,7 @@
 package main
 
 // `radiant host-info` — print which agent (if any) is currently
-// invoking radiant-harness. This subcommand is registered in BOTH
-// the Light and Full binaries because the answer is useful in
-// either context:
+// invoking radiant-harness. Useful in either context:
 //
 //   - Inside an agent (Claude Code, Cursor, Hermes, ...):
 //     `host-info` confirms which one detected us.
@@ -11,9 +9,8 @@ package main
 //     so the operator knows possession isn't happening.
 //
 // The subcommand is implemented on top of the internal/hostdetect
-// package (Sprint 79). Sprint 80 will wire the result of Detect()
-// into the PickBackend policy so the Full binary auto-uses
-// sampling when a host supports it.
+// package. When a host supports MCP sampling/createMessage, the
+// harness automatically routes inference back to that host.
 
 import (
 	"encoding/json"

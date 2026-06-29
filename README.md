@@ -319,21 +319,23 @@ radiant-harness/
 │   ├── cmd_mcp_serve.go                 ← MCP server (JSON-RPC 2.0 over stdio)
 │   ├── cmd_mcp_runtime.go               ← MCP server impl
 │   ├── cmd_host_info.go                 ← radiant host-info
-│   └── helpers.go                       ← shared helpers
+│   └── mcp_types.go                     ← shared MCP wire types
 │
 ├── internal/
 │   ├── hostdetect/                      ← runtime agent detection (env + /proc)
 │   ├── loop/                            ← Discover→Plan→Execute→Verify engine
+│   ├── llm/                             ← Backend interface + SamplingBackend (MCP)
 │   ├── mcpbridge/                       ← MCP tool bridge
-│   ├── config/  ontology/  semantic/    ← semantic layer
-│   └── …                                ← 25 packages total
+│   ├── skill/  semantic/  policy/       ← skill + semantic + policy layers
+│   ├── tools/                           ← file/search/edit tools
+│   └── …                                ← 12 packages total
 │
 ├── scripts/
 │   └── smoke-test.sh                    ← 17-check binary verification
 │
 ├── docs/
 │   ├── HOST-AGENTS.md                   ← detection matrix
-│   └── validation-report-*.md           ← per-sprint reports
+│   └── ARCHITECTURE.md                  ← architecture overview
 │
 ├── Makefile                             ← make build, make release, make smoke
 ├── LICENSE                              ← MIT

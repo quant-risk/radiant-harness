@@ -3,17 +3,10 @@ package llm
 import "context"
 
 // Backend is the abstraction the loop uses for all LLM calls. It decouples
-// the runner from the transport — HTTP (Anthropic, OpenRouter, OpenAI) in the
-// Full build, or MCP sampling/createMessage over a JSON-RPC pipe in both
-// Light and Full builds when the harness is driven by a host agent that
-// provides inference.
-//
-// Light build: only SamplingBackend satisfies this interface (HTTP files
-// are excluded via build tags). Inference comes from the host agent.
-//
-// Full build (default): both SamplingBackend and HTTPBackend are
-// available. Inference source is selected by PickBackend based on runtime
-// context.
+// the runner from the transport. The only transport bundled with radiant is
+// MCP sampling/createMessage (SamplingBackend): every LLM call is routed back
+// to the host agent, which pays for inference and is responsible for the
+// model choice.
 type Backend interface {
 	// Chat sends messages and returns a synchronous completion.
 	Chat(ctx context.Context, messages []Message) (*ChatResponse, error)
@@ -28,7 +21,5 @@ type Backend interface {
 	ModelID() string
 }
 
-// Compile-time interface conformance check for the always-available backend.
-// The HTTPBackend conformance check lives in backend_http.go (only compiled
-// in the Full build).
+// Compile-time interface conformance check.
 var _ Backend = (*SamplingBackend)(nil)

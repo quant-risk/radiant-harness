@@ -13,15 +13,15 @@ used, and whether the agent supports MCP sampling/createMessage
 
 | Agent             | Env key (any of)                                  | PPID match                | Sampling | Code path                 |
 |-------------------|----------------------------------------------------|--------------------------|----------|---------------------------|
-| Claude Code       | `CLAUDE_CODE_ENTRY`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_PID` | `claude-code`, `claude`, `Claude` | yes      | Light + Full              |
-| Cursor            | `CURSOR_TRACE_ID`, `CURSOR_HOME`, `CURSOR_USER_DATA_DIR` | `cursor`, `cursor-server`, `Cursor`, `Cursor.exe` | yes      | Light + Full              |
-| Hermes            | `HERMES_VERSION`, `HERMES_HOME`, `HERMES_AGENT_HOME`     | `hermes-agent`, `hermes-cli` | yes    | Light + Full              |
-| Kimi CLI          | `KIMI_SHARE_DIR`, `KIMI_VERSION`, `KIMI_CONFIG_DIR`     | `kimi`, `kimi-cli`         | yes    | Light + Full              |
-| OpenClaw          | `OPENCLAW_GATEWAY_URL`, `OPENCLAW_VERSION`, `OPENCLAW_WORKSPACE` | `openclaw`, `openclaw-cli` | yes | Light + Full            |
-| Codex             | `CODEX_HOME`, `CODEX_THREAD_ID`, `CODEX_RUNTIME`, `CODEX_THREAD_ENV` | `codex`, `codex-cli` | yes      | Light + Full              |
-| Cline             | `CLINE_USER`, `CLINE_VERSION`, `CLINE_WORKSPACE`        | `cline`, `cline-host`     | yes    | Light + Full              |
-| OpenCode          | `OPENCODE_HOME`, `OPENCODE_VERSION`, `OPENCODE_CONFIG`  | `opencode-cli`           | yes    | Light + Full              |
-| VS Code Copilot   | `VSCODE_PID`, `VSCODE_IPC_HOOK_CLI`, `VSCODE_CWD`       | `Code Helper`, `code`     | yes    | Light + Full              |
+| Claude Code       | `CLAUDE_CODE_ENTRY`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_PID` | `claude-code`, `claude`, `Claude` | yes      | All              |
+| Cursor            | `CURSOR_TRACE_ID`, `CURSOR_HOME`, `CURSOR_USER_DATA_DIR` | `cursor`, `cursor-server`, `Cursor`, `Cursor.exe` | yes      | All              |
+| Hermes            | `HERMES_VERSION`, `HERMES_HOME`, `HERMES_AGENT_HOME`     | `hermes-agent`, `hermes-cli` | yes    | All              |
+| Kimi CLI          | `KIMI_SHARE_DIR`, `KIMI_VERSION`, `KIMI_CONFIG_DIR`     | `kimi`, `kimi-cli`         | yes    | All              |
+| OpenClaw          | `OPENCLAW_GATEWAY_URL`, `OPENCLAW_VERSION`, `OPENCLAW_WORKSPACE` | `openclaw`, `openclaw-cli` | yes | All            |
+| Codex             | `CODEX_HOME`, `CODEX_THREAD_ID`, `CODEX_RUNTIME`, `CODEX_THREAD_ENV` | `codex`, `codex-cli` | yes      | All              |
+| Cline             | `CLINE_USER`, `CLINE_VERSION`, `CLINE_WORKSPACE`        | `cline`, `cline-host`     | yes    | All              |
+| OpenCode          | `OPENCODE_HOME`, `OPENCODE_VERSION`, `OPENCODE_CONFIG`  | `opencode-cli`           | yes    | All              |
+| VS Code Copilot   | `VSCODE_PID`, `VSCODE_IPC_HOOK_CLI`, `VSCODE_CWD`       | `Code Helper`, `code`     | yes    | All              |
 
 ## Confidence scoring
 
@@ -42,7 +42,6 @@ is reported. Ties go to the first in the `knownAgents` order.
 |--------|----------------------------------------------------|
 | 79     | `radiant host-info` command (display only)          |
 | 80     | `internal/llm/pick.go` — `PickBackend(cfg)` picks SamplingBackend when host supports it |
-| 81     | Apply PickBackend to every Full subcommand |
 
 ## Adding a new agent
 
