@@ -264,14 +264,27 @@ func callSamplingOnce(ctx context.Context, backend llm.Backend, phase, system, u
 }
 
 // runPossessForCLI is the entry point used by `radiant mcp possess --task=...`.
-// In v3.6.0 it honours hostdetect.ResolveSupport the same way the MCP path
-// does, so debugging the harness on a Codex box (or any host that we
-// already know lacks sampling) produces the same self-driven scaffold
-// instead of empty placeholders.
 //
-// The `RADIANT_FORCE_SAMPLING=1` env var escapes self-driven mode and
-// runs the deterministic stub path — useful for verifying the stub
-// output shape in a unit test or smoke run.
+// v3.6.0.1 — the empty-stub trap.
+//
+// The previous gate checked `detected.Agent != AgentUnknown` before
+// routing to self-driven. When the host agent ran `radiant mcp possess`
+// from a fresh shell (no `CODEX_HOME`, no `CLAUDE_CODE_ENTRY`, etc.),
+// Detect() returned AgentUnknown and the run fell back to a stub
+// path that ran bootstrapPossess and marked every phase as done
+// with a `[stub mode]` placeholder — leaving the user with a folder
+// of empty directories and zero deliverables, exactly the failure
+// mode the v3.6.0 self-driven pipeline was supposed to fix.
+//
+// v3.6.0.1 flips the default: EVERY CLI invocation of
+// `radiant mcp possess` dispatches to runSelfDrivenPossess. The user
+// gets the templated scaffold (`specs/0001-<slug>/spec.md`,
+// `tasks.md`, `scripts/run.sh`, `docs/README.md`,
+// `.radiant-harness/{CONTEXT.md, handoff.md, verify.md}`) without
+// having to first prove which agent they are. The old hollow-stub
+// behaviour is preserved behind `RADIANT_FORCE_SAMPLING=1` for the
+// rare case where the caller wants to verify the empty-stub shape
+// in a unit test or smoke run.
 func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*possessState, error) {
 	if workdir == "" {
 		workdir, _ = os.Getwd()
@@ -280,16 +293,27 @@ func runPossessForCLI(ctx context.Context, workdir, task string, w io.Writer) (*
 
 	if os.Getenv("RADIANT_FORCE_SAMPLING") != "1" {
 		detected := hostdetect.New().Detect()
+		reason := "CLI invocation without MCP wiring — defaulting to self-driven"
 		if detected.Agent != hostdetect.AgentUnknown {
-			if supports, probed := hostdetect.ResolveSupport(detected.Agent); probed && !supports {
-				fmt.Fprintf(w, "⚠ host %q has no sampling — routing `radiant mcp possess` to self-driven mode.\n",
-					detected.Agent)
-				fmt.Fprintln(w, "  Set RADIANT_FORCE_SAMPLING=1 to bypass and exercise the stub path.")
-				fmt.Fprintln(w)
-				return runSelfDrivenPossess(ctx, workdir, task, "standard", w,
-					fmt.Sprintf("probe says %s has no sampling", detected.Agent))
+			if supports, probed := hostdetect.ResolveSupport(detected.Agent); probed && supports {
+				// Detected host DOES support sampling; CLI path is still
+				// self-driven because there's no MCP transport from a
+				// direct shell call (the LLM loop runs only when the
+				// host agent spawns `radiant mcp serve`). Use the
+				// detected agent as a hint but don't claim sampling.
+				reason = fmt.Sprintf("CLI invocation — host %q reports SupportsSampling=true but no MCP transport from a shell call", detected.Agent)
+			} else if probed && !supports {
+				reason = fmt.Sprintf("probe says %s has no sampling", detected.Agent)
+			} else {
+				reason = fmt.Sprintf("CLI invocation — host %q not yet probed", detected.Agent)
 			}
 		}
+		fmt.Fprintf(w, "→ routing `radiant mcp possess` to self-driven mode (%s).\n", reason)
+		if os.Getenv("RADIANT_FORCE_STUB") != "1" {
+			fmt.Fprintln(w, "  Set RADIANT_FORCE_SAMPLING=1 to bypass and exercise the legacy stub path.")
+		}
+		fmt.Fprintln(w)
+		return runSelfDrivenPossess(ctx, workdir, task, "standard", w, reason)
 	}
 
 	st, err := loadPossessState(workdir, id)
