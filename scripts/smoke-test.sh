@@ -41,11 +41,11 @@ ok()   { echo "$(green OK): $*"; }
 [ -x "$BIN" ] || fail "$BIN is missing or not executable"
 ok "$BIN exists and is executable"
 
-# 2. Version is exactly 3.2.5.
+# 2. Version is exactly 3.2.6.
 V="$("$BIN" --version 2>&1 || true)"
 case "$V" in
-  *"3.2.5"*) ok "version reports '$V'" ;;
-  *)         fail "expected version to contain '3.2.5', got: $V" ;;
+  *"3.2.6"*) ok "version reports '$V'" ;;
+  *)         fail "expected version to contain '3.2.6', got: $V" ;;
 esac
 
 # 3. NO HTTP-LLM symbols.
