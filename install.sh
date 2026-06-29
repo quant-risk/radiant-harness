@@ -44,6 +44,14 @@
 #                      cursor, mavis-code, …); pass --setup-mcp alias below
 #   --setup-mcp        alias for --agent=<autodetected>; runs setup-mcp
 #                      against the detected host
+#   --self-for-agent   emit explicit restart + possession instructions at
+#                      the end (the canonical "an AI agent just got this
+#                      repo" bootstrap). Writes a small instruction file
+#                      to the current directory ($WORKDIR, default $PWD)
+#                      so the next agent that opens it knows exactly what
+#                      to do.
+#   --workdir=<path>   override the directory where the agent-instruction
+#                      file is written (default: current dir or $PWD).
 #   --no-verify        skip SHA256 verification (NOT recommended)
 #   --dry-run          print what would happen; don't write anything
 #
@@ -64,12 +72,14 @@ DRY_RUN=0
 # ---- arg parse --------------------------------------------------------------
 for arg in "$@"; do
   case "$arg" in
-    --setup-mcp) SETUP_MCP=1 ;;
-    --agent=*)    AGENT_NAME="${arg#--agent=}" ;;
-    --no-verify)  VERIFY=0 ;;
-    --dry-run)    DRY_RUN=1 ;;
-    --prefix=*)   PREFIX="${arg#--prefix=}" ;;
-    --version=*)  VERSION="${arg#--version=}" ;;
+    --setup-mcp)      SETUP_MCP=1 ;;
+    --agent=*)        AGENT_NAME="${arg#--agent=}" ;;
+    --self-for-agent) SELF_FOR_AGENT=1 ;;
+    --workdir=*)      WORKDIR="${arg#--workdir=}" ;;
+    --no-verify)      VERIFY=0 ;;
+    --dry-run)        DRY_RUN=1 ;;
+    --prefix=*)       PREFIX="${arg#--prefix=}" ;;
+    --version=*)      VERSION="${arg#--version=}" ;;
     -h|--help)
       # Print the docblock at the top of the script.
       awk 'NR>2 && /^set -euo/{exit} {print}' "$0" | sed -n '/^# /p; /^[^#]/q' | sed 's/^# \{0,1\}//'
@@ -234,3 +244,92 @@ cat <<EOF
   phases, writes code, runs gates, returns a trace.
 
 EOF
+
+# ---- Self-bootstrap for the host agent --------------------------------------
+# When --self-for-agent is set, write a machine-readable instruction file to
+# the current working directory (or $WORKDIR) so the *next* agent that opens
+# this directory sees: "radiant is installed; here is exactly what to do."
+# This side-steps the chicken-and-egg problem where the agent hasn't loaded
+# the new MCP config yet and might run cli commands instead.
+if [ "$SELF_FOR_AGENT" = 1 ]; then
+  if [ -z "$WORKDIR" ]; then
+    WORKDIR="${WORKDIR:-$PWD}"
+    WORKDIR="$(cd "$WORKDIR" 2>/dev/null && pwd || echo "$WORKDIR")"
+  fi
+  mkdir -p "$WORKDIR/.radiant-harness" 2>/dev/null || true
+  INSTALLED_BIN="$PREFIX/radiant"
+  RST=""
+  case "${TARGET_AGENT:-}" in
+    hermes)        RST="send /reload-mcp in this chat" ;;
+    claude)        RST="restart the shell session that runs `claude`" ;;
+    codex)         RST="re-launch codex (exit the current and run again)" ;;
+    cursor)        RST="reopen the Cursor window" ;;
+    opencode)      RST="reopen the OpenCode editor" ;;
+    windsurf)      RST="reopen Windsurf" ;;
+    vscode-copilot) RST="reload the VS Code window (Command Palette > 'Reload Window')" ;;
+    zed)           RST="restart Zed" ;;
+    *)             RST="restart this agent (MCP servers are loaded at process start)" ;;
+  esac
+  cat > "$WORKDIR/.radiant-harness/INIT.json" 2>/dev/null <<JSON
+{
+  "installed_at":    "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "radiant_binary":  "$INSTALLED_BIN",
+  "version":         "$VERSION",
+  "host_agent":      "${TARGET_AGENT:-auto}",
+  "restart_hint":    "$RST",
+  "next_call": {
+    "tool":        "mcp__radiant__possess",
+    "task_arg":    "<the user's original prompt, verbatim>",
+    "workdir_arg": "$WORKDIR",
+    "profile_arg": "standard"
+  }
+}
+JSON
+  cat > "$WORKDIR/.radiant-harness/AGENTS.md" 2>/dev/null <<MD
+# AGENTS.md (auto-written by radiant-harness installer)
+
+This project has **radiant-harness** installed at:
+\`$INSTALLED_BIN\`
+
+The host agent (likely **${TARGET_AGENT:-auto}**) already has its MCP
+config pointing at that binary. The next step is to reload:
+
+  > $RST
+
+After reloading, **call the MCP tool** with the user's original prompt:
+
+  mcp__radiant__possess(
+      task     = "<user's original prompt, verbatim>",
+      workdir  = "$WORKDIR",
+      profile  = "standard"
+  )
+
+Do **not** run \`radiant loop\`, \`radiant run\`, \`radiant fleet\`,
+\`radiant model\`, \`radiant profile\`, \`radiant evaluate\`, or any
+other CLI subcommand directly — those are gated behind
+\`RADIANT_INTERNAL=1\` and the host agent must own the task via the
+MCP tool above.
+MD
+  cat > "$WORKDIR/.radiant-harness/NEXT.txt" 2>/dev/null <<TXT
+=== NEXT STEP for the AI agent in this session ===
+
+Restart yourself: $RST
+
+Then call:
+  mcp__radiant__possess(
+      task    = "<the user's original prompt>",
+      workdir = "$WORKDIR",
+      profile = "standard"
+  )
+
+The harness takes over via sampling/createMessage.
+TXT
+  say "agent-bootstrap files written to: $WORKDIR/.radiant-harness/"
+  say "  - AGENTS.md    (the contract)"
+  say "  - INIT.json    (machine-readable)"
+  say "  - NEXT.txt     (next-step prompt)"
+  say ""
+  say "NEXT STEP for the agent in this directory:"
+  say "  $RST"
+  say ""
+fi

@@ -15,6 +15,19 @@ with real hosts (Hermes mimo/xiaomi 20–40 s cold start blew past the
 The decomposition below makes each MCP tool bounded so the host agent
 stays in control and no single call can time out.
 
+### Added
+- **`install.sh --self-for-agent`** — emits a host-specific restart
+  hint (e.g. `send /reload-mcp in this chat` for Hermes,
+  `restart the shell session that runs claude` for Claude Code)
+  plus writes three bootstrap files to the project directory so the
+  *next* agent that opens it has the contract at hand:
+  - `.radiant-harness/AGENTS.md` — what to do, in Markdown
+  - `.radiant-harness/INIT.json` — the same contract, machine-readable
+  - `.radiant-harness/NEXT.txt` — a single-line next-step prompt
+  This is the canonical "AI agent just received this repo" path.
+- **`install.sh --workdir=<path>`** — control where the bootstrap
+  files are written (default: `$WORKDIR` if set, else `$PWD`).
+
 ### Changed
 - **Decomposed MCP surface.** Replaced the single `radiant_run` tool with
   a small, bounded-tool grammar the host agent calls step by step:
