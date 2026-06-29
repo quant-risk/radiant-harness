@@ -1,0 +1,36 @@
+name: lazy-executor
+description: >
+  Força o executor autonomous loop a produzir o mínimo de código que
+  funciona. Skill em PT-BR portado da ladder do ponytail (DietrichGebert),
+  adaptado ao contexto radiant-harness onde o verifier já corta código
+  que não satisfaz ACs. Use em qualquer task de código onde over-engenharia
+  é uma preocupação: pedir feature nova, refactor, fix, ou review de diff.
+  Suporta níveis de intensidade: lite, full (default), ultra. Não usar pra
+  prosa, tradução, ou perguntas de conhecimento geral.
+version: 1.0.0
+tier_eligible:
+  - trivial
+  - feature
+  - architecture
+when_to_use: |
+  Use este skill sempre que o loop for escrever código e houver risco de
+  sobre-engenharia. Especialmente útil em tasks com alto volume de output
+  de código (helpers, abstractions, configs) que poderiam ser uma linha.
+inputs: []
+outputs:
+  - path: "-"
+    type: report
+    description: |
+      Bloco de texto injetado no system prompt do executor, filtrado
+      pela intensidade (lite/full/ultra).
+gates:
+  - name: intensity_filter
+    description: |
+      Conteúdo é filtrado pelo campo --intensity=lite|full|ultra.
+      Default: full.
+license: MIT
+author: radiant-harness
+related_skills:
+  - nova-feature
+  - clarificar
+  - revisar-pr

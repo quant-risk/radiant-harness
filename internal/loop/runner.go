@@ -17,6 +17,7 @@ import (
 
 	radctx "github.com/quant-risk/radiant-harness/internal/context"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/skill"
 )
 
 // Ensure os.Stdout satisfies StreamWriter at compile time.
@@ -96,6 +97,12 @@ type RunConfig struct {
 	// iteration event. Use os.Stdout (or a file) to activate --log-json.
 	// nil = no structured logging (default).
 	LogJSON io.Writer
+
+	// Intensity controls injection of the lazy-executor skill into the
+	// executor system prompt. Values: "" (default = full), "lite", "full",
+	// "ultra", "off". See internal/skill for the parser and content filter.
+	// Default behavior when empty is "full" — ladder applied.
+	Intensity string
 }
 
 // StreamWriter is the interface for streaming output — satisfied by *os.File,
@@ -327,15 +334,16 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 		}
 
 		execPrompt := buildExecutorPrompt(goal, groundBlock, planOutput, lastReviewFindings)
+		execSys := executorSystemPromptWithIntensity(projectCtxBlock, cfg.Intensity)
 		var execOutput string
 		var execErr error
 		if cfg.Stream {
 			iter := c.State().Iteration + 1
 			fmt.Fprintf(streamOut, "\n── executor (iter %d) ──────────────────────────────\n", iter)
-			execOutput, execErr = backendChatStream(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt, streamOut)
+			execOutput, execErr = backendChatStream(ctx, execBackend, execSys, execPrompt, streamOut)
 			fmt.Fprintf(streamOut, "\n────────────────────────────────────────────────────\n")
 		} else {
-			execOutput, execErr = backendSimpleChat(ctx, execBackend, executorSystemPrompt(projectCtxBlock), execPrompt)
+			execOutput, execErr = backendSimpleChat(ctx, execBackend, execSys, execPrompt)
 		}
 		toks := estimateTokens(execPrompt, execOutput)
 		traceCall(tr, cfg.LogJSON, runID, PhaseExecute, "executor", execModelID, execPrompt, execOutput, toks, execErr)
@@ -461,14 +469,42 @@ func estimateTokens(prompt, response string) int {
 // ── System prompts ────────────────────────────────────────────────────────────
 
 func executorSystemPrompt(contextBlock string) string {
+	return executorSystemPromptWithIntensity(contextBlock, "")
+}
+
+// executorSystemPromptWithIntensity injects the lazy-executor skill filtered
+// to the requested intensity. Empty intensity defaults to "full" so the
+// skill is always present (only "off" disables it explicitly).
+func executorSystemPromptWithIntensity(contextBlock, intensity string) string {
 	base := `You are an expert software engineer implementing a goal autonomously.
 Read the goal and any prior context carefully.
 Produce a concrete, complete implementation. No stubs, no TODOs, no placeholders.
 Output the result clearly so a separate verifier can assess it.`
-	if contextBlock == "" {
-		return base
+
+	// Resolve intensity (empty = full = default).
+	if intensity == "" {
+		intensity = string(skill.IntensityFull)
 	}
-	return base + "\n\n" + contextBlock
+	lazyBlock := ""
+	if intval, err := skill.ParseIntensity(intensity); err == nil && intval != skill.IntensityOff {
+		if body, err := skill.LoadLazyExecutorSkill(intval); err == nil && body != "" {
+			lazyBlock = body
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(base)
+	if lazyBlock != "" {
+		b.WriteString("\n\n## CODE STYLE — LAZY EXECUTOR (intensity: ")
+		b.WriteString(intensity)
+		b.WriteString(")\n\n")
+		b.WriteString(lazyBlock)
+	}
+	if contextBlock != "" {
+		b.WriteString("\n\n")
+		b.WriteString(contextBlock)
+	}
+	return b.String()
 }
 
 // assembleContextBlock runs project detection and assembles CONTEXT.md,

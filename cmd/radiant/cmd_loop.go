@@ -125,6 +125,7 @@ func registerLoopCmds(root *cobra.Command) {
 				quorumN = quorumK + 1
 			}
 
+			intensityFlag, _ := cmd.Flags().GetString("intensity")
 			runCfg := loop.RunConfig{
 				ExecutorModel: execModel,
 				VerifierModel: verModel,
@@ -148,6 +149,7 @@ func registerLoopCmds(root *cobra.Command) {
 				Stream:              stream,
 				Plan:                plan,
 				AutoRoute:           autoRoute,
+				Intensity:           intensityFlag,
 			}
 
 			fmt.Printf("✓ Loop starting\n")
@@ -247,6 +249,7 @@ func registerLoopCmds(root *cobra.Command) {
 	loopStartCmd.Flags().String("planner-model", "", "Model used for planning (default = same as --model; a cheaper model like haiku is often sufficient)")
 	loopStartCmd.Flags().Bool("auto-route", false, "Auto-select per-phase models from the anchor's preset family (research→top-tier, plan→mid, execute→anchor)")
 	loopStartCmd.Flags().String("mode", "", "Operational mode: light|full|auto. light = harness possesses the agent via MCP sampling (no API key). full = autonomous HTTP to LLM providers (API key required). Default: auto-detect.")
+	loopStartCmd.Flags().String("intensity", "", "Executor intensity for lazy-executor skill: lite|full|ultra|off. Default: full. lite = build what was asked, suggest lazy alt. full = ladder enforced. ultra = YAGNI extremist. off = no skill injected.")
 
 	loopStatusCmd := &cobra.Command{
 		Use:   "status [run-id]",
