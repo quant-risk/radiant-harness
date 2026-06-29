@@ -721,6 +721,38 @@ This is the complete CLI surface — **55 commands** in one binary:
 | `radiant completion <shell>` | Shell completion (bash, zsh, fish, powershell). |
 | `radiant help` | Complete command list. |
 
+### `radiant test-case` — offline reproduction of real-host failure modes
+
+> **The single most diagnostic command in the project.** Spawns a real
+> `radiant mcp serve` subprocess, drives the full possession flow with
+> configurable sampling latency (default **25 s/call** — Hermes
+> mimo / xiaomi / OpenRouter cold-start), and writes a Markdown report.
+> Use this **before** testing in a real LLM-backed agent.
+
+```bash
+radiant test-case case.zip \
+  --cold-start-ms=25000 --jitter-ms=5000 \
+  --sampling-timeout=130s \
+  --profile=standard \
+  --report .radiant-harness/reports/case.md
+```
+
+What you get:
+
+- exits 0 only when the harness exits `success`
+- non-zero on `critical_failure`, transport error, or timeout
+- a Markdown report with per-phase timing, sampling call count,
+  the harness's final `Exit:` line, and a full event log
+
+This is the **CI-grade proof that the harness handles slow
+real-world hosts**: every PR runs `radiant test-case ./case.zip
+--cold-start-ms=25000` and the pipeline only passes if the harness
+completes the 4-phase flow within the 130 s sampling timeout.
+
+Why `--cold-start-ms=25000`? Because Hermes' production cold-start
+latency is ~20–40 s per sampling call, and that's the path that
+broke on 2026-06-29. This command exists to reproduce it offline.
+
 ### Low-level (utility)
 
 | Command | What it does |
