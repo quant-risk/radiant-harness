@@ -86,6 +86,12 @@ FINDINGS:
 }
 
 // ParseReviewResponse parses the structured reviewer response.
+//
+// The harness uses two review layers: the per-iteration verifier (which
+// responds with `VERDICT: APPROVED|REJECTED`) and the post-convergence
+// review panel (which historically responded with `REVIEW: PASS|FAIL`).
+// Both formats are accepted here so a single agent response can satisfy
+// whichever layer asks.
 func ParseReviewResponse(response string) ReviewResult {
 	result := ReviewResult{}
 	lines := strings.Split(response, "\n")
@@ -99,7 +105,13 @@ func ParseReviewResponse(response string) ReviewResult {
 		switch {
 		case strings.HasPrefix(line, "REVIEW:"):
 			val := strings.TrimSpace(strings.TrimPrefix(line, "REVIEW:"))
-			result.Pass = strings.EqualFold(val, "pass")
+			firstWord := strings.Fields(strings.ToLower(val))
+			result.Pass = len(firstWord) > 0 && firstWord[0] == "pass"
+		case strings.HasPrefix(line, "VERDICT:"):
+			// Accept VERDICT: APPROVED|REJECTED as equivalent to REVIEW.
+			val := strings.TrimSpace(strings.TrimPrefix(line, "VERDICT:"))
+			firstWord := strings.Fields(strings.ToLower(val))
+			result.Pass = len(firstWord) > 0 && (firstWord[0] == "approved" || firstWord[0] == "pass")
 		case strings.HasPrefix(line, "SCORE:"):
 			var s float64
 			fmt.Sscanf(strings.TrimPrefix(line, "SCORE:"), "%f", &s)

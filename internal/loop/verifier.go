@@ -175,7 +175,12 @@ func ParseVerifyResponse(response string, cfg VerifierConfig) VerifyResult {
 		switch {
 		case strings.HasPrefix(line, "VERDICT:"):
 			verdict := strings.TrimSpace(strings.TrimPrefix(line, "VERDICT:"))
-			result.Approved = strings.EqualFold(verdict, "approved")
+			// Accept any verdict that starts with "approved" (case-insensitive)
+			// followed by optional trailing text. This is more tolerant than
+			// strict equality so natural-language responses like
+			// "VERDICT: APPROVED — gates green" still parse correctly.
+			firstWord := strings.Fields(strings.ToLower(verdict))
+			result.Approved = len(firstWord) > 0 && firstWord[0] == "approved"
 
 		case strings.HasPrefix(line, "SCORE:"):
 			scoreStr := strings.TrimSpace(strings.TrimPrefix(line, "SCORE:"))

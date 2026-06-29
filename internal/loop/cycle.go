@@ -30,7 +30,7 @@ var validTransitions = map[Phase][]Phase{
 	PhaseDiscover:      {PhasePlan, PhaseFailed},
 	PhasePlan:          {PhaseExecute, PhaseFailed},
 	PhaseExecute:       {PhaseVerify, PhaseFailed},
-	PhaseVerify:        {PhasePersist, PhaseExecute, PhaseAwaitingHuman, PhaseFailed},
+	PhaseVerify:        {PhasePersist, PhaseExecute, PhaseAwaitingHuman, PhaseDiscover, PhaseFailed},
 	PhasePersist:       {PhaseDone, PhaseDiscover},
 	PhaseDone:          {PhaseIdle},
 	PhaseFailed:        {PhaseIdle, PhaseDiscover},
