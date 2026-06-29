@@ -188,6 +188,10 @@ Flags:
 			"Equivalent to $RADIANT_MODEL.")
 
 	mcpCmd.AddCommand(mcpServeCmd)
+
+	// Subcommand: mcp self-test — verify the MCP wire-up end-to-end.
+	registerMCPSelfTestCmd(mcpCmd)
+
 	root.AddCommand(mcpCmd)
 }
 

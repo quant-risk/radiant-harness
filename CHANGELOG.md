@@ -4,6 +4,95 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.2.9] — 2026-06-29 — Diagnosis is one command
+
+### Added
+- **`radiant mcp self-test`** — boots a child `radiant mcp serve` process,
+  sends `initialize` + `tools/list` over stdio, returns PASS/FAIL with
+  timing per call. Detects regressions in the MCP wire-up without needing
+  a wired host agent. Exits non-zero on failure. Use:
+  ```bash
+  radiant mcp self-test            # 6 ms expected when wire-up is OK
+  radiant mcp self-test --timeout 15s
+  ```
+- **`radiant doctor --mcp`** — inspects the host agent's MCP config file
+  for an entry pointing to `radiant`. For Hermes (which requires an
+  explicit `sampling:` block) it verifies `sampling.enabled` and reports
+  both the sampling timeout and the outer MCP timeout. Reports the
+  expected config path, whether it exists/writable/parseable, whether
+  `radiant` is registered, and where to look to fix problems. Three
+  report states:
+  - **OK** — fully wired
+  - **FAIL: not wired** — config file exists but no radiant entry
+  - **FAIL: sampling not enabled** — radiant entry exists but Hermes
+    will drop sampling/createMessage calls until the user runs
+    `radiant setup-mcp --agent=hermes --global`
+  - **FAIL: config not parseable** — file is corrupt YAML/JSON
+
+### Verified — three Hermes `doctor --mcp` scenarios
+
+OK (sampling enabled, all green):
+```
+$ HERMES_VERSION=0.1 HOME=/tmp/... radiant doctor --mcp
+  agent                   hermes (confidence 100)
+  config path             /tmp/.../.hermes/config.yaml
+  path exists             true
+  path writable           true
+  config parseable        true
+  radiant entry           true
+  sampling.enabled        true
+  sampling.timeout        120s
+  mcp timeout             300s
+  verdict = OK
+```
+
+FAIL (radiant present but `sampling:` missing):
+```
+  ✗  radiant entry exists but the `sampling:` block is missing or disabled
+  Fix:
+     add a `sampling: { enabled: true, timeout: 120, max_tool_rounds: 5 }` block under mcp_servers.radiant (re-run `radiant setup-mcp --agent=hermes --global` to write it for you)
+  verdict = FAIL
+```
+
+FAIL (no radiant entry at all):
+```
+  ✗  radiant is not registered as an MCP server in this config
+  Fix:
+     run: radiant setup-mcp --agent=hermes
+  verdict = FAIL
+```
+
+### Verified — MCP possession 5/5
+```
+run 1  Exit: success   build+test=PASS
+run 2  Exit: success   build+test=PASS
+run 3  Exit: success   build+test=PASS
+run 4  Exit: success   build+test=PASS
+run 5  Exit: success   build+test=PASS
+```
+
+### Verified — `mcp self-test`
+```
+$ radiant mcp self-test
+radiant mcp self-test: PASS
+  server         : radiant-harness 3.2.8
+  tools          : radiant_run
+  initialize     : 4 ms
+  tools/list     : 0 ms
+  total          : 6ms
+```
+
+### Fixed — `_test.go` file-name gotcha
+The new `cmd_mcp_selftest.go` was originally written as
+`cmd_mcp_self_test.go`. The Go toolchain treats any `*_test.go` file as a
+test file and excludes it from `go build`. Renamed to drop the
+underscore-test-infix and renamed the function from
+`registerMCPSelfTestCmd` to match.
+
+[3.2.9]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.2.9
+
+---
+
 ## [3.2.8] — 2026-06-29 — Hermes: works out of the box
 
 ### Changed
