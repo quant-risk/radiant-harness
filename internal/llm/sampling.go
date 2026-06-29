@@ -276,6 +276,13 @@ func (sb *SamplingBackend) Dispatch(raw []byte) {
 	ch := val.(chan samplingResult)
 
 	if resp.Error != nil {
+		// JSON-RPC -32601 = "Method not found". When the host doesn't
+		// implement sampling/createMessage at all, surface a sentinel
+		// so callers can fall back gracefully.
+		if resp.Error.Code == -32601 {
+			ch <- samplingResult{err: fmt.Errorf("%w (method=%s)", ErrSamplingUnsupported, resp.Error.Message)}
+			return
+		}
 		ch <- samplingResult{err: fmt.Errorf("sampling error %d: %s", resp.Error.Code, resp.Error.Message)}
 		return
 	}
@@ -374,6 +381,20 @@ func samplingToChatResponse(text string) *ChatResponse {
 			},
 		},
 	}
+}
+
+// ErrSamplingUnsupported is returned when the host agent's MCP server
+// replies with the JSON-RPC "method not found" error (code -32601) for
+// sampling/createMessage — i.e. the host does NOT implement the sampling
+// method. Possession flows should detect this and fall back to stub mode
+// rather than failing outright.
+var ErrSamplingUnsupported = errors.New("sampling unsupported on host (json-rpc -32601)")
+
+// IsSamplingUnsupported reports whether an error chain originated from
+// ErrSamplingUnsupported. Use this rather than direct equality so callers
+// stay correct when wrap-format strings change.
+func IsSamplingUnsupported(err error) bool {
+	return errors.Is(err, ErrSamplingUnsupported)
 }
 
 // IsSamplingResponse reports whether a raw JSON-RPC line is a response

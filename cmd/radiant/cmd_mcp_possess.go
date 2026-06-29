@@ -324,6 +324,13 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 	}
 
 	phases := []string{"discover", "plan", "execute", "verify"}
+	// samplingUnsupportedLogged gates the warning so it only prints once
+	// per possession run. Once we see ErrSamplingUnsupported, every
+	// subsequent phase short-circuits to a deterministic placeholder so
+	// the run still completes structurally (state file, AGENTS.md,
+	// specs/, etc.) and the host agent can drive the actual work via
+	// its own tools.
+	samplingUnsupportedLogged := false
 	for _, ph := range phases {
 		r := st.Phases[ph]
 		if r.Status == "done" {
@@ -337,6 +344,35 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 		system, userText := phasePrompts(ph, task, workdir, st)
 		out, err := callSamplingOnce(ctx, backend, ph, system, userText)
 		if err != nil {
+			if llm.IsSamplingUnsupported(err) {
+				if !samplingUnsupportedLogged {
+					fmt.Fprintf(w,
+						"\n⚠ sampling/createMessage is not implemented on this host "+
+							"(JSON-RPC -32601).\n"+
+							"  Falling back to stub mode for remaining phases — the harness will\n"+
+							"  still scaffold specs/, docs/, AGENTS.md and persist state, but the\n"+
+							"  LLM-driven phases will be deterministic placeholders. The host agent\n"+
+							"  (you) can drive the real work using its own tools.\n\n")
+					samplingUnsupportedLogged = true
+				}
+				// Stub the phase: deterministic Markdown so the state
+				// machine still advances and downstream tools
+				// (radiant_phase_status, reset) work as expected.
+				r.Output = fmt.Sprintf(
+					"[stub — host sampling unsupported]\n\n"+
+						"This phase would normally prompt an LLM via sampling/createMessage. "+
+						"The host agent's MCP server does not implement that method, so the "+
+						"harness recorded a placeholder for you to fill in using your own "+
+						"tools (Read, Write, Bash).\n\n"+
+						"## Phase: %s\n\nApply the same intent as the prompt using your own tools.\n",
+					ph)
+				r.Status = "done"
+				r.EndedAt = time.Now().UTC()
+				st.CurrentPhase = ph
+				_ = savePossessState(st)
+				fmt.Fprintf(w, "  • %s → stub (host has no sampling)\n", ph)
+				continue
+			}
 			r.Status = "error"
 			r.Error = err.Error()
 			r.EndedAt = time.Now().UTC()
@@ -376,6 +412,16 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 // phase outputs and a snapshot of the project layout — never the full
 // conversation history. This keeps each phase's sampling call below the
 // 120 s sampling-timeout cap.
+//
+// **Text-only contract (v3.5.1):** the sampling LLM does NOT have access
+// to MCP tools (radiant doesn't send `tools` in the sampling/createMessage
+// params; the v3.3.0+ architecture splits LLM-planning from host-execution).
+// Therefore every phase prompt instructs the model to output Markdown
+// content / structure / reasoning, NEVER calls to write_file / read_file /
+// bash. The host agent applies the plan using its own tools after it
+// receives the sampling response. This keeps mimo (Xiaomi) and other
+// function-calling-less sampling LLMs safe from XML hallucination
+// (validation: `phase_hallucination_test.go`).
 func phasePrompts(phase, task, workdir string, st *possessState) (system, userText string) {
 	// Each phase prompt starts with an unambiguous `## radiant-phase: <name>`
 	// marker so the host (or our synthetic test host) can map a
@@ -383,54 +429,65 @@ func phasePrompts(phase, task, workdir string, st *possessState) (system, userTe
 	// when prior phase outputs are present in the prompt.
 	switch phase {
 	case "discover":
-		system = "You are an expert software engineer analysing a project to plan work."
+		system = "You are an expert software engineer analysing a project to plan work. " +
+			"Output ONLY Markdown. Do not pretend to call tools you do not have."
 		userText = fmt.Sprintf(
 			"## radiant-phase: discover\n\n"+
 				"Task: %s\nWorkdir: %s\n\n"+
-				"Identify the project layout (ls the workdir, read package manifests like go.mod, "+
+				"Identify the project layout (mention key manifest files such as go.mod, "+
 				"package.json, requirements.txt, pyproject.toml), surface any existing "+
 				"specs under specs/0001-*/, and list the bundled skills from radiant "+
-				"that appear most relevant to the task. Do not write files yet. "+
+				"that appear most relevant to the task. Do not write or modify files. "+
 				"Reply with a Markdown summary 6–12 lines long, ending with a section "+
 				"'## Skills to apply' listing exactly 1–3 skill names.",
 			task, workdir)
 	case "plan":
-		system = "You are an expert software engineer decomposing a goal into acceptance criteria."
+		system = "You are an expert software engineer decomposing a goal into acceptance criteria. " +
+			"Output ONLY Markdown. Do not pretend to call tools you do not have."
 		prior := strings.TrimSpace(st.Phases["discover"].Output)
 		userText = fmt.Sprintf(
 			"## radiant-phase: plan\n\n"+
 				"Task: %s\nWorkdir: %s\n\n"+
 				"Discover output (verbatim):\n%s\n\n"+
 				"Decompose the task into 2–5 acceptance criteria (each starting with 'AC<n>:') "+
-				"and 2–5 ordered tasks. Write to specs/0001-%s/tasks.md using Write tool. "+
-				"Then reply with a Markdown summary 6–12 lines listing ACs and tasks.",
+				"and 2–5 ordered tasks. Output the full specs/0001-%s/tasks.md content "+
+				"as a single fenced ```markdown``` block, then reply with a Markdown "+
+				"summary 6–12 lines listing ACs and tasks.",
 			task, workdir, prior, slugify(task))
 	case "execute":
-		system = "You are an expert software engineer implementing the plan."
+		system = "You are an expert software engineer implementing a plan. " +
+			"Output ONLY Markdown (prose + fenced code blocks). " +
+			"Do not pretend to call tools you do not have. " +
+			"The host agent will apply every file change you describe."
 		prior := strings.TrimSpace(st.Phases["plan"].Output)
 		userText = fmt.Sprintf(
 			"## radiant-phase: execute\n\n"+
 				"Task: %s\nWorkdir: %s\n\n"+
 				"Plan output (verbatim):\n%s\n\n"+
-				"Implement the code per the plan. Write files with Write tool. Run "+
-				"the gates from tasks.md with Bash. Iterate until all gates pass. "+
-				"Reply with a Markdown summary 6–12 lines: what you wrote, each gate "+
-				"PASS/FAIL, iterations taken.",
+				"Implement the code per the plan. For EACH file you intend to create or "+
+				"modify, output a fenced ```language path=relative/path``` block with the "+
+				"complete file contents — the host agent will write them. Then describe, "+
+				"in prose, which gates should be run and the expected outcome. End with a "+
+				"Markdown summary 6–12 lines: files touched, expected gate results, "+
+				"iterations anticipated.",
 			task, workdir, prior)
 	case "verify":
-		system = "You are an adversarial code reviewer. Default stance: REJECTED."
+		system = "You are an adversarial code reviewer. Default stance: REJECTED. " +
+			"Output ONLY Markdown."
 		prior := strings.TrimSpace(st.Phases["execute"].Output)
 		userText = fmt.Sprintf(
 			"## radiant-phase: verify\n\n"+
 				"Task: %s\nWorkdir: %s\n\n"+
 				"Execute output (verbatim):\n%s\n\n"+
-				"Verify the implementation against each AC. Run the gates yourself "+
-				"to confirm. Reply with EXACTLY:\n"+
-				"VERDICT: APPROVED\n"+
-				"SCORE: 1.00\n"+
-				"EVIDENCE: <one sentence>\n"+
-				"ESCALATE: false\n"+
-				"ISSUES:\n",
+				"Verify the implementation against each AC by examining the produced "+
+				"Markdown. Reply with EXACTLY these five lines (no preamble, no trailing "+
+				"prose):\n\n"+
+				"VERDICT: APPROVED|REJECTED\n"+
+				"SCORE: <0.00–1.00>\n"+
+				"EVIDENCE: <one short sentence>\n"+
+				"ESCALATE: true|false\n"+
+				"ISSUES:\n"+
+				"- <one bullet per issue, or '-' for none>\n",
 			task, workdir, prior)
 	}
 	return system, userText

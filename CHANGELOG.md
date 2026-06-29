@@ -4,6 +4,76 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.5.1] — 2026-06-29 — Possession flow works on every host
+
+Two interlocking bugs surfaced in production on 2026-06-29 with
+Hermes+mimo and Codex+GPT-5 on a real credit-risk case
+(`case_modelagem_risco_credito_menu_flex_candidato.zip`). Both were
+prompted by the case itself; both made `mcp__radiant__possess` look
+broken to the host agent (it created the empty `.radiant-harness/` /
+`specs/` scaffold and exited without producing any artifacts).
+
+**Bug A — `-32601` from `sampling/createMessage` (Codex).** Codex
+GPT-5 returns JSON-RPC "method not found" when the harness asks
+for sampling. We had marked `AgentCodex.SupportsSampling = true`
+on faith in v3.0.0 without empirical verification. Once we see -32601,
+the possession flow should NOT abort; it should fall back to a
+deterministic stub so the host agent can drive the work using its
+own tools.
+
+**Bug B — XML hallucination on mimo (Hermes).** The four phase
+prompts (`discover` / `plan` / `execute` / `verify`) all instructed
+the LLM to invoke tools it didn't have access to:
+
+  - plan: _"Write to specs/.../tasks.md **using Write tool**"_
+  - execute: _"Write files **with Write tool**. Run the gates **with Bash**."_
+
+Sampling params don't carry a `tools` array (intentionally — the
+v3.3.0 architecture splits planning from execution; the host does
+the writing). When the LLM sees the prompt and tries to honor it,
+function-calling-aware models respond with structured calls and fail,
+function-calling-less models (mimo / Xiaomi MiMo) generate `<function=…>`
+XML as text and the harness dies on parsing it.
+
+### Fixed
+
+- **`internal/llm/sampling.go`** — added `ErrSamplingUnsupported`
+  sentinel + `IsSamplingUnsupported(err)` helper. When the host
+  replies with JSON-RPC `-32601` for `sampling/createMessage`,
+  `Dispatch()` wraps the error so callers can branch.
+- **`cmd/radiant/cmd_mcp_possess.go`** —
+  - `phasePrompts` rewritten: all four phases are now **text-only**.
+    The LLM outputs Markdown / fenced code blocks / VERDICT lines;
+    it never asks for tools it doesn't have. Host agent reads the
+    output and applies it with its own Read/Write/Bash.
+  - `runPossessWithBackend` detects `ErrSamplingUnsupported`, logs a
+    one-shot warning, and short-circuits remaining phases to a
+    deterministic `[stub — host sampling unsupported]` placeholder.
+    The state file is still written, the artifact list still
+    includes `specs/…/`, the host can read the placeholders and
+    fill them in.
+- **`internal/hostdetect/hostdetect.go`** — `agentSignature.SupportsSampling`
+  is now explicitly documented as **declared, not verified**. The
+  empirical check is in the sampling dispatch layer.
+
+### Verified
+
+- `make test-agents` → 12 agents; 12 PASS, 0 FAIL (regression-free).
+- `make smoke` → all green.
+
+### Known limitations
+
+- The `sampling.unsupported` fallback puts placeholders in the state
+  but doesn't generate specs/ tasks.md / verify-report.md from the
+  host agent's own tool calls. A real Codex run still produces the
+  crate — see Codex's 2026-06-29 credit-risk run for a worked
+  example. Future work: have the possession CLI nudge the host agent
+  to fill the stubs in via a single recovery tool call.
+- We still don't send a `tools` array in `samplingParams`. Adding it
+  requires implementations in `Chat()`, the rotation/JSON of
+  sampling params, and a per-host capability negotiation. Deferred
+  until a real agent exposes function calling capability.
+
 ## [3.5.0] — 2026-06-29 — `make test-agents` (12/12 PASS)
 
 Adds a **cross-agent install/validation matrix** that simulates each of

@@ -81,14 +81,20 @@ type HostInfo struct {
 
 // agentSignature is the per-agent fingerprint. Each agent has 1+
 // env-var keys and 1+ parent binary names that uniquely identify it.
-// SupportsSampling documents whether the agent can answer MCP
-// sampling/createMessage when it spawns the harness as an MCP
-// server child process (Light mode).
+//
+// SupportsSampling records a *declared* expectation, not a verified one.
+// The flag is what we'd like to be true based on docs / MCP spec / vendor
+// marketing — but it can be a lie (Codex GPT-5 was marked true here in
+// v3.0.0 and we discovered -32601 in the wild on 2026-06-29). Treat it as a
+// hint, never a guarantee. Empirical verification lives in the
+// sampling/createMessage handler at /internal/llm/sampling.go — if the
+// host replies with JSON-RPC -32601, the possession flow falls back to
+// stub mode (v3.5.1).
 type agentSignature struct {
 	ID               AgentID
 	EnvVars          []string // any one matches → confidence boost
 	ParentBinaries   []string // matches get Medium confidence
-	SupportsSampling bool
+	SupportsSampling bool     // declared; verify at runtime
 }
 
 // signatures maps each known agent to its fingerprint. EnvVars is
