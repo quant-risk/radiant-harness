@@ -125,6 +125,27 @@ post-mortem that led to this design.
 4. (optional) mcp__radiant__phase_status(task_id="…")        # read the trace mid-run
 5. report the trace + artifacts + gate results back to the user
 ```
+| Tool | When | Parameters |
+|------|------|------------|
+| `radiant_skill_list` | Always call once on non-trivial work. | `filter?: string` (substring against name + description) |
+| `radiant_skill_load` | Read one bundled skill's `SKILL.md` + `frontmatter.yaml`. | `name: string` (required) |
+| **`radiant_possess`** | The main call: drives the user's task through discover → plan → execute → verify. | `task: string` (required, verbatim from user) · `workdir?: string` (absolute path, default = agent CWD) · `profile?: "lean" \| "standard" \| "thorough"` (default `standard`) |
+| `radiant_phase_status` | Inspect / resume tracking of a `radiant_possess` run. | `task_id: string` (16-char prefix from the trace) · `workdir?: string` |
+| `radiant_run` | **DEPRECATED alias.** Same as `radiant_possess(task=goal)`. Kept for older hosts. Do not call this in new code. | same as above, plus deprecated `max_iter` / `max_cost` / `max_time` (currently ignored) |
+
+### Typical workflow
+
+```text
+1. mcp__radiant__skill_list(filter="credit-risk")           # see what's bundled
+2. mcp__radiant__skill_load(name="nova-feature")             # read SKILL.md if relevant
+3. mcp__radiant__possess(
+       task     = "<the user's original prompt, verbatim>",
+       workdir  = "<absolute path of the project directory>",
+       profile  = "standard",                                # lean | standard | thorough
+   )
+4. (optional) mcp__radiant__phase_status(task_id="…")        # read the trace mid-run
+5. report the trace + artifacts + gate results back to the user
+```
 
 The harness owns:
 

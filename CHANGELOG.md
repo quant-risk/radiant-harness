@@ -4,6 +4,140 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.0] — 2026-06-29 — Agentic tool-calling driver
+
+v3.6.x closed the **hollow stub** problem (a host that doesn't speak
+sampling/createMessage gets a templated scaffold instead of empty
+dirs) and the **probe lying** problem (SupportsSampling is now a
+runtime-verified value, not a constant). What v3.6.x didn't do is
+**drive** real work via sampling: even on hosts that DO implement
+sampling, the harness only emitted Markdown the agent then had to
+apply by hand.
+
+v3.7.0 ships the agentic driver that makes `mcp__radiant__possess`
+emit real tool calls when the host supports them.
+
+### Added
+
+- **Optional `llm.ToolCapable` interface** (`internal/llm/tools.go`).
+  Backends that implement `ChatWithTools(messages, tools, choice)`
+  opt into the agentic surface. Existing backends don't break; the
+  driver asserts at construction time so silent fallback is
+  impossible — better to fail loud than to lose the capability and
+  have the operator discover it from a fall-through to text-only.
+
+- **Wire-format tool support in `SamplingBackend`**
+  (`internal/llm/sampling.go`). `samplingParams.Tools` and
+  `ToolChoice` serialise to `sampling/createMessage` with the
+  Anthropic shape (most host MCP proxies accept this transparently).
+  `parseSamplingContent` lazily decodes the response: pure-text
+  → legacy `text` channel; array with `tool_use` blocks → new
+  `rendered` channel that the agentic driver reads.
+
+- **Named `ChatResponseChoice` + `ChatResponseMessage`** in
+  `internal/llm/types.go` with `ToolCalls []ToolCall`. Wire format
+  mirrors Anthropic's `content: [{type, ...}]` blocks. The previous
+  inline anonymous struct kept backward compatibility for callers
+  reading `resp.Choices[0].Message.Content` — the new shape has the
+  same field access but adds `ToolCalls` next to it.
+
+- **`internal/possess/driver.go`** — the agentic loop:
+    1. Build the wire tool manifest once (`Registry.Names()` →
+       `llm.Tool{Name, Description, JSON schema from Params}`).
+    2. Per iteration: `ChatWithTools(messages, tools, choice)`
+       → if response text contains `VERDICT: APPROVED|REJECTED`
+       or `REVIEW: PASS|FAIL`, capture verdict and stop.
+       → else dispatch every `ToolCall` via
+       `Registry.Call(ctx, name, input)` against the built-in
+       tools (`read_file`, `write_file`, `search_code`,
+       `run_gate`).
+       → append a `tool_result` echo as the next user message,
+       loop until VERDICT, `MaxIter`, `MaxWall`, or
+       `context.Cancel`.
+    3. Returns `Trace` with `Iterations`,
+       `ToolInvocations []ToolRecord`, `TextSoFar`,
+       `Wall`, `Verdict`, so the caller can surface it.
+
+  `MaxIter` defaults to 25 (lean/standard/thorough profiles
+  override). `MaxWall` defaults to 10 min. Emits a loud
+  `ErrBackendToolsUnsupported` after 2 consecutive text-only
+  turns so callers know to fall back.
+
+- **`runPossessWithDriver`** in
+  `cmd/radiant/cmd_mcp_possess.go::runPossessWithBackend` —
+  agentic system + task prompts that establish role, the strict
+  VERDICT/REVIEW format, and the explicit tool-use rules ("don't
+  end with VERDICT until you've written spec.md, tasks.md, and at
+  least one runnable artefact AND run a gate that passed"). The
+  agentic driver runs once and consumes the whole 4-phase loop;
+  the prior "split by phase" shape is gone because tool_use /
+  tool_result is inherently interleaved.
+
+- **3 regression tests** in
+  `internal/possess/driver_test.go`:
+    - `TestDriverRunsToolsAndStopsOnVerdict` — scripted 4-turn
+      happy path (list_dir → read_file → write_file →
+      verdict text); asserts tool-invocation order, IDs, and
+      re-sampling count.
+    - `TestDriverFallsBackWhenModelNeverCallsTools` —
+      `ErrBackendToolsUnsupported` after 2 text-only turns.
+    - `TestNewDriverRejectsNonToolableBackend` —
+      `NewDriver` refuses a non-`ToolCapable` Backend with a
+      loud error.
+
+### Changed
+
+- **`runPossessWithBackend`** — pre-flight + dispatch. If
+  `ResolveSupport(detected).SupportsSampling == false`, skip
+  the driver and fall through to `runSelfDrivenPossess` (v3.6.x
+  behaviour). Otherwise, if the backend implements
+  `llm.ToolCapable`, dispatch to the agentic driver. Otherwise
+  fall through to the v3.6 per-phase text sampling path.
+
+### Fallback matrix (consolidated reference)
+
+| Host sampling capability | Path taken |
+|---|---|
+| sampling + tools (Claude Code / Anthropic, future native hosts) | Agentic driver — model calls tools, harness dispatches via Registry, real files written + gates run |
+| sampling, model never calls tools despite manifest | Driver bails with `ErrBackendToolsUnsupported` after 2 text-only iterations |
+| sampling -32601 mid-run (Codex GPT-5, Hermes mimo) | Self-driven scaffold fallback (v3.6.x contract) |
+| No `tools` propagation at all | Per-phase text sampling (legacy) |
+| `ResolveSupport` reports `SupportsSampling=false` (probe-verified or well-attested) | Self-driven scaffold (skip sampling) |
+
+### Verified
+
+- `go test ./...` — 31 packages, **0 FAIL**.
+- `go test ./internal/possess` — **3 new regression tests PASS**.
+- `make smoke` — `17/17 OK` (whitelist accepts `v3.7.0`).
+- `make release` — 6 binaries built cleanly (`radiant-{linux,darwin,windows}-{amd64,arm64}`).
+
+### Operational rules (carried forward)
+
+1. **Silent fallback is the enemy of progress.** `NewDriver`
+   refuses a non-`ToolCapable` Backend with a loud error because
+   silent downgrade to text-only would hide the capability loss
+   from the operator. Same rule applies to any future "the host
+   MAY do X but doesn't" detection: surface the gap, let the
+   operator decide.
+
+2. **Wire + driver + integrator land together.** A "tool-calling
+   agentic loop" requires three primitives: (a) wire-format
+   support on the sampling layer, (b) driver loop with
+   VERDICT/REVIEW short-circuit + tool_result echo,
+   (c) integrator that constructs the Registry per-project and
+   weaves the fallback path. Missing any one makes the loop a
+   no-op. The v3.7.0 PR lands all three at once because the
+   tool scaffolding (`internal/tools/{fs,gate}` from Sprints
+   69–72) was already in place — the gap was wire + driver +
+   integrator.
+
+3. **No new tool with broader surface was introduced.** The
+   four built-in tools (`read_file`, `write_file`,
+   `search_code`, `run_gate`) already enforced project-boundary
+   via `fsutil.PathIsSafe` and a policy allowlist for shell gates.
+   The agentic driver plugs into existing infrastructure; future
+   "add tool X" work doesn't need another architectural shift.
+
 ## [3.6.0] — 2026-06-29 — Self-driven possession for hosts without sampling
 
 v3.5.1 fixed the crash but left a **hollow stub** behind: when a host
