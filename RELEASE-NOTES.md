@@ -1,3 +1,86 @@
+# Release Notes — v2.46.0 (cmd_setup_mcp split: main + per_agent)
+
+> Pure refactor. Zero behaviour change, zero new agents, zero new
+> features. Just split `cmd_setup_mcp.go` so the routing file stays
+> under 400 LOC and the per-agent merges live in a flat reference
+> file that's easy to extend.
+
+## TL;DR
+
+`cmd/radiant/cmd_setup_mcp.go` had grown to **781 LOC** by the end of
+Sprint 75 — route, detect, generic JSON merges, plus six per-agent
+merges (Codex TOML, OpenCode nested JSON, Hermes YAML, Kimi global
+JSON, OpenClaw nested JSON, Cline JSON-with-fields). All 800+ lines
+of that file lived in one place.
+
+This release splits it:
+
+- **`cmd_setup_mcp.go`** (375 LOC) — register, resolve, route, write.
+- **`cmd_setup_mcp_per_agent.go`** (439 LOC) — six per-agent merges,
+  one block each.
+
+Both stay in `package main`. Same identifiers, same signatures, same
+behaviour. The 18 setup-mcp tests pass with **zero edits**.
+
+## File layout
+
+```
+cmd/radiant/
+├── cmd_setup_mcp.go            (was 781 LOC; now 375 LOC)
+│   ├── registerSetupMCPCmd
+│   ├── radiantBinaryPath
+│   ├── resolveMCPAgents
+│   ├── type mcpEntry
+│   ├── mcpConfigFor             ← single source of routing truth
+│   ├── mergeClaudeSettings
+│   ├── mergeMCPJSON             ← shared by Cursor/Windsurf/VSCode
+│   ├── mergeZedSettings
+│   └── writeMCPConfig
+│
+└── cmd_setup_mcp_per_agent.go  (NEW; 439 LOC)
+    ├── Codex (TOML):            radiantBlockPattern,
+    │                            tomlQuote, mergeCodexTOML
+    ├── OpenCode (nested JSON):  openCodeServer,
+    │                            openCodeConfig, mergeOpenCodeConfig
+    ├── Hermes (YAML):           hermesEntry, mergeHermesConfig
+    ├── Kimi (global JSON):      mergeKimiMCP
+    ├── OpenClaw (nested JSON):  openClawServer,
+    │                            mergeOpenClawJSONConfig
+    └── Cline (JSON + fields):   clineEntry, mergeClineConfig
+```
+
+## How to add a 12th agent now
+
+```bash
+# 1. Add one switch case in cmd_setup_mcp.go:
+case "myagent":
+    target := filepath.Join(cwd, ".myagent", "config.json")
+    content, err := mergeMyAgentConfig(target, entry)
+    return target, content, err
+
+# 2. Add the merge function in cmd_setup_mcp_per_agent.go:
+func mergeMyAgentConfig(path string, entry mcpEntry) (string, error) {
+    // ...
+}
+
+# 3. (Optional) Add detection in resolveMCPAgents above.
+# 4. Add tests in cmd_setup_mcp_test.go.
+```
+
+Before this sprint, step 1 and 2 lived in the same 800-line file; now
+they live in two themed files.
+
+## Stats
+
+- 1 file trimmed: `cmd_setup_mcp.go` (−406 LOC, −52%).
+- 1 file added: `cmd_setup_mcp_per_agent.go` (+439 LOC).
+- Net: `cmd/radiant/` +33 LOC (file-level header).
+- 0 tests added (zero behaviour change).
+- 0 deps added.
+- 1190 PASS, 0 confirmed FAIL.
+
+---
+
 # Release Notes — v2.45.0 (setup-mcp: Hermes + Kimi + OpenClaw + Cline)
 
 > `radiant setup-mcp` now covers **11 agents across 4 config formats**.

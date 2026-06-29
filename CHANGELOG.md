@@ -4,6 +4,79 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.46.0] — 2026-06-29 — cmd_setup_mcp split: main + per_agent (Sprint 76)
+
+Pure code-movement refactor following the same debt-reduction pattern
+as Sprint 74 (helpers.go extractions). Splits the 781-line
+`cmd_setup_mcp.go` into two themed files. **No agent additions, no
+behaviour change** — just split for navigability.
+
+### Changed — `cmd/radiant/cmd_setup_mcp.go` (trimmed)
+
+- 781 → **375 lines** (−406 LOC, −52%).
+- Now focused on:
+  - command registration (`registerSetupMCPCmd`),
+  - binary-path resolution (`radiantBinaryPath`),
+  - auto-detect (`resolveMCPAgents`),
+  - the routing switch (`mcpConfigFor`),
+  - the three generic JSON merges (`mergeClaudeSettings`,
+    `mergeMCPJSON`, `mergeZedSettings`), and
+  - the writer (`writeMCPConfig`).
+- Imports trimmed: `regexp` and `gopkg.in/yaml.v3` no longer
+  needed here (moved to per_agent).
+
+### Added — `cmd/radiant/cmd_setup_mcp_per_agent.go` (NEW)
+
+- 439 LOC, one themed block per non-trivial agent merge:
+  - **Codex** (TOML): `radiantBlockPattern`, `tomlQuote`, `mergeCodexTOML`.
+  - **OpenCode** (nested JSON): `openCodeServer`, `openCodeConfig`,
+    `mergeOpenCodeConfig`.
+  - **Hermes** (YAML): `hermesEntry`, `mergeHermesConfig` — the only
+    handler that uses `gopkg.in/yaml.v3`.
+  - **Kimi** (global JSON): `mergeKimiMCP`.
+  - **OpenClaw** (nested JSON): `openClawServer`, `mergeOpenClawJSONConfig`.
+  - **Cline** (JSON with optional fields): `clineEntry`, `mergeClineConfig`.
+- All 6 of these functions used to live in `cmd_setup_mcp.go`. Moving
+  them out of the routing file makes "add a 12th agent" a single-block
+  append instead of a sprawling file.
+
+### Why this split (not finer, not coarser)
+
+- **Finer** (one file per agent = 6 more files): over-splitting —
+  each would be 50-85 LOC of mostly-related code, and adding an
+  agent would require creating a new file.
+- **Coarser** (no split): 781 LOC of routing + per-agent code in one
+  file is too much for a single screen.
+- **This split**: Main file holds command + detection + routing +
+  3 generic JSON merges (the format used by 5 agents). Per-agent
+  file is a flat 6-agent reference that's easy to extend.
+
+### Stats
+
+- 1 file trimmed: `cmd_setup_mcp.go` (−406 LOC).
+- 1 file added: `cmd_setup_mcp_per_agent.go` (+439 LOC).
+- Net `cmd/radiant/` change: +33 LOC (file-level header comment in
+  the new file).
+- **0 tests added** (zero behaviour change → all 18 setup-mcp tests
+  pass unmodified).
+- **0 deps added** (no new imports beyond what was already in
+  `cmd_setup_mcp.go`).
+- **1190 tests passing across 31 packages, 0 confirmed FAIL**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled`
+  is timing-dependent and unrelated).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15M), linux/arm64 (14M),
+  darwin/amd64 (15M), darwin/arm64 (14M), windows/amd64 (15M).
+
+### Compatibility
+
+- All 11 agents behave identically to v2.45.0.
+- Public API unchanged (no command renames, no flag changes).
+- Internal: function names unchanged, just live in different files.
+- Adding an agent still requires exactly the same edits as before:
+  one block in `mcpConfigFor` (main file) + one merge block (in
+  per_agent file).
+
 ## [2.45.0] — 2026-06-29 — setup-mcp: Hermes + Kimi CLI + OpenClaw + Cline (Sprint 75)
 
 Four more MCP-capable agents added to `radiant setup-mcp`. Brings the
