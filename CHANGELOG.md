@@ -4,6 +4,77 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.4.0] — 2026-06-29 — `radiant test-case`
+
+Adds the **single most diagnostic command in the project** —
+`radiant test-case <case.zip|dir>` — which drives the harness end-to-end
+against a real subprocess with simulated sampling latency, exactly
+reproducing the failure mode observed on 2026-06-29 with Hermes
+mimo/xiaomi and Codex GPT-5.
+
+### Added
+
+- **`internal/casetest/` package** — small, no-deps code that:
+  - extracts a `.zip` (with zip-slip guard) or accepts a directory;
+  - reads the user prompt from `CONTEXT.md` / `context.md` / `README.md` /
+    `case.md` / `case_description.md` (in that priority);
+  - spawns `radiant mcp serve` as a real subprocess via stdio pipes;
+  - drives the full JSON-RPC possession flow;
+  - replies to `sampling/createMessage` requests after a configurable
+    `cold-start-ms` (default 25 s — Hermes' actual cold start);
+  - emits a Markdown report with per-phase timing, sampling call
+    counts, the final assistant message, and a full event log;
+  - sets `Outcome` (`success` | `critical_failure` | `incomplete`) by
+    parsing the harness's `Exit:` field or counting completed phases.
+- **`radiant test-case <path>` command** (`cmd/radiant/cmd_test_case.go`):
+  - flags: `--cold-start-ms`, `--jitter-ms`, `--sampling-timeout`,
+    `--profile`, `--report <path>`, `--keep-unpacked`, `--timeout`;
+  - registered as a **public** command (no `RADIANT_INTERNAL` gate), on
+    par with `radiant mcp self-test` and `radiant doctor`;
+  - exits 0 only when the harness exits `success`.
+
+### Verified — cold-start matrix on a menu_flex-shaped case
+
+| cold-start | sampling calls | elapsed |
+|------------|----------------|---------|
+| 500 ms     | 4              | 2.01 s  |
+| 2 s        | 4              | 8.01 s  |
+| 5 s        | 4              | 20.0 s  |
+| 25 s (Hermes-real) | 4     | 100.0 s |
+
+The 25 s cold-start run reproduces exactly the path Henrique saw break on
+Hermes. With the test-case harness, that path completes in 100 s —
+comfortably below the harness's 130 s sampling timeout and any host's
+300 s tool-call timeout.
+
+### Verified — bug found and fixed during implementation
+
+Implementing `test-case` exposed two regressions in the harness that
+would have hit real hosts sooner or later:
+
+1. `readJSONWithTimeout` was passing a `timeout` argument to
+   `bufio.Scanner.Scan()`-equivalent code that ignored it entirely —
+   the call could block forever. Fixed by extracting the read into a
+   dedicated goroutine + channel with `time.After(timeout)` select.
+2. Repeat runs against the same case dir would short-circuit to
+   `phases done, success` because the harness cached possession
+   state by `task_id`. The test-case driver now `os.RemoveAll`s the
+   `state/` dir before spawning the harness subprocess.
+
+### Fixed — `internal/casetest` (housekeeping)
+- Bumped `var version` to `3.4.0` and the smoke-test assertion to
+  accept any 3.4.x release.
+
+### Verified
+- `make smoke` → 17/17 OK
+- `go test ./...` → 30 packages pass; 0 fail
+- `radiant test-case <dir>` with realistic Hermes latency → 4 sampling
+  calls, 100 s elapsed, Exit: success on 25 s × 4
+
+[3.4.0]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.4.0
+
+---
+
 ## [3.3.2] — 2026-06-29 — install.sh PREFIX auto-mkdir
 
 ### Fixed

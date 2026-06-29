@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "3.3.2"
+var version = "3.4.0"
 
 // publicCommands is the closed set of CLI subcommands that the Light
 // binary exposes without RADIANT_INTERNAL=1. Anything that the host agent
@@ -43,6 +43,7 @@ var publicCommands = map[string]bool{
 	"host-info": true, // show detected host agent
 	"doctor":    true, // diagnose wiring + agent config
 	"update":    true, // self-update the binary
+	"test-case": true, // drive a real case with simulated sampling latency
 }
 
 func main() {
@@ -100,6 +101,10 @@ func main() {
 
 	// Vertical scaffolds (use host agent via MCP sampling for content gen)
 	registerTelemetryCmds(root) // radiant telemetry + stats + causal-estimate + model + predict + train + evaluate + drift + autodata + validate-file + profile + incident
+
+	// Diagnostics: test-case runs the harness against a real case with
+	// simulated sampling latency.
+	registerTestCaseCmd(root)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 
