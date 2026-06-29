@@ -49,7 +49,7 @@ Supported agents (auto-detected):
 			if len(agents) == 0 {
 				return fmt.Errorf("no supported agent detected in %s\n"+
 					"Use --agent=claude|cursor|windsurf|zed|vscode|codex|opencode|"+
-					"hermes|kimi|openclaw|cline to specify one", cwd)
+					"hermes|kimi|openclaw|cline|MiniMax to specify one", cwd)
 			}
 
 			for _, a := range agents {
@@ -80,7 +80,7 @@ Supported agents (auto-detected):
 		},
 	}
 
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to configure: claude|cursor|windsurf|zed|vscode|codex|opencode|hermes|kimi|openclaw|cline (comma-separated; default: auto-detect)")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to configure: claude|cursor|windsurf|zed|vscode|codex|opencode|hermes|kimi|openclaw|cline|MiniMax (comma-separated; default: auto-detect)")
 	cmd.Flags().BoolVar(&globalFlag, "global", false, "write to user-level config instead of project-level")
 	cmd.Flags().BoolVar(&forceFlag, "force", false, "overwrite existing MCP entry")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "show what would be written without writing")
@@ -273,6 +273,23 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		content, err := mergeOpenClawJSONConfig(target, entry)
 		return target, content, err
 
+	case "MiniMax":
+		// MiniMax Code (MiniMax AI) reads MCP servers from a JSON config
+		// at .MiniMax/mcp.json (project) or ~/.MiniMax/mcp.json (global).
+		// Format mirrors the standard mcpServers shape used by Claude/Cursor.
+		// Override with $MINIMAX_CODE_CONFIG if the install uses a different path.
+		var mmTarget string
+		if cfg := os.Getenv("MINIMAX_CODE_CONFIG"); cfg != "" && global {
+			mmTarget = cfg
+		} else if global {
+			home, _ := os.UserHomeDir()
+			mmTarget = filepath.Join(home, ".MiniMax", "mcp.json")
+		} else {
+			mmTarget = filepath.Join(cwd, ".MiniMax", "mcp.json")
+		}
+		content, err := mergeMCPJSON(mmTarget, entry)
+		return mmTarget, content, err
+
 	case "cline":
 		// Cline CLI writes to ~/.cline/mcp.json with the standard
 		// mcpServers shape. Cline's official examples include optional
@@ -287,7 +304,7 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		return target, content, err
 
 	default:
-		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode, codex, opencode, hermes, kimi, openclaw, cline)", agent)
+		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode, codex, opencode, hermes, kimi, openclaw, cline, MiniMax)", agent)
 	}
 }
 

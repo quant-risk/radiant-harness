@@ -405,6 +405,7 @@ This is the complete CLI surface — **55 commands** in one binary:
 | **OpenCode**      | `.opencode/config.json`   | JSON (nested)  | `OPENCODE_*` env                       |
 | **Hermes**        | `.hermes/config.yaml`     | YAML           | `HERMES_*` env                         |
 | **Kimi CLI**      | `~/.kimi/mcp.json`        | JSON           | `KIMI_*` env                           |
+| **MiniMax Code** | `.MiniMax/mcp.json`      | JSON           | `MINIMAX_CODE_*` env                   |
 | **OpenClaw**      | `.openclaw/openclaw.json` | JSON (nested)  | `OPENCLAW_*` env                       |
 | **Cline**         | `~/.cline/mcp.json`       | JSON           | `CLINE_*` env                          |
 

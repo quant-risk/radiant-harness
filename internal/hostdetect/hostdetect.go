@@ -42,6 +42,7 @@ const (
 	AgentCline       AgentID = "cline"
 	AgentOpenCode    AgentID = "opencode"
 	AgentVSCode      AgentID = "vscode-copilot"
+	AgentMiniMaxCode AgentID = "MiniMax-code"
 )
 
 // knownAgents lists every agent we know how to detect. The order is
@@ -56,6 +57,7 @@ var knownAgents = []AgentID{
 	AgentCline,
 	AgentOpenCode,
 	AgentVSCode,
+	AgentMiniMaxCode,
 }
 
 // HostInfo is what Detect returns. Confidence is 0-100 where 0 means
@@ -142,6 +144,12 @@ var signatures = map[AgentID]agentSignature{
 		EnvVars:          []string{"VSCODE_PID", "VSCODE_IPC_HOOK_CLI", "VSCODE_CWD"},
 		ParentBinaries:   []string{"Code Helper", "Code", "code", "vscode", "code-server"},
 		SupportsSampling: true, // VS Code Copilot supports MCP
+	},
+	AgentMiniMaxCode: {
+		ID:               AgentMiniMaxCode,
+		EnvVars:          []string{"MINIMAX_CODE_VERSION", "MINIMAX_CODE_HOME", "MINIMAX_CODE_CONFIG", "MINIMAX_PROJECT_ROOT"},
+		ParentBinaries:   []string{"MiniMax-code", "minimax-code", "minimax", "MiniMax"},
+		SupportsSampling: true, // MiniMax Code is MCP-native
 	},
 }
 
