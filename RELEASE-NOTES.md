@@ -1,3 +1,99 @@
+# Release Notes — v2.47.0 (helpers.go extraction: PR review block)
+
+> Pure refactor. Pulls the PR review block (`radiant review-pr`
+> worker functions) out of the 2948-line `cmd/radiant/helpers.go`
+> into a new themed file. Same call sites, same behaviour, zero
+> test edits.
+
+## TL;DR
+
+`cmd/radiant/helpers.go` grew back to 2948 LOC after Sprint 74 (it
+had reached 3894, the Sprint-74 extractions trimmed it to 2948,
+and ~1000 LOC has accumulated since). Sprint 77 extracts the
+biggest single-themed block: **the PR review block (~278 LOC)**.
+
+```
+BEFORE (post-Sprint 76)
+─────────────────────────
+cmd/radiant/helpers.go    2948 LOC  (everything)
+
+
+AFTER (post-Sprint 77)
+──────────────────────
+cmd/radiant/helpers.go              2670 LOC  (−278, −9%)
+  └── (everything else: spec helpers, MCP serve, telemetry, …)
+
+cmd/radiant/cmd_pr_review.go        309 LOC  (NEW)
+  ├── type gateResult
+  ├── type acceptanceCriterion
+  ├── runReviewPR                  ← body of `radiant review-pr`
+  ├── parseAcceptanceCriteria
+  ├── parseGatesFromTasks
+  ├── countDiffFiles
+  └── renderPRReview
+```
+
+## Caller unchanged
+
+`cmd_spec.go:364` still calls `runReviewPR(...)` from inside the
+`review-pr` subcommand's `RunE` closure. Nothing to change.
+
+```go
+// cmd_spec.go (UNCHANGED)
+RunE: func(cmd *cobra.Command, args []string) error {
+    ...
+    return runReviewPR(args[0], diffPath, runGates, out)
+},
+```
+
+The 9 existing PR review tests in `main_test.go` stay where they
+are and pass with **zero edits**:
+
+```
+TestParseAcceptanceCriteriaBasic         PASS
+TestParseAcceptanceCriteriaEmpty         PASS
+TestParseAcceptanceCriteriaCaseInsensitive  PASS
+TestParseGatesFromTasks                  PASS
+TestParseGatesFromTasksEmpty             PASS
+TestCountDiffFiles                       PASS
+TestRenderPRReviewIncludesSections       PASS
+TestRenderPRReviewGatePassFail           PASS
+TestRenderPRReviewWithDiffStats          PASS
+```
+
+## Why this candidate
+
+PR review was the **biggest single-themed contiguous block** in
+helpers.go besides the MCP run-* chunk (which is even bigger but
+spans multiple subcommands and would be over-eager to split). The
+review block is also self-contained: it parses spec/tasks markdown,
+optionally runs gates, and produces `pr-review.md`. Depends on
+stdlib only.
+
+## Remaining candidates for future sprints
+
+`helpers.go` is now 2670 LOC. Smaller themed extractions still
+inside:
+
+- integrations (`runIntegrationsList`, `renderIntegrationsDoc` ~150 LOC)
+- incident (`runIncident`, `renderIncidentDoc` ~150 LOC)
+- autodata (`runAutodata`, `parseAutodataResponse` ~225 LOC)
+- evals (`runEvals`, `computeFeatureCoverage`, `renderEvalsReport` ~225 LOC)
+- runDoctor (~115 LOC)
+
+Each will become its own themed file in a future sprint.
+
+## Stats
+
+- 1 file trimmed: `helpers.go` (−278 LOC).
+- 1 file added: `cmd_pr_review.go` (+309 LOC including file header).
+- Net: `cmd/radiant/` +31 LOC.
+- 0 tests added (zero behaviour change).
+- 0 deps added.
+- 1189 PASS, 0 confirmed FAIL.
+
+---
+
 # Release Notes — v2.46.0 (cmd_setup_mcp split: main + per_agent)
 
 > Pure refactor. Zero behaviour change, zero new agents, zero new

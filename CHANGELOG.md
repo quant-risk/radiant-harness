@@ -4,6 +4,68 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.47.0] — 2026-06-29 — helpers.go extraction: PR review block (Sprint 77)
+
+Pure code-movement refactor following the same debt-reduction pattern
+as Sprints 74 (helpers.go → cmd_security.go + cmd_scaffolds.go) and
+76 (cmd_setup_mcp.go split). Pulls the **PR review block** out of
+the 2948-line `helpers.go` into a new themed file.
+
+### Changed — `cmd/radiant/helpers.go` (trimmed)
+
+- 2948 → **2670 lines** (−278 LOC, −9%).
+- Removed the entire PR review block (formerly lines 1734-2011):
+  - 2 types: `gateResult`, `acceptanceCriterion`.
+  - 5 functions: `runReviewPR`, `parseAcceptanceCriteria`,
+    `parseGatesFromTasks`, `countDiffFiles`, `renderPRReview`.
+
+### Added — `cmd/radiant/cmd_pr_review.go` (NEW)
+
+- 309 LOC, themed worker functions for the PR review command:
+  - **Types** (`gateResult`, `acceptanceCriterion`).
+  - **Orchestrator** `runReviewPR` — body of `radiant review-pr`,
+    registered in `cmd_spec.go` and unchanged there. The call site
+    (`cmd_spec.go:364`) didn't need any edit because both files
+    share `package main`.
+  - **Parsers** `parseAcceptanceCriteria`, `parseGatesFromTasks`,
+    `countDiffFiles` — pure functions, easy to test.
+  - **Renderer** `renderPRReview` — emits the `pr-review.md` scaffold
+    (the LLM fills in the semantic AC↔code check via the
+    `revisar-pr` skill).
+
+### Caller unchanged
+
+- `cmd_spec.go:364` still calls `runReviewPR(...)`.
+- `cmd/radiant/main_test.go` still has all 9 tests for the extracted
+  functions (`TestParseAcceptanceCriteria*`, `TestParseGatesFromTasks*`,
+  `TestCountDiffFiles`, `TestRenderPRReview*`).
+- All 9 tests pass with **zero edits**.
+
+### Stats
+
+- 1 file trimmed: `helpers.go` (−278 LOC).
+- 1 file added: `cmd_pr_review.go` (+309 LOC including file-level header).
+- Net `cmd/radiant/` change: +31 LOC (file-level header in the new file).
+- **0 tests added** (zero behaviour change → all 9 PR review tests pass unmodified).
+- **0 deps added** (no new imports).
+- **1189 tests passing across 31 packages, 0 confirmed FAIL**
+  (one known-flake `internal/fleet.TestRunAllContextCanceled` is timing-dependent).
+- `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15M), linux/arm64 (14M),
+  darwin/amd64 (15M), darwin/arm64 (14M), windows/amd64 (15M).
+
+### Remaining helpers.go extractions
+
+Still inside `helpers.go` (~2670 LOC, candidates for future sprints):
+
+- **runIntegrationsList + renderIntegrationsDoc** (~150 LOC) — Sprint 78 candidate.
+- **runIncident + renderIncidentDoc + helpers** (~150 LOC) — Sprint 78 candidate.
+- **autodata** (~225 LOC) — Sprint 79 candidate.
+- **runDoctor** (~115 LOC).
+- **evals** (runEvals + computeFeatureCoverage + renderEvalsReport, ~225 LOC).
+- **MCP run-*** (mcpRunFull + mcpRunHTTP + mcpRunWithBackend + callMCPTool,
+  ~600 LOC).
+
 ## [2.46.0] — 2026-06-29 — cmd_setup_mcp split: main + per_agent (Sprint 76)
 
 Pure code-movement refactor following the same debt-reduction pattern
