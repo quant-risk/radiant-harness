@@ -29,6 +29,7 @@ func main() {
 	registerDoctorCmd(root)
 	registerSetupMCPCmd(root)
 	registerModeCmd(root)
+	registerPricingCmd(root)
 
 	root.SetVersionTemplate("{{.Version}}\n")
 
