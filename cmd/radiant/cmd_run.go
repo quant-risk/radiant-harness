@@ -13,6 +13,7 @@ import (
 	radiant "github.com/quant-risk/radiant-harness/internal"
 	"github.com/quant-risk/radiant-harness/internal/benchmark"
 	"github.com/quant-risk/radiant-harness/internal/engine"
+	"github.com/quant-risk/radiant-harness/internal/tools"
 	"github.com/quant-risk/radiant-harness/internal/llm"
 	"github.com/quant-risk/radiant-harness/internal/quality"
 	"github.com/quant-risk/radiant-harness/internal/routing"
@@ -192,6 +193,7 @@ func registerRunCmds(root *cobra.Command) {
 	var runRetries int
 	var runVerbose bool
 	var runAutoRoute bool
+	var runDisableTools bool
 	var runPlanner string
 	var runImplementer string
 	var runTraceOut string
@@ -251,6 +253,15 @@ func registerRunCmds(root *cobra.Command) {
 			}
 
 			e := engine.New(cfg)
+			// Sprint 69 / v2.38.0: wire the structured tool-use registry
+			// into the engine so ```tool_call``` fences in the LLM
+			// output are dispatched through it. Falls back to legacy
+			// code-block emission when the LLM doesn't emit tool calls.
+			// Use a nil check so a future "disable tools" flag is a
+			// one-liner.
+			if !runDisableTools {
+				e.ToolRegistry = tools.RealRegistry(projectDir)
+			}
 			result, err := e.Run(context.Background(), specDir)
 			if err != nil {
 				return err
@@ -319,6 +330,7 @@ func registerRunCmds(root *cobra.Command) {
 	runCmd.Flags().IntVar(&runRetries, "retries", 3, "max correction retries")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "verbose output")
 	runCmd.Flags().BoolVar(&runAutoRoute, "auto-route", false, "automatically pick the right model per RPI phase (research uses top-tier, implement uses mid-tier)")
+	runCmd.Flags().BoolVar(&runDisableTools, "no-tools", false, "disable structured tool-use; force the legacy code-block emission path (v2.37.0 behaviour)")
 	runCmd.Flags().StringVar(&runPlanner, "planner", "", "LLM used for planning (defaults to --model). E.g. claude-opus-4.1 for planning while claude-sonnet-4.5 implements.")
 	runCmd.Flags().StringVar(&runImplementer, "implementer", "", "LLM used for per-task code generation (defaults to --model). E.g. claude-sonnet-4.5")
 	runCmd.Flags().StringVar(&runTraceOut, "trace-out", "", "write per-LLM-call trace events to this file as JSONL (one event per line). Useful for cost debugging and observability.")

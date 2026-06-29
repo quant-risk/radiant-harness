@@ -56,6 +56,12 @@ type Tool struct {
 	// error. Non-nil error is treated as a recoverable failure —
 	// the executor will surface it to the verifier and (per the
 	// existing semantics) retry the iteration.
+	//
+	// A tool can surface structured trace metadata by returning a
+	// value that satisfies an `Annotate() map[string]any` method
+	// (the engine type-switches against this duck-typed interface).
+	// Adding a new tool that wants trace visibility is a one-method
+	// change — no engine edits required.
 	Invoke func(ctx context.Context, args json.RawMessage) (any, error)
 }
 
@@ -166,4 +172,33 @@ func stubInvoke(name string) func(context.Context, json.RawMessage) (any, error)
 	return func(ctx context.Context, args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("tools: %q is registered but not yet wired into the executor; the code-block emission path is the active one in v2.37.0", name)
 	}
+}
+
+// realRegistry is the indirection through which internal/loop
+// (which can import both this package and internal/tools/fs without
+// a cycle) wires the concrete RealRegistry implementation. The
+// internal/tools package exposes RealRegistry as a thin re-export
+// so callers that already depend on it don't need to add internal/loop
+// to their imports just to build a real registry.
+//
+// The default value returns nil — callers must SetRealRegistryBuilder
+// before calling RealRegistry, or pass nil through to Engine.ToolRegistry
+// (which then uses the legacy code-block path).
+var realRegistry = func(string) *Registry { return nil }
+
+// SetRealRegistryBuilder replaces the default nil builder. Called by
+// internal/loop at init time. Returns the previous builder so tests
+// can swap and restore.
+func SetRealRegistryBuilder(b func(string) *Registry) func(string) *Registry {
+	prev := realRegistry
+	realRegistry = b
+	return prev
+}
+
+// RealRegistry returns the registry with the concrete tools available
+// in the current release. See real_registry.go in internal/loop for
+// the builder. Returns nil if SetRealRegistryBuilder has not been
+// called (e.g. in tests that don't import internal/loop).
+func RealRegistry(projectDir string) *Registry {
+	return realRegistry(projectDir)
 }

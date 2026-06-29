@@ -4,6 +4,131 @@ All notable changes to this project are documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.38.0] — 2026-06-29 — Tool Use Wire-up Parte 1 (Sprint 69)
+
+The "stop regex-parsing code blocks" release. The first concrete
+structured tool — `write_file` — replaces the legacy
+`os.WriteFile`-based code-block emission for any LLM output that
+includes structured tool calls. The verifier prompt now surfaces
+the tool-call trace so it can audit each invocation, not guess from
+prose.
+
+### Added — Concrete `write_file` tool (`internal/tools/fs/`)
+
+- New `internal/tools/fs/` package (139 LOC) — the first concrete
+  tool in the registry.
+- `WriteFileTool(projectDir)` returns a `*tools.Tool` bound to the
+  given project dir. Atomic write via temp + fsync + rename (same
+  pattern as `cycle.go:persistLocked`).
+- Boundary check via `internal/fsutil.PathIsSafe` — symlink-aware,
+  catches `../etc/passwd` and nested symlink escapes.
+- `MaxWriteBytes = 4 MiB` cap rejects runaway emissions.
+- `WriteResult.Annotate()` implements the duck-typed `annotator`
+  interface so the executor picks up byte/path/created metadata
+  without taking a direct dependency on this package.
+- 11 unit tests: happy path, parent dir creation, overwrite,
+  unsafe path rejection (relative + symlink), empty/whitespace
+  path rejection, malformed JSON, oversize content, atomicity
+  invariant, schema validation, registry roundtrip.
+
+### Added — `internal/fsutil/` package
+
+- New neutral package hosts `PathIsSafe` so both `internal/engine`
+  (legacy code-block path) and `internal/tools/fs` (write_file)
+  can depend on it without an import cycle.
+- 3 unit tests including the nested symlinked project root case.
+
+### Added — Engine tool-call dispatch (`internal/engine/engine.go`)
+
+- `applyLLMResponse` now switches on tool-call presence:
+  - If `ToolRegistry != nil` and the response contains
+    ```tool_call``` fences → `applyToolCalls`.
+  - Otherwise → legacy `applyCodeBlocks` path (v2.37.0 behaviour).
+  - Mixed responses: tool calls win, code blocks silently ignored.
+- `extractToolCalls` parses ```tool_call``` fenced blocks
+  (symmetric with `extractCodeBlocks`).
+- `ToolCall` and `ToolCallRecord` types — exposed for the verifier
+  prompt builder.
+- `LastToolTrace()` returns the trace from the most recent
+  `applyLLMResponse` call.
+- `annotator` interface declared locally (duck-typed) so the engine
+  doesn't import any concrete tool package — breaks the cycle.
+- `PathIsSafe` and `pathIsSafe` retained as thin re-exports of
+  `fsutil.PathIsSafe` for backwards-compat with any caller that
+  depended on `engine.PathIsSafe`.
+
+### Added — Verifier prompt trace (`internal/loop/verifier.go`)
+
+- `BuildVerifierPrompt` accepts a new `toolTrace []ToolCallRecord`
+  parameter. When non-empty, the prompt gains a
+  `TOOL CALLS OBSERVED` section listing each call with name,
+  written path, byte count, and error (if any).
+- Two anti-cheat clauses added to the verifier prompt when the
+  trace is non-empty: "no tool call wrote outside the project
+  boundary" and "a tool call erroring is NOT grounds for rejection
+  if the executor correctly surfaced the error and adjusted".
+- Empty trace → prompt is byte-identical to v2.37.0 (back-compat).
+- 4 new tests in `loop_test.go` covering trace presence, absence,
+  and error surfacing.
+
+### Added — `RealRegistry` builder (`internal/loop/real_registry.go`)
+
+- `RealRegistry(projectDir)` returns a `*tools.Registry` with the
+  concrete tools available in the current release.
+- Lives in `internal/loop` (not `internal/tools`) to break an
+  import cycle: `tools/fs` → `tools` (for Tool/Param types), and
+  `tools` → `tools/fs` (for the builder).
+- `tools.SetRealRegistryBuilder` indirection + `init()` wires it
+  automatically — callers can `tools.RealRegistry(projectDir)`
+  without depending on `internal/loop` directly.
+- 1 test: `TestReal_IncludesConcreteWriteFile` (placeholder for
+  Sprint 70 expansion).
+
+### Added — CLI: `radiant tools` (`cmd/radiant/cmd_tools.go`)
+
+- `radiant tools list` — table view of the default registry
+  (v2.37.0 back-compat surface).
+- `radiant tools list --real` — table view of the concrete registry
+  (v2.38.0 wired tools).
+- `radiant tools list --json` — machine-readable JSON for
+  CI / dashboards.
+- `radiant run --no-tools` — disable structured tool-use; force
+  the legacy code-block emission path (full v2.37.0 back-compat).
+
+### Documentation
+
+- `docs/TOOL-USE.md` — operator guide (wire format, dispatcher,
+  behaviour matrix, tool authoring instructions).
+- `docs/SPRINT69-PLAN.md` — the implementation plan this release
+  executed.
+- README.md updated with Tool Use section (lightweight pointer
+  to TOOL-USE.md).
+
+### Stats
+
+- 1 new package: `internal/tools/fs/` (139 LOC + 213 LOC tests).
+- 1 new package: `internal/fsutil/` (74 LOC + 89 LOC tests).
+- 1 new package: `internal/loop/real_registry.go` (43 LOC).
+- 1 new CLI subcommand: `radiant tools list` (+`--real`, `--json`).
+- 1 new flag: `--no-tools` on `radiant run`.
+- **947 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+### Compatibility
+
+- No breaking changes. Default behaviour is to wire `RealRegistry`
+  into `Engine.ToolRegistry` automatically. Pass `--no-tools` to
+  restore v2.37.0 behaviour exactly.
+- LLM outputs that contain only code blocks keep working unchanged.
+- Mixed outputs (tool calls + code blocks) produce deterministic
+  outcomes: tool calls win.
+- `engine.PathIsSafe` retained as a thin wrapper for any caller
+  that imported it directly.
+
+---
+
 ## [2.37.0] — 2026-06-29 — Light/Full modes, Semantic Model, Lazy-Executor
 
 The "make it closed" release. Three things the harness was missing are

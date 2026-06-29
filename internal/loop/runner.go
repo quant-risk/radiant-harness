@@ -374,7 +374,7 @@ func Run(ctx context.Context, projectDir, runID, goal string, cfg RunConfig) (*R
 			return nil, err
 		}
 
-		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg)
+		verPrompt := BuildVerifierPrompt(goal, lastVerifyOutput, verCfg, nil)
 		verResponse, verErr := backendSimpleChat(ctx, verBackend, verifierSystemPrompt(), verPrompt)
 		verToks := estimateTokens(verPrompt, verResponse)
 		traceCall(tr, cfg.LogJSON, runID, PhaseVerify, "verifier", verModelID, verPrompt, verResponse, verToks, verErr)

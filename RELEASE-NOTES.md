@@ -1,3 +1,115 @@
+# Release Notes — v2.38.0 (Tool Use Wire-up Parte 1)
+
+> "Stop regex-parsing code blocks." The first concrete structured
+> tool replaces the legacy `os.WriteFile` path for any LLM that
+> emits `tool_call` fences. The verifier sees the trace, not a
+> string blob.
+
+## Headlines
+
+### 1. Structured `write_file` tool
+
+LLMs can now emit a structured call inside a `tool_call` fenced
+block:
+
+```markdown
+```tool_call
+{"name": "write_file", "args": {"path": "internal/foo.go", "content": "package foo\n"}}
+```
+```
+
+The executor dispatches it through `internal/tools/Registry`,
+which calls `internal/tools/fs.WriteFileTool` — atomic write
+(temp + fsync + rename), `fsutil.PathIsSafe` boundary check,
+4 MiB size cap. The legacy code-block path is untouched and
+runs whenever the LLM doesn't emit tool calls.
+
+### 2. Verifier sees the trace
+
+`BuildVerifierPrompt` now accepts a `toolTrace` slice. When
+non-empty, the prompt gains a `TOOL CALLS OBSERVED` section:
+
+```
+TOOL CALLS OBSERVED (in execution order):
+1. write_file — internal/foo.go (1432 bytes, created)
+2. write_file — internal/foo_test.go (892 bytes, created)
+```
+
+plus two anti-cheat clauses about boundary violations and
+tool-call error handling. When the trace is empty (legacy
+code-block path), the prompt is byte-identical to v2.37.0.
+
+### 3. CLI: `radiant tools list`
+
+```
+$ radiant tools list
+NAME            DESCRIPTION                                                  PARAMS
+----            -----------                                                  ------
+run_gate        Run a quality gate command (go test, go vet, etc.). Retur... 1
+read_file       Read the contents of a file at the given path. Path must ... 1
+write_file      Write content to a file at the given path. Creates parent... 2
+search_code     Search the project for a regex pattern. Returns matching ... 2
+
+$ radiant tools list --real
+NAME            DESCRIPTION                                                  PARAMS
+----            -----------                                                  ------
+write_file      Write content to a file at the given path (project-relati... 2
+```
+
+`--real` shows the v2.38.0 wired registry; the default shows
+the v2.37.0 stub registry for back-compat inspection of the
+advertised surface area.
+
+## Other changes
+
+- **Internal: `internal/fsutil/`** — neutral package hosts
+  `PathIsSafe` so `engine` and `tools/fs` can both depend on it
+  without an import cycle.
+- **Internal: `RealRegistry` indirection** — `internal/loop`
+  wires the concrete builder through `tools.SetRealRegistryBuilder`,
+  called automatically at init time.
+- **`radiant run --no-tools`** — opt-out flag for operators who
+  want v2.37.0 behaviour exactly.
+
+## Stats
+
+- 3 new packages: `internal/tools/fs/`, `internal/fsutil/`,
+  `internal/loop/real_registry.go`.
+- 1 new CLI subcommand: `radiant tools list` (+ `--real`, `--json`).
+- 1 new flag: `--no-tools` on `radiant run`.
+- 1 concrete tool wired: `write_file` (replaces the v2.37.0 stub).
+- **947 tests passing across 28 packages, 0 failures** (validated
+  with `go test -count=1 -v ./...`). `go vet ./...` clean.
+- Cross-compile OK: linux/amd64 (15 MB), darwin/arm64 (14 MB),
+  windows/amd64 (15 MB).
+
+## Compatibility
+
+- **No breaking changes.** Default behaviour is to wire
+  `RealRegistry` automatically. `--no-tools` restores v2.37.0.
+- **Back-compat preserved:** LLM outputs that contain only
+  code blocks keep working unchanged. Mixed outputs (tool calls
+  + code blocks) → tool calls win, code blocks ignored.
+- **Engine.PathIsSafe** retained as a wrapper for any caller
+  that imported it directly.
+
+## Upgrade instructions
+
+```bash
+go install github.com/quant-risk/radiant-harness/cmd/radiant@v2.38.0
+# or:
+git pull
+make build
+./bin/radiant --version       # should report 2.38.0
+./bin/radiant tools list --real
+./bin/radiant run specs/0001-foo --no-tools   # opt out
+```
+
+See [`docs/TOOL-USE.md`](docs/TOOL-USE.md) for the full operator
+guide.
+
+---
+
 # Release Notes — v2.37.0 (Light/Full + Semantic + Lazy-Executor)
 
 > "Make it closed" — the release that turns radiant-harness from a
