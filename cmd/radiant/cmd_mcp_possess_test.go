@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/quant-risk/radiant-harness/internal/hostdetect"
 	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/internal/possess"
 )
 
 // unsupportedSamplingBackend returns JSON-RPC -32601 for every sampling
@@ -91,5 +94,67 @@ func TestRunPossessWithBackendFallsBackToSelfDriven(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "[host-agent: fill in") {
 		t.Errorf("spec.md missing host-agent marker; got:\n%s", string(body))
+	}
+}
+
+// TestRouteAgenticErr_FallsBackOnSamplingUnsupported reproduces the
+// 2026-06-29 Codex failure mode: the agentic driver returns
+// -32601 mid-run because the host's MCP server doesn't implement
+// sampling/createMessage. v3.7.1 closes the hollow-stub trap by
+// routing through runSelfDrivenPossess so the workdir still lands
+// with templated artefacts (spec.md, tasks.md, etc.) instead of
+// empty docs/specs/scripts.
+//
+// All other errors propagate unchanged.
+func TestRouteAgenticErr_FallsBackOnSamplingUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "case.md"), []byte("# test case"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var out bytes.Buffer
+	st, err := routeAgenticErr(
+		fmt.Errorf("%w (mid-run at iter 1): %v", possess.ErrHostSamplingUnsupported, "host without sampling"),
+		context.Background(),
+		dir,
+		"ship the feature",
+		"standard",
+		&out,
+		hostdetect.AgentCodex,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("routeAgenticErr returned err after sentinel match: %v", err)
+	}
+	if st == nil {
+		t.Fatal("expected non-nil state after fallback")
+	}
+	// Self-driven must have emitted at least one artefact under specs/.
+	entries, _ := filepath.Glob(filepath.Join(dir, "specs", "*"))
+	if len(entries) == 0 {
+		t.Fatalf("expected self-driven scaffold to populate %s/specs; output=%s",
+			dir, out.String())
+	}
+}
+
+// TestRouteAgenticErr_PropagatesUnrelatedErrors confirms non-sentinel
+// errors still surface (no silent downgrade on real backend bugs).
+func TestRouteAgenticErr_PropagatesUnrelatedErrors(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	st, err := routeAgenticErr(
+		errors.New("backend returned garbage"),
+		context.Background(),
+		dir,
+		"ship",
+		"standard",
+		&out,
+		hostdetect.AgentCodex,
+		nil,
+	)
+	if err == nil || err.Error() != "backend returned garbage" {
+		t.Fatalf("err = %v, want exact match 'backend returned garbage'", err)
+	}
+	if st != nil {
+		t.Fatalf("st = %v, want nil (no fallback triggered)", st)
 	}
 }

@@ -57,6 +57,25 @@ import (
 // the self-driven scaffold path.
 var ErrBackendToolsUnsupported = errors.New("backend returned no tool_use despite tools offered")
 
+// ErrHostSamplingUnsupported is returned by Drive when the first
+// sampling call into the host agent comes back with JSON-RPC -32601
+// — i.e. the host does NOT implement sampling/createMessage at all.
+// This is a sentinel: callers (cmd_mcp_possess.go::runPossessWithBackend
+// in particular) catch it via errors.Is and route to the
+// self-driven scaffold path instead of returning a fatal error.
+//
+// v3.7.1: the previous version (v3.7.0) let this fall through as a
+// generic error, leaving the workdir with empty docs/specs/scripts
+// and a state.json marked "current_phase=verify, all phases
+// pending" — exactly the hollow-stub failure mode v3.6.0 was meant
+// to close. Sentinel + caller downgrade closes that gap for the
+// agentic path.
+//
+// Detection: ErrSamplingUnsupported from internal/llm propagates
+// through backend.ChatWithTools via wrap, so any host that fails
+// the first sampling call surfaces the same way.
+var ErrHostSamplingUnsupported = errors.New("host sampling/createMessage returned -32601 (use self-driven)")
+
 // MaxIterDefault caps the model round-trips at a sane value. The
 // task in 4-phase possession is bounded; 25 is enough for the
 // discover→plan→execute→verify flow with breathing room.
@@ -277,6 +296,18 @@ func (d *Driver) Drive(ctx context.Context, system, task string) (*Trace, error)
 			tr.EndAt = time.Now()
 			tr.Wall = tr.EndAt.Sub(tr.StartAt)
 			tr.Iterations = iter
+			// v3.7.1: if the first sampling call comes back with
+			// -32601, surface as a SENTINEL so the MCP caller can
+			// downgrade to the self-driven scaffold path. Returning
+			// a generic error here is what left Codex
+			// (~/Downloads/gpt-5-codex/state.json) with empty
+			// docs/specs/scripts in the 2026-06-29 run — the
+			// probe cache had "codex:false" but Detect() returned
+			// AgentUnknown inside the Codex MCP subprocess because
+			// CODEX_HOME wasn't propagated.
+			if llm.IsSamplingUnsupported(err) {
+				return tr, fmt.Errorf("%w (mid-run at iter %d): %v", ErrHostSamplingUnsupported, iter, err)
+			}
 			return tr, fmt.Errorf("sampling at iter %d: %w", iter, err)
 		}
 

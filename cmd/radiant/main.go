@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "3.7.0"
+var version = "3.7.1"
 
 // publicCommands is the closed set of CLI subcommands that the Light
 // binary exposes without RADIANT_INTERNAL=1.

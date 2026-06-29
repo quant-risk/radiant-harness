@@ -44,6 +44,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -432,7 +433,15 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 	// inherently interleaved protocol — splitting it would force the
 	// model into 4 separate turns instead of 1 long turn.
 	if _, ok := backend.(llm.ToolCapable); ok {
-		return runPossessWithDriver(ctx, workdir, task, profile, backend, w, st)
+		_, drvErr := runPossessWithDriver(ctx, workdir, task, profile, backend, w, st)
+		if drvErr != nil {
+			// v3.7.1: a -32601 mid-run → fall back to self-driven so
+			// the workdir still lands with templated artefacts (the
+			// 2026-06-29 Codex failure mode). Any other error
+			// propagates unchanged.
+			return routeAgenticErr(drvErr, ctx, workdir, task, profile, w, detected.Agent, st)
+		}
+		return st, nil
 	}
 
 	// Legacy / non-toolable host — per-phase sampling, code-block
@@ -633,6 +642,38 @@ func runPossessWithDriver(ctx context.Context, workdir, task, profile string, ba
 	// Positive probe evidence for future runs.
 	recordProbeFromError(hostdetect.New().Detect().Agent, nil)
 	return st, nil
+}
+
+// routeAgenticErr inspects the error returned by the agentic driver
+// and decides whether to fall back to the self-driven pipeline or
+// surface the error as fatal. v3.7.1 closes the 2026-06-29 hollow-
+// stub trap on Codex: when the agentic driver returns
+// ErrHostSamplingUnsupported (sentinel for -32601 mid-run) the
+// caller falls through to runSelfDrivenPossess with the
+// deterministic templates instead of leaving the workdir empty.
+//
+// All other errors (real backend bugs, timeouts, panic-like
+// conditions) propagate unchanged.
+func routeAgenticErr(err error, ctx context.Context, workdir, task, profile string, w io.Writer, detectedAgent hostdetect.AgentID, st *possessState) (*possessState, error) {
+	if err == nil {
+		return st, nil
+	}
+	if errors.Is(err, possess.ErrHostSamplingUnsupported) {
+		fmt.Fprintf(w,
+			"\n⚠ agentic driver failed with -32601 mid-run "+
+				"(sampling/createMessage not implemented on this host).\n"+
+				"  Falling back to self-driven scaffold. The harness will populate\n"+
+				"  spec.md / tasks.md / scripts/run.sh / docs/README.md /\n"+
+				"  .radiant-harness/{CONTEXT.md, handoff.md, verify.md} with\n"+
+				"  [host-agent: fill in …] markers so the next agent can fill in.\n\n")
+		// Persist the failure as probe evidence so future runs'
+		// pre-flight (or this run's when run again) short-circuits
+		// without paying the cost of another -32601.
+		recordProbeFromError(detectedAgent, err)
+		return runSelfDrivenPossess(ctx, workdir, task, profile, w,
+			"sampling unsupported mid-run (driver fallback v3.7.1)")
+	}
+	return st, err
 }
 
 // agenticSystemPrompt tells the model the role + the strict
