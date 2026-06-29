@@ -24,3 +24,8 @@ node_modules/
 *.tsbuildinfo
 .radiant-harness/
 /radiant
+
+# setup-mcp test artifacts (left by `make test-agents`)
+/.cursor/
+/.windsurf/
+/.zed/
