@@ -5,6 +5,7 @@
 # One-shot installer for the radiant-harness CLI.
 #
 #   curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash -s -- --agent=hermes
 #
 # What it does:
 #   1. Detects OS / architecture (linux-amd64, darwin-arm64, …).
@@ -12,22 +13,45 @@
 #   3. Downloads the matching `radiant-<os>-<arch>` binary + SHA256SUMS.
 #   4. Verifies the SHA256 of the downloaded binary.
 #   5. Installs to $PREFIX/radiant (default /usr/local/bin/radiant).
-#   6. (Optional, with --setup-mcp) Runs `radiant setup-mcp` to wire MCP.
+#   6. (Optional, with --setup-mcp --agent=<name>) Detects the host agent
+#      in this environment and writes the MCP server config (sampling
+#      block enabled for Hermes) so the next agent invocation sees the
+#      MCP tool without a manual `radiant setup-mcp` step.
+#
+# Auto-wire (the primary use case):
+#   When the user (or the AI agent acting on their behalf) passes
+#   --agent=hermes (or claude, codex, cursor, …), the installer:
+#     a) Installs the binary,
+#     b) Writes the agent's MCP config so the server is registered,
+#     c) For Hermes specifically, writes the `sampling:` block so
+#        Hermes will respond to sampling/createMessage instead of
+#        silently dropping the request.
+#     d) Prints the one-line restart instruction.
+#
+# The agent that receives the task then sees:
+#   - `mcp__radiant__possess(task=..., workdir=...)` available as an MCP tool.
+# Calling that tool is what triggers harness possession of the agent.
+# The harness drives the rest (read skills, scaffold dirs, decompose
+# the task, write code, run gates) via bounded sampling round-trips.
 #
 # Env overrides:
-#   RADIANT_VERSION  pin a specific version (e.g. v3.2.7); default = latest
+#   RADIANT_VERSION  pin a specific version (e.g. v3.3.0); default = latest
 #   PREFIX           install dir; default = /usr/local/bin
 #   REPO             override repo (forks); default = quant-risk/radiant-harness
 #
 # Flags:
-#   --setup-mcp      run `radiant setup-mcp` after install
-#   --no-verify      skip SHA256 verification (NOT recommended)
-#   --dry-run        print what would happen; don't write anything
+#   --agent=<name>     auto-wire MCP for this host (claude, codex, hermes,
+#                      cursor, mavis-code, …); pass --setup-mcp alias below
+#   --setup-mcp        alias for --agent=<autodetected>; runs setup-mcp
+#                      against the detected host
+#   --no-verify        skip SHA256 verification (NOT recommended)
+#   --dry-run          print what would happen; don't write anything
 #
 # Exit codes:
-#   0 = installed successfully
+#   0 = installed (and wired, if --agent/--setup-mcp requested) successfully
 #   1 = any verification, download, or extraction step failed
-#
+#   2 = install succeeded but MCP wiring failed; manual fix instructions printed
+
 set -euo pipefail
 
 REPO="${REPO:-quant-risk/radiant-harness}"
@@ -41,10 +65,11 @@ DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
     --setup-mcp) SETUP_MCP=1 ;;
-    --no-verify) VERIFY=0 ;;
-    --dry-run)   DRY_RUN=1 ;;
-    --prefix=*)  PREFIX="${arg#--prefix=}" ;;
-    --version=*) VERSION="${arg#--version=}" ;;
+    --agent=*)    AGENT_NAME="${arg#--agent=}" ;;
+    --no-verify)  VERIFY=0 ;;
+    --dry-run)    DRY_RUN=1 ;;
+    --prefix=*)   PREFIX="${arg#--prefix=}" ;;
+    --version=*)  VERSION="${arg#--version=}" ;;
     -h|--help)
       # Print the docblock at the top of the script.
       awk 'NR>2 && /^set -euo/{exit} {print}' "$0" | sed -n '/^# /p; /^[^#]/q' | sed 's/^# \{0,1\}//'
@@ -157,9 +182,36 @@ else
   echo "installed: $($PREFIX/radiant --version 2>&1 || echo "(version unknown)")"
 fi
 
-if [ "$SETUP_MCP" = 1 ]; then
-  say "wiring MCP into detected host agent"
-  "$PREFIX/radiant" setup-mcp
+if [ "$SETUP_MCP" = 1 ] || [ -n "$AGENT_NAME" ]; then
+  # Resolve which agent to wire. Prefer explicit --agent=NAME; fall
+  # back to auto-detect via `radiant host-info`. If neither yields, the
+  # user can still wire manually after the agent is first launched.
+  if [ -n "$AGENT_NAME" ]; then
+    TARGET_AGENT="$AGENT_NAME"
+  else
+    HOST_OUT="$("$PREFIX/radiant" host-info 2>/dev/null || true)"
+    TARGET_AGENT="$(printf '%s\n' "$HOST_OUT" | grep -m1 'detected agent' | awk -F: '{print $2}' | tr -d ' ')"
+  fi
+
+  if [ -n "$TARGET_AGENT" ]; then
+    say "wiring MCP for host: $TARGET_AGENT"
+    WIRE_ERR=$("$PREFIX/radiant" setup-mcp --agent="$TARGET_AGENT" --global 2>&1) || true
+    WIRE_RC=$?
+    if [ "$WIRE_RC" -ne 0 ]; then
+      echo ""
+      echo "WARNING: MCP wiring for $TARGET_AGENT failed (rc=$WIRE_RC)."
+      echo ""
+      echo "$WIRE_ERR" | head -20
+      echo ""
+      echo "Retry manually after the host is launched:"
+      echo "  $PREFIX/radiant setup-mcp --agent=$TARGET_AGENT --global"
+      echo "  $PREFIX/radiant doctor --mcp"
+      exit 2
+    fi
+  else
+    say "no host agent auto-detected; skipping MCP wiring"
+    say "after the agent launches, run: $PREFIX/radiant setup-mcp"
+  fi
 fi
 
 cat <<EOF
@@ -167,12 +219,18 @@ cat <<EOF
 
   All set. Try:
 
-    radiant --version
-    radiant mcp serve --help
-    radiant host-info
-    radiant setup-mcp    # if not done yet
+    $PREFIX/radiant --version
+    $PREFIX/radiant mcp self-test     # verify MCP wire-up
+    $PREFIX/radiant doctor --mcp      # verify host agent config
 
-  Or, to verify the latest MCP possession flow end-to-end, ask any host agent
-  that has MCP wired to call: radiant_run(goal="...").
+  If you ran --agent=<name> (or --setup-mcp), the host's MCP config is
+  already updated. Restart the agent to pick up the new MCP server, then
+  call the possession tool:
+
+    mcp__radiant__possess(task="<the goal>", workdir="<cwd>")
+
+  The harness takes over via sampling/createMessage: reads the bundled
+  skills, scaffolds AGENTS.md / docs / specs, decomposes into bounded
+  phases, writes code, runs gates, returns a trace.
 
 EOF

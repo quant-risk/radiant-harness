@@ -19,12 +19,31 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
-var version = "3.2.9"
+var version = "3.3.0"
+
+// publicCommands is the closed set of CLI subcommands that the Light
+// binary exposes without RADIANT_INTERNAL=1. Anything that the host agent
+// would otherwise use to bypass the MCP path (scaffold, scaffold-run
+// helpers, audit, telemetry, validate, etc.) lives in the internal
+// complement and is gated by requireInternal().
+//
+// List rationale: these are the commands an AI agent (or a human) needs
+// to install + diagnose the harness. The MCP-driven loop, possession,
+// and skill loading are exposed as MCP tools and as such do not need a
+// CLI counterpart under a public subcommand.
+var publicCommands = map[string]bool{
+	"setup-mcp": true, // wire MCP into a host agent
+	"mcp":       true, // serve + self-test + possess
+	"host-info": true, // show detected host agent
+	"doctor":    true, // diagnose wiring + agent config
+	"update":    true, // self-update the binary
+}
 
 func main() {
 	root := &cobra.Command{
@@ -34,8 +53,25 @@ func main() {
 		Version: version,
 	}
 
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		name := effectiveTopLevelName(cmd)
+		if internalEnabled() || publicCommands[name] {
+			return nil
+		}
+		fmt.Fprintf(os.Stderr,
+			"radiant %q is an internal helper. "+
+				"To run the harness, the host agent must invoke the MCP tool\n"+
+				"  mcp__radiant__possess(task=\"<the user's prompt>\", workdir=\"<cwd>\")\n"+
+				"after `radiant setup-mcp --agent=<host>` + restart.\n"+
+				"\n"+
+				"If you really need this command outside the harness, set\n"+
+				"  RADIANT_INTERNAL=1 radiant %s …\n",
+			name, name)
+		return fmt.Errorf("command gated by possession contract (RADIANT_INTERNAL=1 to override)")
+	}
+
 	// Core MCP commands
-	registerSetupMCPCmd(root) // 11 agents, vendor-neutral config writes
+	registerSetupMCPCmd(root) // 12 agents, vendor-neutral config writes
 	registerMCPServeCmd(root) // the MCP server itself
 	registerHostInfoCmd(root) // show detected host agent
 
@@ -70,4 +106,37 @@ func main() {
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// internalEnabled reports whether the caller has explicitly opted into
+// the internal command surface by setting RADIANT_INTERNAL=1. The public
+// surface (`setup-mcp`, `mcp`, `host-info`, `doctor`, `update`, plus
+// their subcommands) is always available.
+func internalEnabled() bool {
+	v := os.Getenv("RADIANT_INTERNAL")
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// effectiveTopLevelName returns the first non-root name in the command
+// path. So `radiant loop start` and `radiant mcp serve` both report the
+// top-level subcommand ("loop" or "mcp"), which is what the gate logic
+// keys off. The root command itself (`radiant --version`, `radiant help`)
+// is treated as "version" — always allowed.
+func effectiveTopLevelName(cmd *cobra.Command) string {
+	root := cmd.Root()
+	if cmd == root {
+		return "version"
+	}
+	c := cmd
+	for c.Parent() != nil && c.Parent() != root {
+		c = c.Parent()
+	}
+	// c is now either a top-level subcommand or `root` itself.
+	if c == root || c.Parent() == root {
+		if c == root {
+			return "version"
+		}
+		return c.Name()
+	}
+	return ""
 }

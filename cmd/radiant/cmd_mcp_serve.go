@@ -192,6 +192,10 @@ Flags:
 	// Subcommand: mcp self-test — verify the MCP wire-up end-to-end.
 	registerMCPSelfTestCmd(mcpCmd)
 
+	// Subcommand: mcp possess — CLI mirror of the mcp__radiant__possess
+	// tool, useful for debugging and CI.
+	registerPossessCmd(mcpCmd)
+
 	root.AddCommand(mcpCmd)
 }
 

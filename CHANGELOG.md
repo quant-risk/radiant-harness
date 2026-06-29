@@ -4,6 +4,127 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.3.0] — 2026-06-29 — Possession is the only way
+
+This release rewrites the agent-side contract so that `mcp__radiant__possess`
+is the single mandated path for non-trivial work. The previous
+`radiant_run(goal=…)` exposed the entire autonomous loop as one MCP
+tool call — it worked against synthetic sampling responders but failed
+with real hosts (Hermes mimo/xiaomi 20–40 s cold start blew past the
+300 s outer tool-call timeout; Codex GPT-5 didn't even see the tool).
+The decomposition below makes each MCP tool bounded so the host agent
+stays in control and no single call can time out.
+
+### Changed
+- **Decomposed MCP surface.** Replaced the single `radiant_run` tool with
+  a small, bounded-tool grammar the host agent calls step by step:
+  - `mcp__radiant__skill_list()` — enumerate the 69 bundled skills.
+    Always call this once before `possess` on a non-trivial task.
+  - `mcp__radiant__skill_load(name)` — return the SKILL.md + frontmatter
+    of one skill.
+  - `mcp__radiant__possess(task, workdir?, profile?)` — main entry. The
+    harness drives the agent through discover → plan → execute →
+    verify, ONE sampling/createMessage round-trip per phase, with state
+    persisted to `.radiant-harness/state/possess-<task-id>.json` between
+    phases so a timeout or crash can resume from where it stopped.
+  - `mcp__radiant__phase_status(task_id)` — return the persisted
+    progress so the user can see trace / artifacts / gate results.
+  - `radiant_run` is kept as a thin alias (`task` ← `goal`) for back-compat.
+- **Each phase is bounded.** `cmd_mcp_possess.go` defines `discover`,
+  `plan`, `execute`, `verify` as a fixed sequence. Each phase's prompt
+  starts with an unambiguous `## radiant-phase: <name>` marker so the
+  host (or our synthetic test host) can map a sampling request to the
+  right phase without ambiguity.
+- **JSON-RPC notifications silenced.** `notifications/initialized`,
+  `notifications/cancelled`, `notifications/progress` are no longer
+  answered with an error frame (`-32601 method not found`). Per
+  JSON-RPC 2.0, a notification (no `id`) MUST NOT be answered;
+  previously the error response was throwing off the next valid
+  response on the same stdio line.
+- **CLI escape hatches gated.** All non-public CLI commands
+  (`radiant loop`, `radiant run`, `radiant fleet`, `radiant model`,
+  `radiant profile`, `radiant evaluate`, `radiant drift`, `radiant spec`,
+  `radiant product`, etc.) now refuse to run unless `RADIANT_INTERNAL=1`
+  is set. The host agent now has no way to drive the harness via shell
+  — the only path is `mcp__radiant__possess` via MCP.
+  Public commands always available without `RADIANT_INTERNAL`:
+  - `radiant setup-mcp [--agent=...] [--global]`
+  - `radiant mcp` (serve, self-test, possess CLI mirror)
+  - `radiant host-info`
+  - `radiant doctor [--mcp]`
+  - `radiant update`
+- **`install.sh` now auto-wires MCP.** `--agent=<name>` (or `--setup-mcp`)
+  runs `radiant setup-mcp --agent=<name> --global` after install,
+  detects the host via `radiant host-info`, and writes the full Hermes
+  sampling block when applicable.
+- **`radiant --help`** header now explicitly tells incoming agents to
+  scroll to the new **"🤖 For AI agents"** section.
+
+### Added
+- **`radiant mcp possess`** — debug/CLI mirror of `mcp__radiant__possess`
+  (hidden subcommand, no sampling — useful for self-test and CI).
+- **AGENTS.md bootstrap.** On first `radiant_possess` in a fresh project
+  directory, the harness writes `AGENTS.md` + `docs/` + `specs/` +
+  `scripts/` + `.agent-context/` with explicit instructions for any
+  future AI agent that opens the directory.
+- **State persistence between phases.** Each phase's output and
+  status is written to `.radiant-harness/state/possess-<id>/state.json`
+  atomically; calling `radiant_possess(task=…, workdir=…)` again
+  with the same (workdir, task) tuple resumes from the failed or
+  incomplete phase rather than restarting.
+- **README "🤖 For AI agents" section.** Step-by-step recipe an agent
+  follows verbatim: install + wire MCP → restart → drive via
+  `mcp__radiant__possess`. Plus a failure-mode table.
+
+### Verified — 5/5 MCP possession runs in /tmp/v330-case-N
+Each run produced `AGENTS.md`, `docs/`, `specs/`, `scripts/`,
+`.agent-context/`, `.radiant-harness/state/possess-<id>/state.json`,
+with all four phases (`discover`, `plan`, `execute`, `verify`)
+completed and recorded with their distinct outputs:
+
+```
+run 1  PASS
+run 2  PASS
+run 3  PASS
+run 4  PASS
+run 5  PASS
+```
+
+### Verified — install.sh --agent=hermes end-to-end
+```text
+$ curl -fsSL .../install.sh | bash -s -- --agent=hermes
+==> downloading radiant-darwin-arm64
+==> verifying SHA256
+==> SHA256 OK
+==> installing to /usr/local/bin/radiant
+==> wiring MCP for host: hermes
+  ✓ hermes     → /Users/.../.hermes/config.yaml
+
+$ HERMES_VERSION=0.1 radiant doctor --mcp
+  agent             hermes (confidence 100)
+  config path       /Users/.../.hermes/config.yaml
+  radiant entry     true
+  sampling.enabled  true
+  sampling.timeout  120s
+  mcp timeout       300s
+  verdict = OK
+```
+
+### Verified — internal gate
+```bash
+$ radiant loop start "x"           # without RADIANT_INTERNAL
+radiant "loop" is an internal helper. To run the harness, the host agent
+must invoke the MCP tool
+  mcp__radiant__possess(task="<the user's prompt>", workdir="<cwd>")
+
+$ RADIANT_INTERNAL=1 radiant loop start "x"
+✓ Loop starting
+```
+
+[3.3.0]: https://github.com/quant-risk/radiant-harness/releases/tag/v3.3.0
+
+---
+
 ## [3.2.9] — 2026-06-29 — Diagnosis is one command
 
 ### Added

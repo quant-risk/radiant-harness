@@ -47,10 +47,14 @@ type mcpRequest struct {
 
 // mcpResponse is a JSON-RPC 2.0 response to the client.
 type mcpResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      any         `json:"id,omitempty"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *mcpError   `json:"error,omitempty"`
+	JSONRPC  string      `json:"jsonrpc"`
+	ID       any         `json:"id,omitempty"`
+	Result   interface{} `json:"result,omitempty"`
+	Error    *mcpError   `json:"error,omitempty"`
+	// suppress=true means "do not encode this — it answers a notification
+	// (JSON-RPC `id` absent) and per the spec MUST NOT elicit a reply."
+	// Only used internally by the read loop in cmd_mcp_runtime.go.
+	suppress bool `json:"-"`
 }
 
 // mcpError is the error block of a JSON-RPC response.
