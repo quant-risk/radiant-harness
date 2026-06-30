@@ -607,7 +607,7 @@ This is the complete CLI surface — **55 commands** in one binary:
 | `radiant eval` | Run a prompt N times for latency/cost. |
 | `radiant bench` | Benchmark vs TLC, Spec Kit, OpenSpec, Superpowers. |
 | `radiant improve` | Self-improvement engine from traces. |
-| `radiant integrate` | Read-only listing of declared MCP integrations. |
+| `radiant integrations` | Read-only listing of declared MCP integrations. |
 
 ### MCP & agents
 
