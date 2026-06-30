@@ -77,7 +77,7 @@ If you see this fall back fire on a host that *should*
 support sampling, check the host's MCP subprocess env first
 (it's a host integration issue, not a harness bug).
 
-### Heads-up: when the host is Hermes TUI synchronous (v3.7.2-prep)
+### Heads-up: when the host is Hermes TUI synchronous
 
 Hermes TUI implements **synchronous tool calls** — it
 `wait_for_tool_result` before processing anything else. That
@@ -92,7 +92,7 @@ Hermes TUI                          radiant mcp serve
   │                                       │── discover (offline) ✓
   │                                       │── plan (offline) ✓
   │                                       │── execute needs sampling
-  │                                       │── sampling/createMessage ──► ??? 
+  │                                       │── sampling/createMessage ──► ???
   │   TUI can't process it;               │     (callback is dropped)
   │   still waiting on possess ─────►     │
   │                                       │
@@ -100,40 +100,39 @@ Hermes TUI                          radiant mcp serve
 120s timeout on the tool call → fail
 ```
 
-**This deadlock happens regardless of v3.7.1.** v3.7.1 closes the
-*Codex* hollow-stub case (driver surfaces -32601 mid-run → falls
-back to self-driven scaffold). It does NOT change the Hermes TUI
-flow because the deadlock is at the MCP protocol layer, before
-the driver even starts. The release notes framed the fix
-broader than the actual scope; v3.7.2-prep already exposes
-`radiant_run_gate` and `radiant_possess_async` in `tools/list`
-(returning structured "v3.7.2 in-development" stubs today), and
-PR-B/PR-C will wire real subprocess plumbing + auto-routing on
-synchronous hosts.
+**v3.7.x closes this deadlock automatically** via
+`sync-host auto-routing`. When `mcp__radiant__possess` is called
+and the host is in `internal/hostdetect.knownSyncHosts` (today:
+`hermes`), `runPossessWithBackend` short-circuits to the async
+gate primitives (`radiant_possess_async` + `radiant_run_gate`).
+The synchronous tool call returns within the host's outer
+timeout with a ticket; phases run offline; the host polls
+`mcp__radiant__phase_status(task_id=ticket)` for progress and
+final `state.json`.
 
-**Until then, the supported workstream for Hermes TUI is:**
+What this means in practice:
 
-```
-1. mcp__radiant__skill_list                 # enumerate (no round-trip)
-2. mcp__radiant__skill_load(name="...")     # read SKILL.md (no round-trip)
-3. mcp__radiant__init / radiant_create_spec # scaffold (no round-trip)
-4. Python / bash directly                  # fill the [host-agent: ...] markers
-```
+- **You can call `mcp__radiant__possess` from a Hermes TUI
+  session.** It returns a populated ticket within ~500 ms (no
+  120 s wait).
+- **Do NOT call `mcp__radiant__possess` if you want a synchronous
+  stream of progress.** TUI hosts can't render a streaming
+  response while blocked on the tool call. Use
+  `mcp__radiant__phase_status` for polling instead.
 
-Each MCP call is small and returns fast — none of them trap the
-TUI. The harness becomes your **research / spec-writer /
-skill-loader**; the actual code execution lives in the same chat
-where Python and bash already run. This is the same hybrid pattern
-that resolved the iFood Pago MenuFlex case end-to-end. See
-`CHANGELOG.md` `[3.7.2-prep]` for full context and operational
-notes.
+If the host is a synchronous TUI that *isn't* in
+`knownSyncHosts` (e.g. a vendor releases a new TUI after this
+writing) and you observe the 120 s deadlock, add it to
+`internal/hostdetect/probe.go::knownSyncHosts` and rebuild. The
+next call runs the same async path automatically.
 
 **Do NOT** call `mcp__radiant__possess` from a synchronous TUI host
-expecting a populated result. The harness will only land you with
-templated scaffolds and 120 s of waiting. If you need end-to-end
-execution via `radiant_possess`, use an async-capable host
-(Claude Code, or terminal `radiant run` with a configured LLM
-provider).
+expecting a populated result. The harness already auto-routes the
+call through `radiant_possess_async` — see the section above. If
+the auto-route did not fire (e.g. a host in
+`knownSyncHosts` is wrong / missing), the deadline will still be
+120 s; report it and the harness short-circuit will land in
+v3.7.x follow-up.
 
 ### Heads-up: skill names changed (v3.7.2-prep)
 

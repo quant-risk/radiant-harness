@@ -194,3 +194,44 @@ func ResolveSupport(agent AgentID) (supports, probed bool) {
 var knownSamplingUnsupported = map[AgentID]bool{
 	AgentCodex: true, // 2026-06-29: GPT-5 + OpenAI Codex CLI return -32601
 }
+
+// knownSyncHosts is the closed set of agents whose MCP server uses
+// synchronous `wait_for_tool_result` semantics — i.e. they block the
+// tool call until the host's model finishes. Calling
+// `sampling/createMessage` from inside one of these tools causes a
+// deadlock (the host is busy waiting on the tool call, the tool is
+// waiting on the sampling response — neither can make progress).
+//
+// The harness auto-routes `mcp__radiant__possess` on these hosts to
+// the async gate primitives (`radiant_possess_async` +
+// `radiant_run_gate`) instead of the synchronous possess loop,
+// which closes the 120 s deadlock documented in AGENTS-FOR-TASKS.md
+// § Hermes TUI workstream.
+//
+// Membership is decided per-vendor by inspecting the host's MCP
+// runtime documentation or running an empirical deadlock probe.
+// Add entries when:
+//
+//   - A vendor confirms their TUI/SDK is synchronous (open issue);
+//   - A session against a previously-listed host completes
+//     end-to-end inside one MCP round-trip (rare — see PR that
+//     moves the agent OFF this list).
+//
+// As of v3.7.x, the only confirmed entry is Hermes TUI (the 2026-
+// 06-29 protocol-level deadlock reproduction). Update this comment
+// when the picture changes.
+var knownSyncHosts = map[AgentID]bool{
+	AgentHermes: true, // Hermes TUI synchronous wait_for_tool_result; v3.7.x first appeared in AGENTS-FOR-TASKS.md § Hermes-TUI workstream.
+}
+
+// IsSyncHost reports whether the agent's MCP server uses
+// synchronous tool-call semantics that deadlock on a nested
+// sampling/createMessage round-trip. The harness uses this to
+// auto-route `mcp__radiant__possess` to the async primitives on
+// sync hosts.
+func IsSyncHost(agent AgentID) bool {
+	if agent == "" {
+		return false
+	}
+	return knownSyncHosts[agent]
+}

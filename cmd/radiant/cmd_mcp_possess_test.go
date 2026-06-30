@@ -333,3 +333,64 @@ func TestRadiantRunAliasRemoved(t *testing.T) {
 	// If you add a new path that calls them, this test fails loud.
 	t.Logf("mcpRunFull still exists; remove in v3.7.x-follow-up")
 }
+
+// TestSyncHostAutoRouting is the v3.7.x closing test for the
+// protocol-level Hermes TUI deadlock. Without auto-routing, a Hermes
+// session calling `mcp__radiant__possess` deadlocks at the 120 s
+// tool-call timeout because Hermes' wait_for_tool_result blocks on
+// the nested sampling/createMessage call. With auto-routing
+// (sprint-6 item #1), the synchronous possess entry is short-
+// circuited to the async gate primitives — no sampling, no
+// deadlock, populated state.json at the end.
+//
+// We can't spin up a real Hermes session in a unit test, so the test
+// exercises the bypass directly via hostdetect.IsSyncHost + the
+// asyncPossess entry point used by the auto-route.
+func TestSyncHostAutoRouting(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 1. Verify Hermes is in the sync-host table.
+	if !hostdetect.IsSyncHost(hostdetect.AgentHermes) {
+		t.Fatalf("expected Hermes to be in knownSyncHosts; sprint-6 sync-host auto-routing requires it")
+	}
+
+	// 2. Verify an async-host is NOT in the table.
+	if hostdetect.IsSyncHost(hostdetect.AgentClaudeCode) {
+		t.Fatalf("Claude Code should NOT be a sync-host")
+	}
+	if hostdetect.IsSyncHost(hostdetect.AgentCodex) {
+		t.Fatalf("Codex is no-sampling, NOT sync-host (different failure mode)")
+	}
+
+	// 3. Run the async path via the in-process wrapper the auto-route
+	//    invokes (runAsyncPossessForBackend) — exercises the same
+	//    surface that the sync-host bypass in runPossessWithBackend
+	//    calls.
+	stRun, err := runAsyncPossessForBackend(dir, "ship the feature", "standard")
+	if err != nil {
+		t.Fatalf("async possess spawn failed: %v", err)
+	}
+	if stRun == nil || stRun.TaskID == "" {
+		t.Fatal("async possess did not return populated state")
+	}
+
+	// 4. State must be populated end-to-end — same observable shape
+	//    as the synchronous possess path.
+	id := taskID(dir, "ship the feature")
+	st, err := loadPossessState(dir, id)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	for _, phase := range []string{"discover", "plan", "execute", "verify"} {
+		pr, ok := st.Phases[phase]
+		if !ok || pr == nil || pr.Status != "done" {
+			t.Errorf("phase %q status = %+v, want done", phase, pr)
+		}
+	}
+	if st.RunMode == "" {
+		t.Errorf("RunMode not set; sync-host auto-route should tag the mode")
+	}
+}

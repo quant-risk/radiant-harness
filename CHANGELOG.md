@@ -4,6 +4,64 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — sync-host auto-routing closes the Hermes TUI deadlock
+
+`mcp__radiant__possess` is now safe to call from a synchronous TUI
+host (e.g. Hermes) without producing the 120 s tool-call deadlock.
+
+Detection: every call to `radiant_possess` (MCP-bound path in
+`runPossessWithBackend`) now runs a new pre-flight gate against
+`internal/hostdetect.IsSyncHost(agent)`. As of v3.7.x the table
+contains only `hermes` (the documented sync-host in
+AGENTS-FOR-TASKS.md § Hermes-TUI workstream). New entries belong
+in `internal/hostdetect/probe.go::knownSyncHosts` and should be
+prompted by a confirmed 120 s deadlock reproduction.
+
+Routing: when the host is sync, the synchronous possess call
+hands off to `runAsyncPossessForBackend` — which invokes the
+existing `asyncPossess.Spawn` path (`radiant_possess_async` /
+`radiant_run_gate` family). The host sees a populated
+`*possessState` plus a ticket within ~500 ms; phases run
+offline; the host polls `mcp__radiant__phase_status(task_id=ticket)`
+for progress.
+
+### Added
+
+- `internal/hostdetect/probe.go`: `knownSyncHosts` map + `IsSyncHost`
+  helper. Documented as `closed set` of agents whose MCP server
+  uses synchronous `wait_for_tool_result` semantics.
+- `cmd_mcp_possess.go::runAsyncPossessForBackend(workdir, task,
+  profile)` — wraps `asyncPossess.Spawn` and tags
+  `possessState.RunMode` with the sync-host ticket for audit.
+- `cmd_mcp_possess_test.go::TestSyncHostAutoRouting` —
+  closes the protocol-level deadlock for Hermes; verifies the
+  table + async wrapper + state shape.
+
+### Behaviour change
+
+- `radiant_possess(task, ...)` from Hermes no longer hangs for 120 s
+  before returning. The call returns ~500 ms with a populated
+  state.json. The host calls `radiant_phase_status(task_id)` to
+  follow progress.
+- Hosts in `knownSyncHosts` see a single-line notice in the
+  harness trace: `⚠ host "hermes" uses synchronous MCP …  Auto-
+  routing to radiant_possess_async instead …`.
+
+### Verified
+
+- `TestSyncHostAutoRouting` PASS (asserts `IsSyncHost(Hermes) ==
+  true`, `IsSyncHost(ClaudeCode) == false`, the in-process
+  wrapper returns a populated state with the `RunMode` tag).
+- `make smoke` rc=0.
+- `make test-agents` 12/12.
+- Build clean (zero imports flagged by `go vet`).
+
+### Open
+
+- Adding new agents to `knownSyncHosts` is operator-side.
+  Document any vendor confirmation in the AGENTS-FOR-TASKS.md
+  header so the path stays explicit.
+
 ## [Unreleased] — drop the `radiant_run` legacy alias
 
 The `mcp__radiant__run` MCP tool — kept as a **DEPRECATED** alias of

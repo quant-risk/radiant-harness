@@ -415,6 +415,29 @@ func runPossessWithBackend(ctx context.Context, workdir, task, profile string, b
 			return runSelfDrivenPossess(ctx, workdir, task, profile, w,
 				fmt.Sprintf("probe says %s has no sampling", detected.Agent))
 		}
+
+		// Pre-flight: synchronous-host TUI / SDKs (Hermes today) BLOCK
+		// on any nested sampling/createMessage round-trip — the documented
+		// 120 s tool-call deadlock. Route the synchronous `radiant_possess`
+		// onto the async gate primitives (`radiant_possess_async` +
+		// `radiant_run_gate`) so the host sees a fast-tool-call return
+		// path instead of a hung tool call. The async harness has no
+		// upstream sampling dependency — phases run offline and the
+		// host polls for completion via `radiant_phase_status`.
+		if hostdetect.IsSyncHost(detected.Agent) {
+			fmt.Fprintf(w,
+				"⚠ host %q uses synchronous MCP wait_for_tool_result. "+
+					"Nested sampling/createMessage would deadlock. "+
+					"Auto-routing to radiant_possess_async instead — "+
+					"return value is a ticket; host polls radiant_phase_status "+
+					"for progress.\n\n",
+				detected.Agent)
+			st, drvErr := runAsyncPossessForBackend(workdir, task, profile)
+			if drvErr != nil {
+				return st, drvErr
+			}
+			return st, nil
+		}
 	}
 
 	// Bootstrap the project layout BEFORE delegating to the agentic

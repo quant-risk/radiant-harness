@@ -139,3 +139,34 @@ func alreadyDone(st *possessState, phase string) bool {
 	}
 	return pr.Status == "done"
 }
+
+// runAsyncPossessForBackend is the in-process entry that callers
+// inside cmd_mcp_possess (NOT the MCP router) use when they need to
+// run the full 4-phase offline loop instead of the synchronous
+// driver. Used by the sync-host auto-routing in
+// `runPossessWithBackend` (Hermes TUI) so the harness can return a
+// populated *possessState without sampling/createMessage round-
+// trips. Returns the canonical state shape so callers can read
+// st.CurrentPhase / st.Phases exactly as if the synchronous loop
+// had completed.
+func runAsyncPossessForBackend(workdir, task, profile string) (*possessState, error) {
+	if workdir == "" {
+		workdir, _ = os.Getwd()
+	}
+	h, err := asyncPossess{}.Spawn(task, workdir, profile)
+	if err != nil {
+		return nil, err
+	}
+	id := taskID(workdir, task)
+	st, err := loadPossessState(workdir, id)
+	if err != nil {
+		return nil, fmt.Errorf("sync-host auto-routing: %w", err)
+	}
+	// Tag the mode so a later audit can spot it.
+	st.RunMode = fmt.Sprintf("sync-host-async %s", h.Ticket)
+	st.LastPhaseAt = time.Now()
+	if err := savePossessState(st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
