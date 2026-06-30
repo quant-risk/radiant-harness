@@ -6,11 +6,27 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 12:35 BRT by mavis during v3.7.9 deep post-release validation
+**Last updated:** 2026-06-30 12:50 BRT by mavis during v3.7.10 sprint
 
 ## Current sprint / active feature
 
-- Active: **v3.7.9 shipped + validated 12/12; v3.7.10 kickoff pending.**
+- Active: **v3.7.10 code-complete; release cut pending.**
+- Sprint goal: close the remaining 3 backlog items (--watch,
+  nested pid tree, async-host opt-in matrix).
+- Progress (v3.7.10 closed): (1) `radiant phase watch`
+  CLI namespace + `runPhaseWatch` polling helper with
+  terminal/max-poll/JSON/no-reemit semantics + SIGINT handling;
+  (2) PidTree struct + `TaskLive.tree` + `refreshChildPidsLoop`
+  pgrep-based child refresh + sidecar file format;
+  (3) `--async-subprocess` + `--fleet-async-subprocess` CLI
+  flags on `radiant mcp serve` + envBool helper + precedence
+  chain (CLI > env > default); (4) `radiant doctor --async-host`
+  diagnostic with the 13-host opt-in matrix (only Hermes
+  flagged RecommendAsync=true today); (5) 22 new tests pin
+  the contract (13 pidtree + 9 v3_7_10 CLI/MCP); (6) full
+  validation pending — release cut pending.
+- v3.7.10 GitHub release: tag `v3.7.10` + 7 release assets
+  (TBD).
 
 ## Current sprint / active feature
 
@@ -45,15 +61,12 @@ alwaysApply: true
 
 ## Next concrete action
 
-- v3.7.10 backlog. Order: (1) Real host opt-in for
-  `RADIANT_FLEET_ASYNC_SUBPROCESS=1` — needs a reproduction of
-  a sampling-backed fleet cross-process need (CI host with
-  hard MCP tool-call deadline against a large fleet) before
-  turning the subprocess path on by default; (2) `--watch`
-  flag for `radiant_phase_status` (poll pid file + emit MCP
-  notifications on alive→dead transitions); (3) Per-task
-  nested pid tracking (recursive liveness) for fleet — which
-  child process died, not just that one did.
+- v3.7.11 backlog. Order: (1) `--watch --on-change-exit` flag
+  for "wait until anything changes" notifications; (2)
+  `--follow=<ticket>` for resume-then-watch without manually
+  updating the ticket id; (3) Per-host opt-in matrix in
+  `docs/HOSTS.md` for offline reading; (4) Real CI host
+  reproducing fleet cross-process need (still gated).
 
 ## Latest validation
 

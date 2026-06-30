@@ -4,6 +4,105 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.10] — 2026-06-30 — --watch, nested pid tree, async-host opt-in matrix
+
+Three backlog items closed in one sprint, all observability/lifecycle:
+
+### Added
+
+- **`radiant phase watch <task-id> --interval=2s --max-poll=10m [--json]`** —
+  new CLI namespace under `radiant phase`. Polls the persisted
+  `possessState` and re-emits the phase status summary **only** when
+  `(status, current_phase, subprocess_alive, subprocess_pid)` changes.
+  Exits 0 when the run reaches a terminal state (`done` /
+  `cancelled` / `error` / `crashed`); exits 1 after `--max-poll`
+  elapses (safety net for runaway watchers); exits 130 on
+  SIGINT/SIGTERM (clean Ctrl-C handling). `--json` emits one
+  structured object per change in NDJSON format (`jq -c` line-
+  by-line parseable).
+- **`radiant phase status <task-id>`** — one-shot CLI mirror of
+  `radiant_phase_status` content[1]. Same format as the watch's
+  terminal emission, no polling.
+- **`mcp__radiant__fleet_status` / `mcp__radiant__fleet_resume` extended
+  with nested pid tree** — `TaskLive` (per-task liveness field in
+  `FleetStatus`) gains a `tree` object:
+  ```json
+  {
+    "parent_pid": 12345,
+    "parent_alive": true,
+    "children_pids": [12346, 12347],
+    "children_alive": true,
+    "child_count": 2
+  }
+  ```
+  `parent_alive=false, children_alive=false` distinguishes a clean
+  crash from `parent_alive=false, child_count>0` (orphaned helpers).
+- **`radiant doctor --async-host`** — new diagnostic that scores
+  the current host against the v3.7.10 async-subprocess opt-in
+  matrix (13 hosts covered). Reports:
+  - Current opt-in status from env vars
+  - Per-flag verdict (`RECOMMENDED` / `ALREADY ON` / `NOT RECOMMENDED` /
+    `OPTED-IN (no harm)`)
+  - The exact CLI flag to flip if opt-in is recommended
+  - Exits non-zero when a recommendation is unmade (CI catch)
+- **`--async-subprocess` and `--fleet-async-subprocess` CLI flags** on
+  `radiant mcp serve`. CLI flag > env var > default off. Same
+  effect as the env vars but works in setup-mcp configs that
+  can't express env vars.
+- **`pgrep -P` based child-pid refresh** in `Dispatcher.spawnAgent`.
+  Writes a `.radiant-harness/fleet/pids/agent-<runID>-<taskID>.pid.children`
+  sidecar every 5s with the live children pid list. The
+  `refreshChildPidsLoop` goroutine exits cleanly when the agent
+  process exits (no goroutine leak per task).
+
+### Changed
+
+- `Coordinator.Status()` populates the new `TaskLiveness[*].Tree`
+  field when `WithLivenessDir` is set. The flat `Alive` + `Pid`
+  fields stay for backwards compat — old callers still see
+  "agent is alive/dead".
+- `Dispatcher.spawnAgent` now writes a children sidecar and
+  spawns a refresh goroutine. Both are cleaned up on agent exit
+  (defer remove + refresh goroutine signal).
+- `radiant_phase_status` MCP schema gains an informational
+  `watch` parameter. The tool itself is unchanged (single-call
+  snapshot) but the schema now explicitly tells hosts to spawn
+  `radiant phase watch` for streaming.
+
+### Diagnostics
+
+- `radiant doctor --async-host` is now the canonical way to ask
+  "should this host opt into async subprocess mode?". Without
+  this, an operator running into a tool-call timeout has to
+  read source code to discover the env vars exist. With this,
+  one command produces the verdict + the exact flag to flip.
+
+### Process
+
+- **22 new tests pin the contract:**
+  - `internal/fleet/pidtree_test.go` (13): pid sidecar roundtrip,
+    refresh loop lifecycle, parent/children liveness combinations.
+  - `cmd/radiant/v3_7_10_test.go` (9): `radiant phase watch`
+    terminal/max-poll/JSON/no-reemit semantics, status CLI shape,
+    `radiant doctor --async-host` exit-code contract,
+    `envBool` truthy/falsy parsing.
+
+### Backlog for v3.7.11 (post-release)
+
+- Per-CI-host reproduction of fleet cross-process need (still
+  gated). The opt-in machinery + diagnostic shipped in 3.7.10
+  are ready; the actual default-flip happens when a real CI
+  host reproduces.
+- `--watch --on-change-exit` flag — exit on the FIRST change
+  after the initial snapshot, useful for "wait until anything
+  changes" notifications.
+- `radiant phase watch --follow=<other-ticket>` — follow another
+  ticket's state when a re-dispatched run gets a new ticket id.
+
+### Post-release validation
+
+TBD — pending release cut.
+
 ## [3.7.9] — 2026-06-30 — Fleet async primitives (parity with loop)
 
 The fleet lifecycle now has the same status / retry / liveness

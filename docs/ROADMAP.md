@@ -6,6 +6,35 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.10 (2026-06-30)
+
+- **`radiant phase watch <task-id>` CLI** — polls the persisted
+  phase state and re-emits the summary on change. Companion to
+  the MCP `radiant_phase_status` for hosts that want streaming
+  without round-tripping through the MCP transport. Exits 0 on
+  terminal state, exits 1 after `--max-poll`, exits 130 on
+  SIGINT. NDJSON mode (`--json`) is `jq -c` line-by-line
+  parseable.
+- **Per-task nested pid tree** — `TaskLive.tree` exposes
+  `parent_alive` + `children_pids` + `children_alive` +
+  `child_count` so a host can distinguish "parent died
+  cleanly" from "parent died; N helpers orphaned".
+  `Dispatcher.spawnAgent` now spawns a `refreshChildPidsLoop`
+  goroutine that `pgrep -P`'s the agent every 5s and writes
+  the children sidecar at
+  `.radiant-harness/fleet/pids/agent-<...>.pid.children`.
+- **Async-subprocess opt-in matrix + diagnostic.** Two new CLI
+  flags (`--async-subprocess`, `--fleet-async-subprocess`) on
+  `radiant mcp serve` join the env-var path with CLI-flag >
+  env-var > default-off precedence. `radiant doctor
+  --async-host` (v3.7.10+) scores all 13 known hosts — only
+  Hermes is currently flagged RecommendAsync=true (TUI gates
+  tool-call completion on subprocess exit); the rest default
+  to inline.
+- **22 new tests pin the contract** — pid sidecar roundtrip,
+  watch terminal/max-poll/JSON/no-reemit semantics, status CLI
+  shape, doctor exit-code contract, envBool parsing.
+
 ## Shipped in v3.7.9 (2026-06-30)
 
 - **Fleet async primitives (A+B+C combined).** Closes the
@@ -88,16 +117,16 @@ state, and clear enough for another agent to complete real project work.
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| Turn on `RADIANT_ASYNC_SUBPROCESS=1` for a real host that needs it (sampling-backed sync-host possess OR fleet cross-process worktree) | Concrete reproduction gates the work | M | Maintainers | Reproduce the need | Document the host, opt in by default, validate end-to-end |
-| Turn on `RADIANT_FLEET_ASYNC_SUBPROCESS=1` for the same real host needs | Concrete reproduction (e.g. CI host with hard MCP tool-call deadline against a large fleet) | M | Maintainers | v3.7.9 fleet async primitives | Document the host, opt in by default, validate end-to-end |
+| Real CI host reproducing fleet cross-process need (gates default-flip of `RADIANT_FLEET_ASYNC_SUBPROCESS=1`) | Concrete reproduction (CI host with hard MCP tool-call deadline against a large fleet) | M | Maintainers | v3.7.10 opt-in machinery + diagnostic | Document the host, opt in by default, validate end-to-end |
+| Real sync host reproducing loop async need (gates default-flip of `RADIANT_ASYNC_SUBPROCESS=1`) | Concrete reproduction (Hermes TUI aside, no other known sync host yet) | M | Maintainers | v3.7.10 opt-in machinery + diagnostic | Document the host, opt in by default, validate end-to-end |
 
 ## Next
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| `--watch` flag for `radiant_phase_status` | Poll pid file + emit MCP notifications on alive→dead transitions | S | Maintainers | v3.7.8 pid probe | `radiant_phase_status --watch <ticket>` streams until terminal state or Ctrl-C |
-| Per-task nested pid tracking (recursive liveness) | Distinguish crashed parent from crashed child agent | M | Maintainers | v3.7.9 fleet pid files | Status surfaces which child process died, not just that one did |
-| Backfill v3.7.3-v3.7.5 CHANGELOG entries (Done in commit 82b1245, but Worth tracking for future sprints where v3.7.0-v3.7.x history has gaps) | Honest release history | S | Maintainers | Git log for the period | Each tag has a CHANGELOG subsection with date + feature summary |
+| `--watch --on-change-exit` flag | Exit on the first change after the initial snapshot | S | Maintainers | v3.7.10 phase watch | `radiant phase watch --on-change-exit <ticket>` for "wait until anything changes" notifications |
+| `radiant phase watch --follow=<ticket>` | Follow another ticket's state when a re-dispatched run gets a new ticket id | S | Maintainers | v3.7.10 phase watch | Operator can resume-then-watch without manually updating the ticket id |
+| Per-host opt-in matrix docs | Surface the v3.7.10 doctor recommendation in `docs/HOSTS.md` for offline reading | S | Maintainers | v3.7.10 doctor --async-host | A single table that lists all 13 hosts + their per-flag verdict |
 
 ## Later
 
