@@ -4,6 +4,120 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.1] — 2026-06-29 — Agentic driver -32601 fallback closes Codex hollow-stub
+
+A Codex CLI run at 2026-06-29 23:44 produced
+
+```json
+"phases": { "discover": { "status": "error",
+  "error": "sampling at iter 1: sampling unsupported on host
+   (json-rpc -32601) (method=sampling/createMessage)" } }
+```
+
+in `~/Downloads/gpt-5-codex/.radiant-harness/state/possess-0371d5f41b4ecd67/state.json`.
+The harness bootstrapped the project (AGENTS.md / docs / specs / scripts /
+.radiant-harness/ + 70+ bundled skills), then attempted the agentic driver,
+which the Codex MCP server rejected with `-32601`. v3.7.0 surfaced the error
+as fatal and exited. Result: empty docs/specs/scripts on disk, agent forced
+to fill by hand.
+
+### Root cause
+
+Codex CLI spawned `radiant mcp serve` as an MCP subprocess without
+propagating `CODEX_HOME` (the agent host runs in its own env namespace).
+`hostdetect.Detect()` inside the harness returned `AgentUnknown`, so the
+v3.7.0 pre-flight short-circuit (which required `detected.Agent !=
+AgentUnknown` to trigger self-driven) didn't fire. The agentic driver ran,
+made one sampling call, and got `-32601`.
+
+### Fixed
+
+- **`internal/possess/driver.go`** — new sentinel
+  `ErrHostSamplingUnsupported`. When the first `ChatWithTools` call
+  surfaces `ErrSamplingUnsupported`, the driver returns this sentinel
+  wrapped instead of letting the error propagate as generic.
+
+- **`cmd/radiant/cmd_mcp_possess.go::routeAgenticErr`** — new helper
+  inspects the agentic driver's error. Sentinel match → route to
+  `runSelfDrivenPossess` with reason `"sampling unsupported mid-run
+  (driver fallback v3.7.1)"`, persist the probe evidence, return success.
+  Any other error propagates unchanged.
+
+- **`runPossessWithBackend`** — driver call site now wraps the helper.
+  Pre-flight short-circuit path is unchanged (still requires positive
+  `detected.Agent` to skip sampling; an open follow-up described below
+  relaxes this).
+
+### Tests added
+
+In `cmd/radiant/cmd_mcp_possess_test.go`:
+
+- `TestRouteAgenticErr_FallsBackOnSamplingUnsupported` — sentinel
+  triggers the self-driven scaffold; asserts `specs/*/spec.md` exists.
+- `TestRouteAgenticErr_PropagatesUnrelatedErrors` — non-sentinel
+  errors do NOT silently downgrade.
+
+Hand-rolled integration test (in `internal/possess/driver_test.go`)
+that runs `runPossessWithBackend` with a backend stub returning
+`ErrSamplingUnsupported` on every `ChatWithTools` call. Pre-fix:
+state.json shows `discover: status=error`. Post-fix: state.json shows
+all 4 phases done via self-driven fallback; workdir lands with 196
+files including `spec.md`, `tasks.md`, `CONTEXT.md`, `handoff.md`,
+`verify.md` with `[host-agent: fill in …]` markers.
+
+### Verified
+
+- `go test ./...` — 31 packages PASS, 0 FAIL.
+- `go test ./internal/possess/ ./cmd/radiant/` — 5 regression tests PASS:
+    - `TestDriverRunsToolsAndStopsOnVerdict` (v3.7.0 happy path)
+    - `TestDriverFallsBackWhenModelNeverCallsTools` (v3.7.0)
+    - `TestRunPossessWithBackendFallsBackToSelfDriven` (v3.6.x)
+    - `TestRouteAgenticErr_FallsBackOnSamplingUnsupported` (v3.7.1)
+    - `TestRouteAgenticErr_PropagatesUnrelatedErrors` (v3.7.1)
+- `make smoke` — 17/17 OK (whitelist accepts `v3.7.1`).
+- Hand-traced the exact failing scenario from the 23:44 Codex run:
+  `--workdir` on `/Users/henrique/Downloads/gpt-5-codex`-style
+  layout → 196 files populated, no `discover: error` phase.
+
+### Diagnostic pattern (carried forward)
+
+Whenever a fallback bug ships, write a hand-rolled integration test
+that reproduces the *exact* failing scenario from production —
+the bug class from the prior round (`v3.5.1` `-32601`) was
+documented in `internal/llm/sampling.go` and the memory but no
+test exercised the agentic path end-to-end. v3.7.1 closes that
+test gap. Future "host-doesn't-support-X" failures get caught by
+the same pattern.
+
+### Known follow-up (open, NOT in 3.7.1)
+
+- **Pre-flight over-reliance on positive detection.** Today
+  `runPossessWithBackend` only routes to self-driven when
+  `detected.Agent != AgentUnknown && ResolveSupport(detected).
+  Supports == false && probed`. When Detect returns AgentUnknown
+  (e.g. MCP subprocess with truncated env), the pre-flight skips
+  and the driver runs. v3.7.1 catches the failure at the
+  sentinel level — works in practice. The cleaner fix is a
+  pre-flight that doesn't require positive detection:
+  "if ANY probe cache row says supports=false, OR ANY agent in
+  knownSamplingUnsupported would land here, route to
+  self-driven regardless of detected.Agent". Tracked for v3.7.2.
+
+- **`setup-mcp --pass-env=` flag.** Lets the host agent enumerate
+  env vars that should propagate to the `radiant mcp serve`
+  subprocess. Codex / Claude Code / OpenCode would each pass
+  their respective agent identifier env. Tracked for v3.7.2.
+
+### Operational rule (carried forward)
+
+Multi-stage fallbacks need explicit sentinels AND `errors.Is`
+matches in the caller. The driver returning
+`ErrHostSamplingUnsupported` instead of a generic error, AND
+the caller refusing to silently downgrade on anything else —
+that's what closes the gap. Comments like "see § Why this is
+the only path" aren't enough; the type system has to enforce
+the contract.
+
 ## [3.7.0] — 2026-06-29 — Agentic tool-calling driver
 
 v3.6.x closed the **hollow stub** problem (a host that doesn't speak

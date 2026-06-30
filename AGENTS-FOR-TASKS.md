@@ -49,6 +49,34 @@ still templated.
 internal mode is for CI. The self-driven path is the supported
 behaviour on hosts that don't sample.
 
+### Heads-up: when the agentic driver hits `-32601` (v3.7.1)
+
+v3.7.0 introduced an agentic tool-calling driver — the
+host's model can call `read_file`, `write_file`,
+`search_code`, `run_gate` natively via the MCP
+sampling wire format. **If your host advertises tools but
+its first sampling call returns JSON-RPC `-32601` mid-run**
+(this happens when the MCP subprocess can't see the agent's
+env vars, e.g. Codex CLI doesn't propagate `CODEX_HOME`),
+v3.7.1 automatically falls back to the self-driven scaffold
+mode. The workdir still lands with `spec.md`, `tasks.md`,
+`scripts/run.sh`, `docs/README.md`,
+`.radiant-harness/{CONTEXT.md, handoff.md, verify.md}`
+populated — no more empty folders when the host rejects
+sampling.
+
+If the self-driven fallback triggers, you'll see
+`mode: self-driven (sampling unsupported mid-run (driver
+fallback v3.7.1))` in the harness output. Same code path
+as `mcp__radiant__possess` driven by a host agent with
+sampling — you'll get `[host-agent: fill in ...]`
+markers that you (or your next agent) replaces with real
+content.
+
+If you see this fall back fire on a host that *should*
+support sampling, check the host's MCP subprocess env first
+(it's a host integration issue, not a harness bug).
+
 
 
 ---
