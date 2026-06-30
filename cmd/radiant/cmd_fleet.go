@@ -117,10 +117,31 @@ func registerFleetCmds(root *cobra.Command) {
 			goal := args[0]
 			agentCount, _ := cmd.Flags().GetInt("agents")
 
-			// `radiant fleet start` is always Full mode — fleet agents run
-			// autonomously with the operator's API key. For Light mode
-			// (MCP sampling), use `radiant mcp-serve` and let the host
-			// agent drive the fleet via sampling. No flag/env/config.
+			// Light-mode drop-in: a CLI invocation has no MCP
+			// transport into a host's sampling/createMessage
+			// surface, so the legacy Full-mode coordinator (which
+			// walks agent roles via LLM calls) cannot drive
+			// anything. Auto-route to the offline self-driven
+			// scaffold instead — it produces the canonical
+			// `.radiant-harness/CONTEXT.md` +
+			// `specs/0001-<slug>/{spec.md,tasks.md}` tree without
+			// empty `tasks: []` placeholders the v3.7.0 hollow-stub
+			// failure mode left behind.
+			if loopStartCLIDropIn() {
+				fmt.Fprintf(os.Stderr, "→ routing `radiant fleet start` to the offline self-driven scaffold (the requesting shell has no MCP-wired host).\n")
+				fmt.Fprintf(os.Stderr, "  The fleet coordinator needs a Full-mode API key to dispatch multi-agent work; for the\n")
+				fmt.Fprintf(os.Stderr, "  drop-in path we hand you the canonical 4-phase scaffold instead.\n\n")
+				_, lerr := runSelfDrivenPossess(context.Background(), cwd, goal, "standard", os.Stdout, "fleet start drop-in (no host)")
+				if lerr != nil {
+					return fmt.Errorf("self-driven fallback: %w", lerr)
+				}
+				return nil
+			}
+
+			// Full mode — fleet agents run autonomously with the
+			// operator's API key. Light mode falls through to
+			// runSelfDrivenPossess above.
+			_ = agentCount
 
 			runID := fmt.Sprintf("fleet-%d", time.Now().Unix())
 			store, err := fleet.NewStore(cwd, runID, goal)

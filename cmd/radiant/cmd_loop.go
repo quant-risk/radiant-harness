@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/quant-risk/radiant-harness/v3/internal/config"
+	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
 	"github.com/quant-risk/radiant-harness/v3/internal/llm"
 	"github.com/quant-risk/radiant-harness/v3/internal/loop"
 	"github.com/quant-risk/radiant-harness/v3/internal/schedule"
@@ -35,6 +37,32 @@ func registerLoopCmds(root *cobra.Command) {
 			cfg, _ := config.Load(cwd)
 			if cfg == nil {
 				cfg = &config.Config{}
+			}
+
+			// Light-mode drop-in: if the shell has no MCP-wired host
+			// AND the user hasn't asked for sampling, route the loop
+			// start to the offline self-driven pipeline. Mirrors
+			// `radiant mcp possess`'s behaviour. The legacy
+			// hollow-stub failure mode (loop.Run → resolveBackends
+			// errors out → critical_failure with empty workdir) is
+			// documented in v3.7.0 release notes as the failure
+			// shape this auto-route was created to prevent from
+			// reaching the CLI surface.
+			if loopStartCLIDropIn() {
+				result, lerr := runLoopCLILight(context.Background(), cwd, goal, os.Stdout)
+				if lerr == nil {
+					if result != nil {
+						fmt.Printf("✓ Loop finished\n")
+						fmt.Printf("  Exit:       %s\n", result.ExitReason)
+						fmt.Printf("  Iterations: %d\n", result.Iterations)
+						fmt.Printf("  Elapsed:    %s\n", result.Elapsed.Round(time.Second))
+					}
+					return nil
+				}
+				// self-driven fell through; fall back to the legacy
+				// loop.Run path so the user gets whatever error
+				// message resolveBackends currently surfaces.
+				fmt.Fprintf(os.Stderr, "warning: self-driven fallback failed (%v); attempting full loop.Run…\n", lerr)
 			}
 
 			budget, _ := cmd.Flags().GetInt("budget")
@@ -307,6 +335,20 @@ the same env-var resolution as 'start' (OPENROUTER_API_KEY, etc.).`,
 			c, err := loop.LoadCycle(cwd)
 			if err != nil {
 				return fmt.Errorf("no loop state found (run `radiant loop start` first): %w", err)
+			}
+
+			// Same Light-mode drop-in policy as `loop start`: if the
+			// shell has no host wired and no API key was supplied,
+			// the offline scaffold is what the caller actually gets.
+			if loopStartCLIDropIn() {
+				fmt.Fprintf(os.Stderr, "note: `radiant loop resume` has no MCP-wired host in this shell —\n")
+				fmt.Fprintf(os.Stderr, "      handing you the offline self-driven scaffold instead. To resume a real\n")
+				fmt.Fprintf(os.Stderr, "      sampling run, wire MCP via `radiant setup-mcp --agent=<host>`.\n\n")
+				_, lerr := runSelfDrivenPossess(context.Background(), cwd, c.State().Goal, "standard", os.Stdout, "loop resume drop-in (no host)")
+				if lerr != nil {
+					return fmt.Errorf("self-driven fallback: %w", lerr)
+				}
+				return nil
 			}
 			state := c.State()
 
@@ -761,4 +803,84 @@ Examples:
 
 	traceCmd.AddCommand(traceShowCmd, traceListCmd)
 	root.AddCommand(traceCmd)
+}
+
+// ── Light-mode drop-in helpers for `radiant loop {start,resume}` ───────
+//
+// These exist so that the CLI surface ("`radiant loop start "ship X"`"
+// from a fresh shell) is never the hollow-stub that v3.7.0 documented.
+// When the user calls the loop CLI without an MCP-wired host AND no
+// API key, the offline self-driven pipeline runs in place of the
+// sampling loop. The output shape is identical to `radiant mcp possess`
+// on a fresh agent wiring: `.radiant-harness/CONTEXT.md`,
+// `specs/0001-<slug>/{spec.md,tasks.md}`, `scripts/run.sh`,
+// `docs/README.md`, `.radiant-harness/{handoff.md,verify.md}` —
+// populated deterministically and ready for the host agent to fill in.
+
+// loopStartCLIDropIn returns true when `radiant loop start` from a
+// shell should bypass the sampling loop engine and emit the offline
+// self-driven scaffold instead.
+func loopStartCLIDropIn() bool {
+	if os.Getenv("RADIANT_OPENROUTER_API_KEY") != "" ||
+		os.Getenv("OPENAI_API_KEY") != "" ||
+		os.Getenv("ANTHROPIC_API_KEY") != "" ||
+		os.Getenv("RADIANT_FORCE_SAMPLING") == "1" {
+		// Caller explicitly opted into the sampling loop. Don't
+		// interfere — `loop.Run` will handle the call (possibly
+		// surfacing a real error if keys are wrong, which is what
+		// the caller wants to debug).
+		return false
+	}
+	detected := hostdetect.New().Detect()
+	if detected.Agent == hostdetect.AgentUnknown {
+		return true
+	}
+	if _, probed := hostdetect.ResolveSupport(detected.Agent); probed {
+		// Even when supports=true, a direct shell call has no
+		// transport into the host's MCP server. Route to the
+		// offline scaffold rather than a guaranteed critical_failure.
+		_ = detected // for clarity; supports result is consumed in the unconditional scaffold
+		return true
+	}
+	// probed=true && supports=false → host confirmed offline
+	// (Codex today). Scaffold.
+	return true
+}
+
+// runLoopCLILight is the offline drop-in for `radiant loop start`.
+// It runs the deterministic 4-phase pipeline and reports back a
+// `*loop.RunResult` so the upstream Cmd prints the same `✓ Loop
+// finished…` footer the sampling path does.
+func runLoopCLILight(ctx context.Context, cwd, goal string, w io.Writer) (*loop.RunResult, error) {
+	reason := "no MCP-wired host agent reachable from this shell"
+	if detected := hostdetect.New().Detect(); detected.Agent != hostdetect.AgentUnknown {
+		reason = fmt.Sprintf("host %q detected but no MCP transport from a shell call", detected.Agent)
+	}
+	fmt.Fprintf(w, "→ routing `radiant loop start` to the offline self-driven scaffold.\n")
+	fmt.Fprintf(w, "  Reason: %s.\n", reason)
+	fmt.Fprintf(w, "  No API key is needed. To drive the sampling loop instead,\n")
+	fmt.Fprintf(w, "  wire MCP with `radiant setup-mcp --agent=<host>` and call from your agent.\n\n")
+
+	id := taskID(cwd, goal)
+	st, err := runSelfDrivenPossess(ctx, cwd, goal, "standard", w, reason)
+	if err != nil {
+		return nil, fmt.Errorf("self-driven fallback failed: %w", err)
+	}
+	if st == nil {
+		return nil, fmt.Errorf("self-driven fallback returned no state")
+	}
+	// Lazy-load the freshly-written state.json to compute elapsed +
+	// iteration count (4 phases for self-driven).
+	data, readErr := os.ReadFile(possessStatePath(cwd, id))
+	if readErr == nil {
+		var fresh possessState
+		_ = json.Unmarshal(data, &fresh)
+		elapsed := time.Now().UTC().Sub(fresh.StartedAt)
+		return &loop.RunResult{
+			ExitReason: loop.ExitSuccess, // self-driven always lands "done"
+			Iterations: len(fresh.Phases),
+			Elapsed:    elapsed,
+		}, nil
+	}
+	return &loop.RunResult{ExitReason: loop.ExitSuccess}, nil
 }

@@ -4,6 +4,43 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — drop-in CLI auto-route
+
+`radiant loop start`, `radiant run`, and `radiant fleet start` from a
+fresh shell (no MCP-wired host, no API key) now auto-route to the
+offline self-driven scaffold instead of failing with `resolveBackends`
+or printing a `tasks: []` placeholder fleet store. The output shape
+matches `radiant mcp possess` on a fresh agent wiring: canonical
+`.radiant-harness/CONTEXT.md` + `specs/0001-<slug>/{spec.md,tasks.md}`
++ `scripts/run.sh` + `docs/README.md` +
+`.radiant-harness/{handoff.md,verify.md}` — populated
+deterministically and ready for the next host agent to fill in.
+
+This closes the v3.7.0 hollow-stub failure mode projected onto the
+CLI surface in v3.7.1 (a fresh shell calling the documented
+commands would exit `critical_failure` with no artefacts; the
+auto-route produces the canonical scaffold in the working directory).
+
+### What changed
+
+- `cmd/radiant/main.go::publicCommands` extended to include
+  `loop`, `run`, `fleet`, `worktree`, `state`, `handoff`, `improve`
+  — these commands were gated by `RADIANT_INTERNAL=1` despite being
+  the headline examples in the README. Gating them prevented the
+  canonical "use from any shell" path from working.
+- `cmd/radiant/cmd_loop.go::loopStartCmd` + `loopResumeCmd` route
+  through a new `runLoopCLILight` helper when
+  `loopStartCLIDropIn()` returns true (no API key + no MCP host).
+- `cmd/radiant/cmd_fleet.go::fleetStartCmd` short-circuits to
+  `runSelfDrivenPossess` for the same conditions; the legacy
+  Full-mode Coordinator path remains for callers with API keys.
+- `cmd/radiant/cmd_run.go::runCmd` mirrors the same auto-route so
+  `radiant run <spec-dir>` from a fresh shell no longer fails with
+  "no API key provided".
+
+`RADIANT_FORCE_SAMPLING=1` and explicit API keys continue to bypass
+the auto-route and surface the real `loop.Run` / engine error path.
+
 ## [Unreleased] — profile-aware budgets
 
 `radiant loop start --profile X` now resolves all four budget caps

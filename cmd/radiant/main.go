@@ -31,11 +31,10 @@ var version = "3.7.1"
 // binary exposes without RADIANT_INTERNAL=1.
 //
 // Anything that would otherwise be used by a host agent to bypass the
-// MCP path (loop, run, fleet, scaffold-run helpers, telemetry, etc.)
-// lives in the internal complement and is gated by requireInternal().
+// MCP path lives in the internal complement and is gated by requireInternal().
 //
 // The commands listed here are safe for any caller — including a host
-// agent — to invoke directly:
+// agent or a fresh shell with no MCP wired — to invoke directly:
 //
 //   - **setup-mcp / doctor / host-info / mcp / update / test-case**:
 //     install + diagnose + serve + drive a case end-to-end with
@@ -50,24 +49,36 @@ var version = "3.7.1"
 //     project manifest. Lets the host agent discover methodology.
 //   - **context** (and ontology under it): assemble + compress
 //     CONTEXT.md. Lets the host agent narrow the project context.
+//   - **loop / run / fleet** (v3.7.x): the harness engine on the CLI.
+//     In Light mode the loop auto-routes to the self-driven scaffold
+//     pipeline when no host agent is wired (no API keys needed, no
+//     HTTP egress — the offline 4-phase pipeline produces a
+//     populated state.json + specs/0001-<slug>/ tree the host can
+//     then fill in). Gating these commands behind RADIANT_INTERNAL=1
+//     prevented the canonical "use from any shell" path the README
+//     documents from working — exposing them here is the v3.7.x
+//     fix that lands the drop-in.
+//   - **worktree / state / handoff / improve** (v3.7.x): low-risk
+//     project-state helpers, also safe for direct invocation.
 //
-// The dangerous surfaces — `loop start`, `run`, `fleet`, `eval`,
-// `models`, `train`, `predict`, `evaluate`, `drift`, `model`,
-// `profile`, `stats`, `causal-estimate`, `autodata`, `improve`,
-// `integrate`, `semantic`, `incident`, `bench`, `budget`, `improve`,
-// `worktree`, `state`, `handoff`, `tools`, `pricing`, `telemetry` —
-// stay gated. They either drive an LLM loop or touch project state in
-// ways that should remain under CI / harness control.
+// Everything else (`eval`, `models`, `train`, `predict`, `evaluate`,
+// `drift`, `model`, `profile`, `stats`, `causal-estimate`, `autodata`,
+// `integrate`, `semantic`, `incident`, `bench`, `budget`,
+// `tools`, `pricing`, `telemetry`) stays gated. Either they touch
+// project state in ways that benefit from explicit operator
+// opt-in, or they're legacy stubs.
 //
 // List rationale: a host agent (Codex / Claude Code / Hermes / …) that
 // gets a task in a project with radiant-harness installed should be
-// able to drive the SDD scaffolding, audit its own work, and load
-// skills — all without going through the MCP `radiant_possess` call,
-// which may not be wired (or supported) on every host.
+// able to drive the full harness loop, audit its own work, load
+// skills, and resume from any tool's POV without going through the
+// MCP `radiant_possess` call. Read AGENTS-FOR-TASKS.md § MCP tools
+// first; this list covers the case where the MCP wire isn't
+// available yet (new sandbox, hostile env, sync TUI deadlock).
 var publicCommands = map[string]bool{
 	// install + diagnose + serve
 	"setup-mcp": true, // wire MCP into a host agent
-	"mcp":       true, // serve + self-test + possess
+	"mcp":       true, // serve + self-test + possess + possess_async + run_gate + phase_status + skill_list/load
 	"host-info": true, // show detected host agent
 	"doctor":    true, // diagnose wiring + agent config
 	"update":    true, // self-update the binary
@@ -82,6 +93,17 @@ var publicCommands = map[string]bool{
 	// Methodology discoverability
 	"skills": true, // radiant skills list / validate / boot
 	"context": true, // radiant context detect / assemble / compress / ontology
+
+	// Harness engine on the CLI (the "use from any shell" path)
+	"loop":      true, // radiant loop {start|status|resume|cancel|history|export|diff|trace|list} — Light auto-routes to self-driven when no host wired
+	"run":       true, // radiant run <spec-dir> — one-shot harness run against a given spec
+	"fleet":     true, // radiant fleet {start|status|dispatch|summary|resume} — multi-agent coordinator
+
+	// Low-risk project-state helpers
+	"worktree": true, // isolated git worktree management
+	"state":    true, // show current session state (resume point)
+	"handoff":  true, // pause + write session state to a handoff file
+	"improve":  true, // self-improvement engine — analyse traces, propose skill edits
 }
 
 func main() {

@@ -211,6 +211,23 @@ func registerRunCmds(root *cobra.Command) {
 			specDir := args[0]
 			projectDir := "."
 
+			// Light-mode drop-in: a CLI invocation has no MCP
+			// transport, and the legacy Full-mode engine fails fast
+			// on "no API key provided". Auto-route to the offline
+			// self-driven scaffold instead so the user gets
+			// populated `.radiant-harness/CONTEXT.md` + the
+			// canonical specs/<slug>/{spec.md,tasks.md} tree.
+			if loopStartCLIDropIn() {
+				fmt.Fprintf(os.Stderr, "→ routing `radiant run` to the offline self-driven scaffold (the shell has no MCP-wired host or API key).\n")
+				fmt.Fprintf(os.Stderr, "  Set OPENROUTER_API_KEY (or --api-key) to drive the Full-mode engine, or\n")
+				fmt.Fprintf(os.Stderr, "  wire MCP with `radiant setup-mcp --agent=<host>` and call from your agent.\n\n")
+				_, lerr := runSelfDrivenPossess(context.Background(), projectDir, fmt.Sprintf("run %s", filepath.Base(specDir)), "standard", os.Stdout, "run drop-in (no host)")
+				if lerr != nil {
+					return fmt.Errorf("self-driven fallback: %w", lerr)
+				}
+				return nil
+			}
+
 			// Resolve model. With --auto-route the anchor model is the
 			// one the operator passed; the engine can swap it per
 			// phase using llm.AutoRoute.
