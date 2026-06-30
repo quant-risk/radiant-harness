@@ -33,9 +33,14 @@ type FleetStatus struct {
 // hasn't started, or finished and the file was cleaned up).
 // Alive=false with Pid>0 means "the pid file points at a dead
 // process" — the agent crashed without writing terminal status.
+//
+// v3.7.10: gains a `tree` field with the nested child pid
+// liveness. The flat `alive` + `pid` are kept for backwards
+// compat — old callers still see "the agent is alive/dead".
 type TaskLive struct {
-	Alive bool `json:"alive"`
-	Pid   int  `json:"pid,omitempty"`
+	Alive bool    `json:"alive"`
+	Pid   int     `json:"pid,omitempty"`
+	Tree  PidTree `json:"tree,omitempty"`
 }
 
 // AgentRecord tracks a single agent in the fleet.
@@ -153,6 +158,12 @@ func (c *Coordinator) Status() FleetStatus {
 	// CompleteTask). This distinguishes "agent is still running"
 	// from "agent died mid-execution" without requiring the host
 	// to re-read every pid file.
+	//
+	// v3.7.10 — also populate the nested PidTree for each task
+	// so the host can see "parent alive, child died" vs "parent
+	// alive, all children alive". Tree lookup uses the sidecar
+	// .children file (kept fresh by spawnAgent) so we don't
+	// have to fork pgrep on every Status() call.
 	if c.livenessDir != "" {
 		if alive, pid := dispatcherLiveness(c.livenessDir, ctx.RunID); pid > 0 || alive {
 			out.DispatcherAlive = alive
@@ -162,10 +173,21 @@ func (c *Coordinator) Status() FleetStatus {
 		for i := range ctx.Tasks {
 			t := &ctx.Tasks[i]
 			alive, pid := taskLiveness(c.livenessDir, ctx.RunID, t.ID)
-			out.TaskLiveness[t.ID] = TaskLive{Alive: alive, Pid: pid}
+			tree := TaskPidTree(c.livenessDir, ctx.RunID, t.ID)
+			out.TaskLiveness[t.ID] = TaskLive{Alive: alive, Pid: pid, Tree: tree}
 			if t.Status == TaskAssigned && pid > 0 && !alive {
+				// v3.7.10 — enrich the evidence with child
+				// status. If the parent died but children are
+				// still alive, we know the agent exited without
+				// reaping its helpers (orphaned). If children
+				// are also dead, it's a clean crash.
+				ev := fmt.Sprintf("agent pid %d not alive (liveness probe)", pid)
+				if len(tree.ChildrenPids) > 0 {
+					ev += fmt.Sprintf("; %d children recorded, %d still alive",
+						len(tree.ChildrenPids), tree.ChildCount)
+				}
+				t.Evidence = ev
 				t.Status = TaskCrashed
-				t.Evidence = fmt.Sprintf("agent pid %d not alive (liveness probe)", pid)
 			}
 		}
 	}

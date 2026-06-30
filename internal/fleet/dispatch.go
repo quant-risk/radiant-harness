@@ -348,8 +348,23 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 	// Now that we have a real pid, write it.
 	_ = writePidFile(pidPath, cmd.Process.Pid)
 	defer removePidFile(pidPath)
+	// Also remove the children sidecar so a follow-up
+	// mcp__radiant__fleet_status doesn't surface stale child
+	// pids from a previous run of the same task id.
+	defer removePidFile(taskPidChildrenPath(d.cfg.Workdir, runID, task.ID))
+
+	// v3.7.10 — periodically refresh the children sidecar so
+	// mcp__radiant__fleet_status can report nested liveness
+	// without re-forking pgrep on every call. Refresh interval
+	// is 5s — large enough that a busy fleet doesn't fork
+	// pgrep constantly, small enough that a host polling every
+	// 10s sees fresh data.
+	refreshDone := make(chan struct{})
+	go refreshChildPidsLoop(d.cfg.Workdir, runID, task.ID, cmd.Process.Pid, 5*time.Second, refreshDone)
 
 	err := cmd.Wait()
+	close(refreshDone) // tell the refresh goroutine to exit
+
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -364,5 +379,25 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 		ExitCode: exitCode,
 		Err:      err,
 		Elapsed:  time.Since(started),
+	}
+}
+
+// refreshChildPidsLoop polls pgrep -P at the given interval and
+// writes the result to the children sidecar file. Exits when
+// refreshDone is closed (which signals "the agent process has
+// exited, stop polling").
+func refreshChildPidsLoop(workdir, runID, taskID string, parentPid int, interval time.Duration, refreshDone <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// Initial snapshot before the first tick so the sidecar has
+	// content right away.
+	_ = writeChildPids(workdir, runID, taskID, ChildrenPidsForParent(parentPid))
+	for {
+		select {
+		case <-refreshDone:
+			return
+		case <-ticker.C:
+			_ = writeChildPids(workdir, runID, taskID, ChildrenPidsForParent(parentPid))
+		}
 	}
 }

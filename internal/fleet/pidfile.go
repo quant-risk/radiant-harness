@@ -37,6 +37,7 @@ package fleet
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -187,6 +188,169 @@ func dispatcherLiveness(workdir, runID string) (alive bool, pid int) {
 		return false, 0
 	}
 	return pidAlive(pid), pid
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v3.7.10 — nested pid tracking (recursive liveness).
+//
+// Each fleet task agent is a `radiant loop start <task>` subprocess
+// which itself can spawn helper subprocesses (e.g. a `git worktree
+// add` helper, a Python helper for one phase). When the agent dies,
+// the helper's pid may or may not be alive depending on whether
+// the helper was reparented to init (orphaned but still running)
+// or was killed by the agent's exit.
+//
+// A single `kill -0` on the agent pid only tells us whether the
+// AGENT died. It can't distinguish "agent died and helper is still
+// running" from "agent died and helper died too". This is the
+// gap v3.7.10 closes.
+//
+// Layout: alongside the parent pid file we write a sidecar
+// `.children` file containing the live child pids at the time of
+// last update. The dispatcher periodically calls
+// `RefreshChildPids` (or we read on demand) to keep the sidecar
+// fresh. Status() exposes ParentAlive + ChildrenAlive + children
+// pid list so a host can tell:
+//
+//   - parent alive, 0 children       → normal, agent running
+//   - parent alive, N children      → agent running with helpers
+//   - parent dead, 0 children       → agent died cleanly
+//   - parent dead, N children       → agent died; N helpers orphaned
+//   - parent alive, 1 child dead    → helper crashed but agent still alive
+//
+// pgrep -P is the source of truth for "what are my children right
+// now". The sidecar is a cache so a host reading status without
+// the dispatcher polling doesn't have to fork pgrep per call.
+// ─────────────────────────────────────────────────────────────────────
+
+const taskPidChildrenSuffix = ".children"
+
+// taskPidChildrenPath returns the sidecar children pid file path
+// for a fleet task agent.
+func taskPidChildrenPath(workdir, runID, taskID string) string {
+	return taskPidPath(workdir, runID, taskID) + taskPidChildrenSuffix
+}
+
+// PidTree describes the liveness of a fleet task agent and its
+// children. ParentAlive mirrors the v3.7.9 TaskLive.Alive field;
+// ChildrenAlive is true only when every recorded child pid is
+// alive (an empty Children list = trivially true).
+type PidTree struct {
+	ParentPid     int   `json:"parent_pid"`
+	ParentAlive   bool  `json:"parent_alive"`
+	ChildrenPids  []int `json:"children_pids,omitempty"`
+	ChildrenAlive bool  `json:"children_alive"`
+	// ChildCount is the number of currently-live children — when
+	// children have died and been reaped, this can be smaller
+	// than len(ChildrenPids). Useful for the "orphaned N helpers"
+	// diagnosis in the surfaced status string.
+	ChildCount int `json:"child_count"`
+}
+
+// writeChildPids serializes a slice of int pids to the children
+// sidecar file for a task agent. Empty slice writes an empty
+// file (so a follow-up read distinguishes "no children recorded"
+// from "children file missing").
+func writeChildPids(workdir, runID, taskID string, pids []int) error {
+	path := taskPidChildrenPath(workdir, runID, taskID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	// Use a simple newline-separated list — easier to grep / cat
+	// than JSON for operators diagnosing a crashed agent.
+	var sb strings.Builder
+	for _, p := range pids {
+		fmt.Fprintf(&sb, "%d\n", p)
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+// readChildPids returns the recorded children pid list. Returns
+// (nil, false) when the sidecar file doesn't exist (parent never
+// had children, or the sidecar was cleaned up with the parent).
+func readChildPids(workdir, runID, taskID string) ([]int, bool) {
+	data, err := os.ReadFile(taskPidChildrenPath(workdir, runID, taskID))
+	if err != nil {
+		return nil, false
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue // corrupt line; skip
+		}
+		pids = append(pids, pid)
+	}
+	return pids, true
+}
+
+// TaskPidTree returns the nested liveness for a single task.
+// (alive=false, pid=0) parent means the parent pid file is gone —
+// caller should treat the task as "not yet started or already
+// cleaned up".
+func TaskPidTree(workdir, runID, taskID string) PidTree {
+	parentAlive, parentPid := taskLiveness(workdir, runID, taskID)
+	if parentPid == 0 {
+		return PidTree{ParentAlive: false}
+	}
+	children, ok := readChildPids(workdir, runID, taskID)
+	if !ok || len(children) == 0 {
+		return PidTree{
+			ParentPid:     parentPid,
+			ParentAlive:   parentAlive,
+			ChildrenAlive: true, // vacuously true
+		}
+	}
+	aliveCount := 0
+	for _, p := range children {
+		if pidAlive(p) {
+			aliveCount++
+		}
+	}
+	return PidTree{
+		ParentPid:     parentPid,
+		ParentAlive:   parentAlive,
+		ChildrenPids:  children,
+		ChildrenAlive: aliveCount == len(children),
+		ChildCount:    aliveCount,
+	}
+}
+
+// ChildrenPidsForParent shells out to `pgrep -P <pid>` to find the
+// direct children of a process. Returns an empty slice on any
+// error (pgrep missing, no children, permission denied) — the
+// caller treats "no children found" and "couldn't probe" the
+// same way (an empty sidecar is a valid state).
+//
+// Implementation note: pgrep is portable across macOS / Linux
+// (same -P flag semantics on both). On Windows we'd need
+// `wmic` or `Get-CimInstance` — out of scope for v3.7.10; the
+// fleet pid tracking story is Linux/macOS only.
+func ChildrenPidsForParent(parentPid int) []int {
+	if parentPid <= 0 {
+		return nil
+	}
+	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPid)).Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
 }
 
 // WriteDispatcherPid writes the dispatcher pid file at

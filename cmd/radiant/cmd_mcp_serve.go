@@ -69,6 +69,19 @@ func isCharDevice(fd *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
+// envBool reads a boolean env var. Truthy values are "1", "true",
+// "yes", "on" (case-insensitive). Anything else is false.
+// Used for the async-subprocess opt-in precedence chain
+// (CLI flag > env var).
+func envBool(name string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func registerMCPServeCmd(root *cobra.Command) {
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
@@ -76,9 +89,11 @@ func registerMCPServeCmd(root *cobra.Command) {
 	}
 
 	var (
-		flagCwd            string
-		flagSamplingTimeout time.Duration
-		flagModelHint      string
+		flagCwd                  string
+		flagSamplingTimeout      time.Duration
+		flagModelHint            string
+		flagAsyncSubprocess      bool
+		flagFleetAsyncSubprocess bool
 	)
 
 	mcpServeCmd := &cobra.Command{
@@ -108,9 +123,27 @@ Flags:
                          start calls complete); 5 s when there is no
                          wired host. Override via RADIANT_SAMPLING_TIMEOUT.
 
-  --model-hint=<name>    MCP modelPreferences hint (suggestion only;
-                         the host may ignore). Empty by default.
-                         Environment RADIANT_MODEL has the same effect.`,
+--model-hint=<name>    MCP modelPreferences hint (suggestion only;
+                          the host may ignore). Empty by default.
+                          Environment RADIANT_MODEL has the same effect.
+
+  --async-subprocess       Opt into subprocess-backed async gate
+                          primitives (v3.7.7+). Same effect as
+                          RADIANT_ASYNC_SUBPROCESS=1 in the env.
+                          Use when the calling host gates
+                          tool-call completion on subprocess exit
+                          (sampling-backed sync hosts).
+
+  --fleet-async-subprocess Opt into subprocess-backed fleet async
+                          gate (v3.7.9+). Same effect as
+                          RADIANT_FLEET_ASYNC_SUBPROCESS=1 in the env.
+                          Use for CI hosts with hard MCP
+                          tool-call deadlines against large fleets.
+
+Precedence for both flags: CLI flag > env var > default (off).
+The CLI flag wins because the host agent's invocation context
+(a setup-mcp config or a CI script) is the authoritative
+signal of "this host actually needs subprocess mode".`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Sanity-check: if stdin is a TTY, the operator probably
 			// ran this from a terminal by accident. Warn but don't
@@ -171,8 +204,23 @@ Flags:
 				modelHint = os.Getenv("RADIANT_MODEL")
 			}
 
-			fmt.Fprintf(os.Stderr, "radiant mcp serve: sampling_timeout=%s, model_hint=%q, cwd=%s\n",
-				timeout, modelHint, mustGetwd())
+			// Resolve async subprocess opt-ins. CLI flag wins
+			// over env var — the host's invocation context is
+			// the authoritative signal. Setting either via the
+			// env var is still supported for setups that can't
+			// pass CLI flags (e.g. a setup-mcp config that
+			// predates v3.7.10).
+			asyncSubprocess := flagAsyncSubprocess || envBool("RADIANT_ASYNC_SUBPROCESS")
+			fleetAsyncSubprocess := flagFleetAsyncSubprocess || envBool("RADIANT_FLEET_ASYNC_SUBPROCESS")
+			if asyncSubprocess {
+				_ = os.Setenv("RADIANT_ASYNC_SUBPROCESS", "1")
+			}
+			if fleetAsyncSubprocess {
+				_ = os.Setenv("RADIANT_FLEET_ASYNC_SUBPROCESS", "1")
+			}
+
+			fmt.Fprintf(os.Stderr, "radiant mcp serve: sampling_timeout=%s, model_hint=%q, cwd=%s, async_subprocess=%t, fleet_async_subprocess=%t\n",
+				timeout, modelHint, mustGetwd(), asyncSubprocess, fleetAsyncSubprocess)
 
 			return runMCPServe(os.Stdin, os.Stdout, true, timeout, modelHint)
 		},
@@ -186,6 +234,14 @@ Flags:
 	mcpServeCmd.Flags().StringVar(&flagModelHint, "model-hint", "",
 		"Optional model hint suggested to the host (MCP modelPreferences.hint.name). "+
 			"Equivalent to $RADIANT_MODEL.")
+	mcpServeCmd.Flags().BoolVar(&flagAsyncSubprocess, "async-subprocess", false,
+		"Opt into subprocess-backed async gate primitives (v3.7.7+). "+
+			"Same effect as RADIANT_ASYNC_SUBPROCESS=1. "+
+			"Use when the calling host gates tool-call completion on subprocess exit.")
+	mcpServeCmd.Flags().BoolVar(&flagFleetAsyncSubprocess, "fleet-async-subprocess", false,
+		"Opt into subprocess-backed fleet async gate (v3.7.9+). "+
+			"Same effect as RADIANT_FLEET_ASYNC_SUBPROCESS=1. "+
+			"Use for CI hosts with hard MCP tool-call deadlines against large fleets.")
 
 	mcpCmd.AddCommand(mcpServeCmd)
 

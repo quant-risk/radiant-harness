@@ -16,6 +16,7 @@ import (
 
 func registerDoctorCmd(root *cobra.Command) {
 	var flagMCP bool
+	var flagAsyncHost bool
 	doctorCmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose the radiant environment — MCP wiring, git, worktrees, zero-HTTP guarantee",
@@ -38,18 +39,31 @@ radiant server is registered, whether sampling is enabled (Hermes
 requires an explicit sampling: nested block), and what timeout values
 are configured.
 
+With --async-host (v3.7.10+), doctor probes whether the detected
+host would benefit from the subprocess-backed async gate primitives
+(RADIANT_ASYNC_SUBPROCESS=1 / --async-subprocess) and the fleet
+async subprocess mode (RADIANT_FLEET_ASYNC_SUBPROCESS=1 /
+--fleet-async-subprocess). Reports current opt-in status and the
+exact command-line flag to flip if opt-in is recommended.
+
 Note: the Light binary NEVER needs an API key. Inference is delegated to
 the host agent via MCP sampling/createMessage. The harness drives the
 loop; the host agent thinks.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if flagMCP {
+			switch {
+			case flagMCP:
 				return runDoctorMCP(cmd, os.Stdout)
+			case flagAsyncHost:
+				return runDoctorAsyncHost(cmd, os.Stdout)
 			}
 			return runDoctorGeneral(cmd, os.Stdout)
 		},
 	}
 	doctorCmd.Flags().BoolVar(&flagMCP, "mcp", false,
 		"Diagnose MCP host agent wiring (parses ~/.config/<agent>/... and reports sampling block status).")
+	doctorCmd.Flags().BoolVar(&flagAsyncHost, "async-host", false,
+		"Diagnose whether the current host benefits from subprocess-backed async gates "+
+			"(RADIANT_ASYNC_SUBPROCESS=1 / RADIANT_FLEET_ASYNC_SUBPROCESS=1). v3.7.10+.")
 	root.AddCommand(doctorCmd)
 }
 
@@ -434,6 +448,195 @@ func probeRadiantEntry(agent string, data []byte) (bool, bool, string, string, e
 		return true, false, "", "", nil
 	}
 	return false, false, "", "", nil
+}
+
+// asyncHostRecommendation is the diagnostic verdict for a single
+// host agent — does it benefit from subprocess-backed async gates?
+// `RecommendAsync` is true when the host is known to gate tool-call
+// completion on subprocess exit, or has a hard MCP tool-call deadline
+// that makes inline phase work risk timeout. `RecommendFleetAsync`
+// covers the fleet async subprocess mode (large fleets that exceed
+// the host's tool-call window).
+type asyncHostRecommendation struct {
+	Agent               hostdetect.AgentID
+	Confidence          int
+	RecommendAsync      bool
+	RecommendFleetAsync bool
+	Reason              string
+}
+
+// hostAsyncRecommendations is the v3.7.10 opt-in matrix. Each entry
+// records whether subprocess mode helps that host, with the reason.
+// `true` here means "opt-in is RECOMMENDED for this host" — the
+// inline path still works, but subprocess mode removes a real
+// failure mode. Updated as we collect real-world reproductions.
+//
+// The matrix is intentionally conservative: every entry is gated by
+// either (a) a documented host timeout window or (b) a real
+// reproduction. Adding a host requires a note explaining the
+// recommendation; without one the entry stays "false".
+var hostAsyncRecommendations = map[hostdetect.AgentID]asyncHostRecommendation{
+	hostdetect.AgentClaudeCode: {
+		RecommendAsync:      false, // no documented timeout pressure; inline OK
+		RecommendFleetAsync: false, // fleet inline finishes well within tool-call window
+		Reason:              "Claude Code: no known tool-call timeout pressure for inline phases; opt-in available but not required.",
+	},
+	hostdetect.AgentCursor: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Cursor: same as Claude Code.",
+	},
+	hostdetect.AgentHermes: {
+		RecommendAsync: true, // Hermes gates tool-call completion on subprocess exit (v3.7.6 known issue)
+		RecommendFleetAsync: false,
+		Reason: "Hermes TUI: 120s tool-call window; inline 4-phase loop completes in " +
+			"<500ms but Hermes still spawns a synchronous subprocess for " +
+			"each tool call, so opting in keeps work out of the TUI process tree.",
+	},
+	hostdetect.AgentCodex: {
+		RecommendAsync:      false, // Codex does not gate on subprocess exit
+		RecommendFleetAsync: false,
+		Reason:              "Codex: open shell subprocess model does not benefit from a second-level fork.",
+	},
+	hostdetect.AgentCline: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Cline: VS Code extension subprocess model — inline fine.",
+	},
+	hostdetect.AgentOpenCode: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "OpenCode: terminal-native; inline finishes before the host's read window.",
+	},
+	hostdetect.AgentVSCode: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "VS Code Copilot: same as Cursor.",
+	},
+	hostdetect.AgentMiniMaxCode: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "MiniMax Code: same as Claude Code.",
+	},
+	hostdetect.AgentWindsurf: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Windsurf: same as Cursor.",
+	},
+	hostdetect.AgentZed: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Zed: same as Cursor.",
+	},
+	hostdetect.AgentGeminiCLI: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Google Gemini CLI: terminal-native; inline fine.",
+	},
+	hostdetect.AgentKimiCLI: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "Kimi CLI: terminal-native; inline fine.",
+	},
+	hostdetect.AgentOpenClaw: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "OpenClaw: MCP-first; inline fine.",
+	},
+	hostdetect.AgentUnknown: {
+		RecommendAsync:      false,
+		RecommendFleetAsync: false,
+		Reason:              "No agent detected — cannot recommend.",
+	},
+}
+
+// runDoctorAsyncHost is the body of `radiant doctor --async-host`.
+// Detects the host, looks up the opt-in recommendation, and
+// reports the current state of both env vars + CLI flags. Designed
+// to be the single command an operator runs when a tool-call timeout
+// reproduces — the output is the exact flag to flip.
+func runDoctorAsyncHost(cmd *cobra.Command, w io.Writer) error {
+	det := hostdetect.New().Detect()
+
+	rec, ok := hostAsyncRecommendations[det.Agent]
+	if !ok {
+		// Defensive default for agents added after v3.7.10.
+		rec = asyncHostRecommendation{
+			Agent:  det.Agent,
+			Reason: "no entry in the opt-in matrix (newer than the matrix; default = no opt-in recommended).",
+		}
+	}
+	rec.Agent = det.Agent
+	rec.Confidence = det.Confidence
+
+	// Current opt-in status from this process's env.
+	asyncOn := envBool("RADIANT_ASYNC_SUBPROCESS")
+	fleetAsyncOn := envBool("RADIANT_FLEET_ASYNC_SUBPROCESS")
+
+	fmt.Fprintln(w, "radiant doctor --async-host")
+	fmt.Fprintln(w, strings.Repeat("─", 60))
+	fmt.Fprintf(w, "  %-26s  %s (confidence %d)\n", "agent", det.Agent, det.Confidence)
+	if !det.SupportsSampling && det.Agent != hostdetect.AgentUnknown {
+		fmt.Fprintf(w, "  %-26s  unknown (will verify at first sampling call)\n", "sampling capability")
+	} else if det.Agent != hostdetect.AgentUnknown {
+		fmt.Fprintf(w, "  %-26s  yes\n", "sampling capability")
+	}
+	fmt.Fprintf(w, "  %-26s  %t (RADIANT_ASYNC_SUBPROCESS)\n", "loop async subprocess (env)", asyncOn)
+	fmt.Fprintf(w, "  %-26s  %t (RADIANT_FLEET_ASYNC_SUBPROCESS)\n", "fleet async subprocess (env)", fleetAsyncOn)
+	fmt.Fprintln(w, strings.Repeat("─", 60))
+
+	// Verdict for loop async subprocess.
+	loopVerdict := "NOT RECOMMENDED"
+	if rec.RecommendAsync {
+		loopVerdict = "RECOMMENDED"
+		if asyncOn {
+			loopVerdict = "ALREADY ON"
+		}
+	} else if asyncOn {
+		loopVerdict = "OPTED-IN (no harm)"
+	}
+	fmt.Fprintf(w, "  loop async subprocess:    %s\n", loopVerdict)
+	fmt.Fprintf(w, "    %s\n", rec.Reason)
+
+	// Verdict for fleet async subprocess.
+	fleetVerdict := "NOT RECOMMENDED"
+	if rec.RecommendFleetAsync {
+		fleetVerdict = "RECOMMENDED"
+		if fleetAsyncOn {
+			fleetVerdict = "ALREADY ON"
+		}
+	} else if fleetAsyncOn {
+		fleetVerdict = "OPTED-IN (no harm)"
+	}
+	fmt.Fprintf(w, "  fleet async subprocess:  %s\n", fleetVerdict)
+	if rec.RecommendFleetAsync {
+		fmt.Fprintf(w, "    %s\n", rec.Reason)
+	} else {
+		fmt.Fprintf(w, "    no documented CI host reproducing a fleet cross-process need yet.\n")
+		fmt.Fprintf(w, "    if you have one, file an issue or send the traceback to the maintainers.\n")
+	}
+
+	fmt.Fprintln(w, strings.Repeat("─", 60))
+
+	// Action line — the exact CLI flag to flip if the operator
+	// agrees with the recommendation.
+	if rec.RecommendAsync && !asyncOn {
+		fmt.Fprintf(w, "  → opt in:  radiant mcp serve --async-subprocess\n")
+		fmt.Fprintf(w, "    (or:    export RADIANT_ASYNC_SUBPROCESS=1)\n")
+	}
+	if rec.RecommendFleetAsync && !fleetAsyncOn {
+		fmt.Fprintf(w, "  → opt in:  radiant mcp serve --fleet-async-subprocess\n")
+		fmt.Fprintf(w, "    (or:    export RADIANT_FLEET_ASYNC_SUBPROCESS=1)\n")
+	}
+
+	// Exit non-zero only when a recommendation is unmade: the
+	// operator wants the diagnostic to surface the gap. When
+	// everything is already on or the recommendation is "no",
+	// exit 0 — there's nothing to fix.
+	if (rec.RecommendAsync && !asyncOn) || (rec.RecommendFleetAsync && !fleetAsyncOn) {
+		return fmt.Errorf("doctor --async-host: opt-in recommended but not enabled")
+	}
+	return nil
 }
 
 // tomlUnmarshal is a tiny stub — pulls the [mcp_servers] section out of a

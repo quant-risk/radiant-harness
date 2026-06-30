@@ -65,11 +65,12 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 			},
 			Required: []string{"task"},
 		}},
-		{Name: "radiant_phase_status", Description: "Return the current state of a radiant_possess run by task_id (the 16-char prefix shown in the harness trace).", InputSchema: mcpInputSchema{
+		{Name: "radiant_phase_status", Description: "Return the current state of a radiant_possess run by task_id (the 16-char prefix shown in the harness trace). v3.7.8+ adds subprocess_alive + subprocess_pid so the host can distinguish 'phase still running' from 'subprocess crashed without writing an error'. For long-running runs, spawn `radiant phase watch <task-id>` as a subprocess and tail its stdout — the MCP transport itself does not support streaming responses.", InputSchema: mcpInputSchema{
 			Type: "object",
 			Properties: map[string]mcpPropertyDef{
 				"task_id": {Type: "string", Description: "16-char task ID returned by radiant_possess."},
 				"workdir": {Type: "string", Description: "Project directory (default: agent's CWD)."},
+				"watch": {Type: "boolean", Description: "Informational only. The MCP tool always returns a single snapshot; for streaming, spawn `radiant phase watch <task-id>` as a subprocess and tail its stdout. The flag exists so a host's intent is observable in logs."},
 			},
 			Required: []string{"task_id"},
 		}},

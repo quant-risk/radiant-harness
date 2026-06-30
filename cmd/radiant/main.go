@@ -140,6 +140,7 @@ func main() {
 
 	// Loop engine
 	registerLoopCmds(root)  // radiant loop (start, status, resume, …) + trace
+	registerPhaseWatchCmd(root) // radiant phase (status, watch) — ticket-based MCP runs (v3.7.10+)
 	registerRunCmds(root)   // radiant run, init, validate, bench, config, models, eval
 	registerFleetCmds(root) // radiant fleet + worktree + improve + budget
 
