@@ -4,6 +4,46 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — drop the `radiant_run` legacy alias
+
+The `mcp__radiant__run` MCP tool — kept as a **DEPRECATED** alias of
+`radiant_possess(task=goal)` since v3.7.2 — is **removed**. New code
+must call `mcp__radiant__possess`. Older hosts that still emit the
+old name now get a clear `-32602 unknown tool: radiant_run`
+response rather than a silent downgrade to a different code path.
+
+### Removed
+
+- Tool definition: `radiant_run` removed from the `tools/list` table
+  in `cmd_mcp_runtime.go`.
+- Switch case: removed from `callMCPToolLight` AND from the legacy
+  CLI-dispatcher path in `helpers.go`.
+- Helper functions `mcpRunFull` and `mcpRunWithBackendLight`
+  (now unreferenced; removed at the source-tree level in the next
+  pass — kept for this commit so the diff is reviewable).
+- All prose references in `cmd_*.go` docstrings and
+  `mcp_types.go` now point at `radiant_possess`.
+- `AGENTS-FOR-TASKS.md` § MCP tools: `radiant_run` row deleted.
+
+### Migration
+
+A host agent that was emitting `radiant_run(goal=…)` to drive
+possession must switch to `radiant_possess(task=…)`. Two-line
+edit at the host: replace the tool name and rename the argument
+key from `goal` to `task`. Behaviour is otherwise identical
+(returns a populated `state.json` under
+`.radiant-harness/state/possess-<task-id>/`).
+
+### Verified
+
+- `mcp self-test` exposes **6 tools** (was 7): `radiant_possess`,
+  `radiant_run_gate`, `radiant_possess_async`, `radiant_phase_status`,
+  `radiant_skill_list`, `radiant_skill_load`.
+- `make smoke` rc=0, `make test-agents` 12/12.
+- Calling the deleted `mcp__radiant__run` server-side returns the
+  expected `-32602 unknown tool: radiant_run` (test added to
+  `cmd_mcp_possess_test.go`).
+
 ## [3.7.2] — 2026-06-30 — Close the drop-in install gap
 
 Three install-path bugs reproduced on the 2026-06-29 drop-in rehearsal

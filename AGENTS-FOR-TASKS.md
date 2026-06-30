@@ -210,7 +210,6 @@ post-mortem that led to this design.
 | `radiant_skill_load` | Read one bundled skill's `SKILL.md` + `frontmatter.yaml`. | `name: string` (required) |
 | **`radiant_possess`** | The main call: drives the user's task through discover → plan → execute → verify. | `task: string` (required, verbatim from user) · `workdir?: string` (absolute path, default = agent CWD) · `profile?: "lean" \| "standard" \| "thorough"` (default `standard`) |
 | `radiant_phase_status` | Inspect / resume tracking of a `radiant_possess` run. | `task_id: string` (16-char prefix from the trace) · `workdir?: string` |
-| `radiant_run` | **DEPRECATED alias.** Same as `radiant_possess(task=goal)`. Kept for older hosts. Do not call this in new code. | same as above, plus deprecated `max_iter` / `max_cost` / `max_time` (currently ignored) |
 
 ### Typical workflow
 
@@ -231,7 +230,6 @@ post-mortem that led to this design.
 | `radiant_skill_load` | Read one bundled skill's `SKILL.md` + `frontmatter.yaml`. | `name: string` (required) |
 | **`radiant_possess`** | The main call: drives the user's task through discover → plan → execute → verify. | `task: string` (required, verbatim from user) · `workdir?: string` (absolute path, default = agent CWD) · `profile?: "lean" \| "standard" \| "thorough"` (default `standard`) |
 | `radiant_phase_status` | Inspect / resume tracking of a `radiant_possess` run. | `task_id: string` (16-char prefix from the trace) · `workdir?: string` |
-| `radiant_run` | **DEPRECATED alias.** Same as `radiant_possess(task=goal)`. Kept for older hosts. Do not call this in new code. | same as above, plus deprecated `max_iter` / `max_cost` / `max_time` (currently ignored) |
 
 ### Typical workflow
 

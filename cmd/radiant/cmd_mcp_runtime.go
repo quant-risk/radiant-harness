@@ -13,18 +13,16 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/quant-risk/radiant-harness/v3/internal/llm"
-	"github.com/quant-risk/radiant-harness/v3/internal/loop"
 	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
-// MCP server. Single tool: radiant_run (host-agent driven via
-// sampling/createMessage). No HTTP LLM, no API keys.
+// MCP server. Seven bounded primitives + one driver-driven possess entry
+// point. No HTTP LLM, no API keys.
 func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout time.Duration, modelHint string) error {
 	d := &mcpDispatcher{}
 	if samplingMode {
@@ -86,19 +84,6 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 				"name": {Type: "string", Description: "Skill name (e.g. credit-risk, ml, regulatory). Required."},
 			},
 			Required: []string{"name"},
-		}},
-		// ----- legacy alias (kept for back-compat) ------
-		{Name: "radiant_run", Description: "DEPRECATED alias for radiant_possess(task=goal). Kept so older hosts keep working. Use radiant_possess in new code.", InputSchema: mcpInputSchema{
-			Type: "object",
-			Properties: map[string]mcpPropertyDef{
-				"goal":     {Type: "string", Description: "Alias for `task`."},
-				"task":     {Type: "string", Description: "The user's original task prompt."},
-				"profile":  {Type: "string", Description: "Execution profile: lean | standard | thorough (default: standard)"},
-				"max_iter": {Type: "number", Description: "Max iterations (default 20) — currently ignored, kept for API stability"},
-				"max_cost": {Type: "string", Description: "Dollar cap, e.g. '2.00' — currently ignored"},
-				"max_time": {Type: "string", Description: "Wall-clock cap, e.g. '10m' — currently ignored"},
-			},
-			Required: []string{"task"},
 		}},
 	}
 
@@ -200,9 +185,6 @@ func callMCPToolLight(name string, args json.RawMessage, d *mcpDispatcher) mcpRe
 	case "radiant_run_gate":
 		// v3.7.2-prep stub. Real subprocess wiring in PR-B.
 		return mcpRunGate(args)
-	case "radiant_run":
-		// back-compat: treat `goal` and `task` interchangeably
-		return mcpRunWithBackendLight(args, d.backend())
 	case "radiant_phase_status":
 		return mcpPhaseStatus(args)
 	case "radiant_skill_list":
@@ -211,66 +193,6 @@ func callMCPToolLight(name string, args json.RawMessage, d *mcpDispatcher) mcpRe
 		return mcpSkillLoad(args)
 	}
 	return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
-}
-
-func mcpRunWithBackendLight(args json.RawMessage, backend llm.Backend) mcpResponse {
-	var a struct {
-		Goal    string `json:"goal"`
-		Profile string `json:"profile"`
-		Model   string `json:"model"`
-		MaxIter int    `json:"max_iter"`
-		MaxCost string `json:"max_cost"`
-		MaxTime string `json:"max_time"`
-	}
-	_ = json.Unmarshal(args, &a)
-	if a.Goal == "" {
-		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "radiant_run: goal is required"}}
-	}
-	if a.Profile == "" {
-		a.Profile = "standard"
-	}
-	modelID := a.Model
-	if modelID == "" {
-		modelID = os.Getenv("RADIANT_MODEL")
-	}
-	if modelID == "" {
-		modelID = "mcp-sampling"
-	}
-	maxIter := a.MaxIter
-	var maxDuration time.Duration
-	if a.MaxTime != "" {
-		maxDuration, _ = time.ParseDuration(a.MaxTime)
-	}
-	runID := "run-" + strconv.FormatInt(time.Now().Unix(), 10)
-	runCfg := loop.RunConfig{
-		Backend: backend,
-		Budget: loop.BudgetConfig{
-			MaxIter:     maxIter,
-			Profile:     loop.BudgetProfile(a.Profile),
-			MaxDuration: maxDuration,
-		},
-	}
-	result, err := loop.Run(context.Background(), "", runID, a.Goal, runCfg)
-	var b []byte
-	b = append(b, []byte(fmt.Sprintf("Run ID: %s\nGoal: %s\nModel: %s (sampling)\n\n", runID, a.Goal, modelID))...)
-	if err != nil {
-		b = append(b, []byte(fmt.Sprintf("Loop failed: %v\n", err))...)
-	} else {
-		b = append(b, []byte(fmt.Sprintf("Exit: %s\nIterations: %d\nElapsed: %s\nTokens: %d\n",
-			result.ExitReason, result.Iterations,
-			result.Elapsed.Round(time.Second), result.TokensUsed))...)
-		if result.CostUSD > 0 {
-			b = append(b, []byte(fmt.Sprintf("Cost: $%.4f\n", result.CostUSD))...)
-		}
-	}
-	isErr := err != nil
-	return 	mcpResponse{
-		JSONRPC: "2.0",
-		Result: map[string]interface{}{
-			"content": []map[string]string{{"type": "text", "text": string(b)}},
-			"isError": isErr,
-		},
-	}
 }
 
 // mcpPossessWithBackend implements the new mcp__radiant__possess tool —

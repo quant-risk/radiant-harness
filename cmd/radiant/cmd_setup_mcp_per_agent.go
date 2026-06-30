@@ -278,7 +278,7 @@ func mergeHermesConfig(path string, entry mcpEntry, writeSamplingBlock bool) (st
 	he := hermesEntry{
 		Command: entry.Command,
 		Args:    entry.Args,
-		Timeout: 300, // outer MCP server timeout (long enough for a full radiant_run)
+		Timeout: 300, // outer MCP server timeout (long enough for a full radiant_possess)
 	}
 	if writeSamplingBlock {
 		he.Sampling = hermesSamplingEnabled()

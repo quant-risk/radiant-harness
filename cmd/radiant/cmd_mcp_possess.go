@@ -5,7 +5,7 @@ package main
 //
 // Design rationale (2026-06-29):
 //
-// The previous `radiant_run` exposed the entire autonomous loop as a single
+// Earlier versions wrapped the autonomous loop as a single
 // MCP tool call. That design was the *wrong* size for an MCP tool:
 //   - Real agents (Hermes, Codex GPT-5, OpenCode) failed because the
 //     hidden complexity (4 phases × N iterations × sampling round-trips)
@@ -31,9 +31,6 @@ package main
 //      bundled domain skills and inject the relevant ones into its own
 //      context *before* calling `radiant_possess`. This forces the
 //      skills to be visible to the agent.
-//
-//   4. The legacy `radiant_run(goal)` is kept as a thin alias for
-//      `radiant_possess(task=goal)` so existing setups keep working.
 //
 // All four primitives are non-blocking until the harness needs a sampling
 // call. The agent calls them in any order, paused or inter-leaved with

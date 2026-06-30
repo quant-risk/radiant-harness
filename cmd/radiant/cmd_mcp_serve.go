@@ -90,7 +90,7 @@ Hermes, Cursor, etc. The host agent pays for inference; radiant never
 needs an API key.
 
 Wire it into your agent with 'radiant setup-mcp', restart the agent,
-and any prompt that calls 'radiant_run' will drive the loop.
+and any prompt that calls 'radiant_possess' will drive the loop.
 
 Flags:
 

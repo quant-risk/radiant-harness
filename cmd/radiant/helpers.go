@@ -1282,7 +1282,7 @@ func boolStr(b bool) string {
 	return "disabled (opt-in)"
 }
 
-// mcpRunFull implements the radiant_run MCP tool.
+// mcpRunFull implements the radiant_possess MCP tool.
 // Calls loop.Run() directly in-process — no exec.Command, no PATH dependency.
 // When backend is non-nil (sampling mode), all LLM calls route through it
 // instead of the HTTP API — no API key required.
@@ -1298,7 +1298,7 @@ func mcpRunFull(args json.RawMessage, backend llm.Backend) mcpResponse {
 	}
 	_ = json.Unmarshal(args, &a)
 	if a.Goal == "" {
-		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "radiant_run: goal is required"}}
+		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "task is required (alias for goal, v3.7.x back-compat)"}}
 	}
 	if a.Profile == "" {
 		a.Profile = "standard"
@@ -1596,8 +1596,10 @@ func callMCPTool(name string, args json.RawMessage, d *mcpDispatcher) mcpRespons
 		if a.Plain {
 			argv = append(argv, "--plain")
 		}
-	case "radiant_run":
-		return mcpRunFull(args, d.backend())
+	// v3.7.x: the legacy `radiant_run` MCP tool was removed. New code
+	// must call `mcp__radiant__possess` instead. Older hosts that
+	// still emit `radiant_run` get a clear, fast `unknown tool`
+	// response rather than a silent downgrade.
 	default:
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 	}

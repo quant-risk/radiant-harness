@@ -68,13 +68,13 @@ type mcpError struct {
 // dispatch chain, replacing the former package-level activeSamplingBackend global.
 type mcpDispatcher struct {
 	// sampling is non-nil only when --sampling mode is active.
-	// When non-nil, radiant_run routes all LLM calls through it instead
+	// When non-nil, radiant_possess routes all LLM calls through it instead
 	// of the HTTP API. The host agent provides inference via
 	// sampling/createMessage responses delivered to Dispatch().
 	sampling *llm.SamplingBackend
 }
 
-// backend returns the llm.Backend to use for radiant_run calls, or nil
+// backend returns the llm.Backend to use for radiant_possess calls, or nil
 // in non-sampling mode (caller uses the HTTP path).
 func (d *mcpDispatcher) backend() llm.Backend {
 	if d == nil || d.sampling == nil {

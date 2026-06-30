@@ -28,7 +28,7 @@ func registerSetupMCPCmd(root *cobra.Command) {
 		Use:   "setup-mcp",
 		Short: "Register radiant as an MCP server in your agent's config",
 		Long: `Detects your agent and writes the MCP server entry so any prompt
-can invoke radiant_run automatically.
+can invoke radiant_possess automatically.
 
 Supported agents (auto-detected):
   Claude Code, Cursor, Windsurf, Zed, VSCode, Codex (OpenAI), OpenCode,

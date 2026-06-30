@@ -5,7 +5,7 @@ package main
 // wire-up is healthy. Used as a smoke test for regressions in the MCP
 // server state machine without needing a wired host agent.
 //
-// We deliberately do NOT call `tools/call radiant_run` in self-test mode,
+// We deliberately do NOT call `tools/call radiant_possess` in self-test mode,
 // because the harness loop would try to round-trip via sampling/createMessage
 // back to the host (us) and deadlock waiting for a sampling response we
 // never produce. Run a full MCP possession test (Python host) to exercise
@@ -85,7 +85,7 @@ type selfTestReport struct {
 // over stdio, and returns a structured report. Side effects: writes
 // human-readable output to stdout / stderr.
 //
-// We deliberately stop after tools/list. Calling tools/call radiant_run
+// We deliberately stop after tools/list. Calling tools/call radiant_possess
 // from a self-test would deadlock (the harness waits for a sampling
 // response we never produce).
 func runMCPSelfTest(ctx context.Context, exe string, stdout, stderr io.Writer) selfTestReport {
@@ -176,7 +176,7 @@ func runMCPSelfTest(ctx context.Context, exe string, stdout, stderr io.Writer) s
 	}
 	if len(report.ToolNames) == 0 {
 		report.ErrorMessage = "tools/list returned empty toolset"
-		report.Hint = "the binary should register at least one tool (radiant_run)"
+		report.Hint = "the binary should register at least one tool (radiant_possess)"
 		writeSelfTestReport(stdout, report, time.Since(start))
 		return report
 	}
