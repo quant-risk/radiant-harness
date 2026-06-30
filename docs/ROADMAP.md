@@ -31,7 +31,7 @@ state, and clear enough for another agent to complete real project work.
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| Backfill v3.7.3-v3.7.5 CHANGELOG entries | Honest release history | S | Maintainers | Git log for the period | Each tag has a CHANGELOG subsection with date + feature summary |
+| Add Gemini restart hint to `install.sh` | Consistent post-install UX | XS | Maintainers | v3.7.6 hostdetect already detects `gemini` | `--agent=gemini` prints a one-line restart instruction like the other 12 hosts |
 
 ## Next
 
