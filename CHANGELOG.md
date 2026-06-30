@@ -102,7 +102,49 @@ v3.7.11 follow-up work.
 
 ### Post-release validation
 
-TBD — pending release cut.
+2026-06-30 13:50 BRT — **15/15 PASS** after `v3.7.12` tag + release (12 base + 3 v3.7.12-specific surface checks):
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.12` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS |
+| E | `make test-agents` | PASS, 13/13 |
+| F | `make test-dropin` | PASS, against v3.7.12 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.12` clean (docs commit BEFORE tag → ideal ordering, no `-N-g<sha>` suffix) |
+| I | Fetch published SHA256SUMS | OK — basename-only format (no `dist/` prefix, learned from v3.7.11 process-learnings) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`a376e7bc...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.12`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.12`, `mcp self-test` PASS with 8 tools |
+| M | **`radiant phase redirect --list` on canonical v3.7.12 binary** | PASS — formatted table + NDJSON output both work; real captured output shows 2 redirects enumerated with OLD/NEXT/CREATED_AT/PATH columns + count line |
+| N | **`radiant phase follow` on canonical v3.7.12 binary** | PASS — streamed formatted summary (status, current phase, next-step hint, resume command, 4 phase icons), exited with max-poll error |
+| O | **`--help` surfaces reachable on canonical v3.7.12 binary** | PASS — `phase --help` lists status/watch/redirect/follow; `phase redirect --help` documents the protocol; `phase follow --help` describes the alias |
+
+**Surface checks (M/N/O) used the CANONICAL-INSTALLED binary at `~/.local/bin/radiant`** (v3.7.12 from `curl install.sh@tag | bash`). Real captured output from M:
+
+```
+$ radiant phase redirect --list
+OLD               NEXT              CREATED_AT            PATH
+--------------------------------------------------------------------------------
+v3712-old-1       v3712-new-1       2026-06-30T16:41:39Z  /tmp/v3712-list/.radiant-harness/state/possess-v3712-old-1/redirect.json
+v3712-old-2       v3712-new-2       2026-06-30T16:41:39Z  /tmp/v3712-list/.radiant-harness/state/possess-v3712-old-2/redirect.json
+2 redirect(s) in /tmp/v3712-list/.radiant-harness/state
+```
+
+```
+$ radiant phase redirect --list --json | jq -c '.'
+{"old_ticket":"v3712-old-1","next_ticket":"v3712-new-1","created_at":"2026-06-30T16:41:39Z","redirect_file":"..."}
+{"old_ticket":"v3712-old-2","next_ticket":"v3712-new-2","created_at":"2026-06-30T16:41:39Z","redirect_file":"..."}
+```
+
+**Process-learnings reinforced:**
+
+- **Docs commit BEFORE tag = clean version string.** v3.7.12 docs went in BEFORE `git tag v3.7.12`, so the rebuild reports `v3.7.12` clean (no `-N-g<sha>` suffix). Compare to v3.7.11 where the STATE.md commit slipped in after the initial tag (had to delete + retag). This is the order that works.
+- **Basename-only SHA256SUMS** (no `dist/` prefix) — `cd dist && shasum -a 256 * > SHA256SUMS`. v3.7.11 process-learning applied; `make test-dropin` passed first try.
 
 ## [3.7.11] — 2026-06-30 — --on-change-exit, --follow, docs/HOSTS.md
 
