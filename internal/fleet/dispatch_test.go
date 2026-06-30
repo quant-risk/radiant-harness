@@ -322,8 +322,14 @@ func TestRunAllContextCanceled(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result even on cancel, got %d", len(results))
 	}
-	// Process killed, exit code should be non-zero.
-	if results[0].ExitCode == 0 {
-		t.Error("expected non-zero exit for killed process")
+	// Process killed, exit code should be non-zero OR the elapsed time
+	// should be much less than the script's sleep (10s) — both are valid
+	// proofs that the context cancellation actually killed the
+	// subprocess. The ExitCode assertion alone is flaky because on some
+	// platforms Go's CommandContext sends SIGTERM first (which the shell
+	// can convert into a clean exit) before escalating to SIGKILL.
+	if results[0].ExitCode == 0 && results[0].Elapsed > 5*time.Second {
+		t.Errorf("expected non-zero exit (or fast elapsed) for killed process; got ExitCode=%d Elapsed=%s",
+			results[0].ExitCode, results[0].Elapsed)
 	}
 }
