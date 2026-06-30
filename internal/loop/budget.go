@@ -94,6 +94,78 @@ type BudgetConfig struct {
 	CostPer1K float64
 }
 
+// ProfileDefaults captures the full per-profile budget matrix
+// (token, iter, wall-clock, dollar). The implicit defaults in
+// NewBudget only wire MaxTokens per profile; this struct is the
+// single source of truth that the CLI consults when the user
+// passes `--profile X` without any explicit budget cap.
+//
+// Sizes are conservative for late-2026 / 2027 model context
+// windows. Bump if your host gets a larger default context.
+type ProfileDefaults struct {
+	MaxTokens   int
+	MaxIter     int
+	MaxDuration time.Duration
+	MaxCostUSD  float64
+}
+
+// profileDefaultsTable is the per-profile budget matrix. The key
+// is the BudgetProfile string; an unknown profile falls back to
+// ProfileStandard (the framework's default).
+var profileDefaultsTable = map[BudgetProfile]ProfileDefaults{
+	ProfileLean: {
+		MaxTokens: 10_000, MaxIter: 5,
+		MaxDuration: 1 * time.Minute, MaxCostUSD: 0.50,
+	},
+	ProfileStandard: {
+		MaxTokens: 50_000, MaxIter: 20,
+		MaxDuration: 10 * time.Minute, MaxCostUSD: 2.00,
+	},
+	ProfileThorough: {
+		MaxTokens: 200_000, MaxIter: 50,
+		MaxDuration: 30 * time.Minute, MaxCostUSD: 8.00,
+	},
+}
+
+// DefaultsForProfile returns the per-profile budget matrix for
+// the given profile. Unknown profiles resolve to Standard so a
+// typo doesn't silently enable unbounded runs.
+func DefaultsForProfile(p BudgetProfile) ProfileDefaults {
+	if def, ok := profileDefaultsTable[p]; ok {
+		return def
+	}
+	return profileDefaultsTable[ProfileStandard]
+}
+
+// ProfileBudgets reports the full table for `radiant budget list`
+// and CHANGELOG / docs surfaces. Order is stable so consumers can
+// range over the slice without worrying about map iteration.
+func ProfileBudgets() []ProfileBudget {
+	order := []BudgetProfile{ProfileLean, ProfileStandard, ProfileThorough}
+	out := make([]ProfileBudget, 0, len(order))
+	for _, p := range order {
+		def := profileDefaultsTable[p]
+		out = append(out, ProfileBudget{
+			Profile:     p,
+			MaxTokens:   def.MaxTokens,
+			MaxIter:     def.MaxIter,
+			MaxDuration: def.MaxDuration,
+			MaxCostUSD:  def.MaxCostUSD,
+		})
+	}
+	return out
+}
+
+// ProfileBudget carries a row of the per-profile budget table for
+// `radiant budget list`-style surfaces.
+type ProfileBudget struct {
+	Profile     BudgetProfile `json:"profile"`
+	MaxTokens   int           `json:"max_tokens"`
+	MaxIter     int           `json:"max_iter"`
+	MaxDuration time.Duration `json:"-"`
+	MaxCostUSD  float64       `json:"max_cost_usd"`
+}
+
 // NewBudget creates a Budget from a BudgetConfig.
 func NewBudget(cfg BudgetConfig) *Budget {
 	maxTokens := cfg.MaxTokens
@@ -104,12 +176,34 @@ func NewBudget(cfg BudgetConfig) *Budget {
 	}
 	maxIter := cfg.MaxIter
 	if maxIter <= 0 {
-		maxIter = 20 // sane default
+		maxIter = 20 // sane default; the profile matrix below overrides this per-profile
 	}
 	warnRatio := cfg.WarnRatio
 	if warnRatio <= 0 {
 		warnRatio = DefaultWarnRatio
 	}
+
+	// v3.7.x: per-profile defaults. When the user passes --profile
+	// (or it's resolved from config) and any of the budget caps
+	// are zero, fill them from the profile matrix. Existing knobs
+	// (--budget, --max-cost, --max-time, --max-iter) still win
+	// when set explicitly — only the zero/limbo fields are filled.
+	if cfg.Profile != "" {
+		def := DefaultsForProfile(cfg.Profile)
+		if maxTokens <= 0 {
+			maxTokens = def.MaxTokens
+		}
+		if maxIter <= 0 {
+			maxIter = def.MaxIter
+		}
+		if cfg.MaxDuration <= 0 {
+			cfg.MaxDuration = def.MaxDuration
+		}
+		if cfg.MaxCostUSD <= 0 {
+			cfg.MaxCostUSD = def.MaxCostUSD
+		}
+	}
+
 	return &Budget{
 		maxTokens:   maxTokens,
 		maxIter:     maxIter,

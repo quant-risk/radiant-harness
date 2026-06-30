@@ -4,6 +4,74 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — profile-aware budgets
+
+`radiant loop start --profile X` now resolves all four budget caps
+(tokens, iterations, wall-clock, dollar cost) from a per-profile
+matrix when those flags are not set explicitly. This replaces the
+legacy "0 = unlimited" semantics with bounded defaults — agents
+running with a profile can no longer accidentally run unbounded.
+
+### Profile matrix (the new defaults)
+
+| Profile    | MaxTokens | MaxIter | Wall-clock | Cost ceiling |
+|------------|------------|---------|------------|--------------|
+| `lean`     | 10,000     | 5       | 1m         | $0.50        |
+| `standard` | 50,000     | 20      | 10m        | $2.00        |
+| `thorough` | 200,000    | 50      | 30m        | $8.00        |
+
+Unknown / typoed profile names fall back to `standard`. This
+keeps a typo from silently enabling unbounded runs.
+
+### Behaviour change
+
+Before v3.7.x:
+
+```
+$ radiant loop start "ship the feature" --profile=lean
+# MaxDuration defaults to "unlimited", MaxCostUSD to "unlimited",
+# MaxIter defaults to 20 (hardcoded), MaxTokens to 10_000 (from
+# the legacy profileDefaults map of single int → int).
+```
+
+After v3.7.x:
+
+```
+$ radiant loop start "ship the feature" --profile=lean
+# MaxTokens=10000 MaxIter=5 MaxDuration=1m MaxCostUSD=$0.50 —
+# all four caps come from the profile matrix.
+```
+
+Explicit `--budget`, `--max-iter`, `--max-time`, `--max-cost`
+flags still win over the matrix (zero config filled per-axis).
+A new internal helper `internal/loop.ProfleDefaultsForProfile()`
+(or `ProfileBudgets()` for the full table) is reachable by
+`radiant budget list` style commands in a follow-up.
+
+### Added
+
+- `internal/loop/budget.go`:
+  - `ProfileDefaults` struct + `profileDefaultsTable` matrix.
+  - `DefaultsForProfile(p BudgetProfile) ProfileDefaults` (lookup
+    with `standard` fallback).
+  - `ProfileBudgets() []ProfileBudget` — stable-ordered slice
+    for `radiant budget list`-style surfaces.
+  - `NewBudget` extended: when `BudgetConfig.Profile` is set and
+    a cap is zero, the matrix fills it. Existing explicit caps
+    still win.
+- `internal/loop/budget_profile_test.go::TestProfileDefaultsMatrix`:
+  closed-table test that runs under both Light and Full
+  (`-tags with_full`).
+
+### Verified
+
+- `TestProfileDefaultsMatrix` PASS (closed-table monotonicity,
+  unknown-profile fallback).
+- `make smoke` rc=0.
+- Existing loop tests (`TestBudget_NewFromProfile`,
+  `TestBudget_NewFromExplicit`, etc.) all still PASS — the
+  behaviour change is additive when explicit caps are set.
+
 ## [Unreleased] — sync-host auto-routing closes the Hermes TUI deadlock
 
 `mcp__radiant__possess` is now safe to call from a synchronous TUI
