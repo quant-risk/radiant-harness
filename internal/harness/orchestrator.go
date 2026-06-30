@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"sync"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/gaterun"
-	"github.com/quant-risk/radiant-harness/internal/quality"
-	"github.com/quant-risk/radiant-harness/internal/spec"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/gaterun"
+	"github.com/quant-risk/radiant-harness/v3/internal/quality"
+	"github.com/quant-risk/radiant-harness/v3/internal/spec"
 )
 
 // Orchestrator manages the SDD harness pipeline.

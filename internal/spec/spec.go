@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 // scannerBufferSize is the max line length the parser tolerates. LLM-written

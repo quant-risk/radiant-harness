@@ -461,7 +461,7 @@ v3.6.0 fixes that. Two changes:
 Codex is hard-coded in `knownSamplingUnsupported` as of v3.6.0, so
 the very first possession call on a fresh Codex box routes to
 self-driven with no probe latency. Cline, OpenCode, Kimi, OpenClaw,
-VSCode, and `mavis-code` are still `declared=true` on faith — if
+VSCode, and MiniMax Code are still `declared=true` on faith — if
 you observe a similar `-32601` on one of them, add it to the
 `knownSamplingUnsupported` map in `internal/hostdetect/probe.go` and
 open a PR.

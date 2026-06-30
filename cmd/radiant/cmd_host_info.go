@@ -21,7 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/quant-risk/radiant-harness/internal/hostdetect"
+	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
 )
 
 func registerHostInfoCmd(root *cobra.Command) {

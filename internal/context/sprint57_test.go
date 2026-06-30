@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	radctx "github.com/quant-risk/radiant-harness/internal/context"
+	radctx "github.com/quant-risk/radiant-harness/v3/internal/context"
 )
 
 // helpers ──────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/hostdetect"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/possess"
+	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/possess"
 )
 
 // unsupportedSamplingBackend returns JSON-RPC -32601 for every sampling
@@ -156,5 +157,155 @@ func TestRouteAgenticErr_PropagatesUnrelatedErrors(t *testing.T) {
 	}
 	if st != nil {
 		t.Fatalf("st = %v, want nil (no fallback triggered)", st)
+	}
+}
+
+// TestRunGate_DiscoverOffline is the v3.7.2 regression test for the
+// `radiant_run_gate` MCP tool. The synchronous-host workaround no
+// longer returns the "in-development" stub — it actually runs the
+// chosen phase against the workdir, persists state.json, and writes
+// `.radiant-harness/CONTEXT.md` (the same artefact the LLM-driven path
+// produces). Host can poll `radiant_phase_status` mid-stream.
+func TestRunGate_DiscoverOffline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp := mcpRunGate(json.RawMessage(`{"phase":"discover","task":"ship the audit fix","workdir":"` + dir + `"}`))
+	if resp.Error != nil {
+		t.Fatalf("run_gate discover returned error: %s", resp.Error.Message)
+	}
+
+	// CONTEXT.md is the well-known artefact discover writes.
+	contextPath := filepath.Join(dir, ".radiant-harness", "CONTEXT.md")
+	if _, statErr := os.Stat(contextPath); statErr != nil {
+		t.Fatalf("discover did not write CONTEXT.md: %v", statErr)
+	}
+
+	// State file persisted.
+	id := taskID(dir, "ship the audit fix")
+	statePath := possessStatePath(dir, id)
+	if _, statErr := os.Stat(statePath); statErr != nil {
+		t.Fatalf("state.json not at %s: %v", statePath, statErr)
+	}
+
+	st, err := loadPossessState(dir, id)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if st.CurrentPhase != "discover" {
+		t.Errorf("CurrentPhase = %q, want discover", st.CurrentPhase)
+	}
+	pr := st.Phases["discover"]
+	if pr == nil || pr.Status != "done" {
+		t.Errorf("discover phase status = %v, want done", pr)
+	}
+}
+
+// TestRunGate_PlanThenExecute chains two phases against the same task
+// id so the second call picks up the spec dir written by the first.
+// This is the actual flow a synchronous host follows: 4 short MCP calls
+// instead of one 120s blocking one.
+func TestRunGate_PlanThenExecute(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp1 := mcpRunGate(json.RawMessage(`{"phase":"plan","task":"ship credit risk scoring","workdir":"` + dir + `"}`))
+	if resp1.Error != nil {
+		t.Fatalf("plan failed: %s", resp1.Error.Message)
+	}
+
+	specs, _ := filepath.Glob(filepath.Join(dir, "specs", "0001-*"))
+	if len(specs) == 0 {
+		t.Fatalf("plan did not create specs/0001-* directory; want one")
+	}
+	specMd := filepath.Join(specs[0], "spec.md")
+	if _, statErr := os.Stat(specMd); statErr != nil {
+		t.Fatalf("plan did not write spec.md: %v", statErr)
+	}
+
+	resp2 := mcpRunGate(json.RawMessage(`{"phase":"execute","task":"ship credit risk scoring","workdir":"` + dir + `"}`))
+	if resp2.Error != nil {
+		t.Fatalf("execute failed: %s", resp2.Error.Message)
+	}
+
+	id := taskID(dir, "ship credit risk scoring")
+	st, _ := loadPossessState(dir, id)
+	if st.Phases["plan"].Status != "done" || st.Phases["execute"].Status != "done" {
+		t.Errorf("after both phases: plan=%v execute=%v, want both done",
+			st.Phases["plan"], st.Phases["execute"])
+	}
+}
+
+// TestRunGate_RejectsInvalidPhase is the contract test that holds the
+// 4-phase invariant under v3.7.2, the way sentinel tests hold the
+// fallback invariant under v3.7.1. Anything outside {discover,plan,
+// execute,verify} must surface as -32602 (params invalid) and never
+// create a state.json side-effect.
+func TestRunGate_RejectsInvalidPhase(t *testing.T) {
+	dir := t.TempDir()
+	resp := mcpRunGate(json.RawMessage(`{"phase":"ship","task":"x","workdir":"` + dir + `"}`))
+	if resp.Error == nil {
+		t.Fatal("expected invalid phase to return error, got success")
+	}
+	if resp.Error.Code != -32602 {
+		t.Errorf("error code = %d, want -32602 (params invalid)", resp.Error.Code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".radiant-harness")); err == nil {
+		t.Errorf("rejected phase must not produce state side-effects, but .radiant-harness exists")
+	}
+}
+
+// TestPossessAsync_AllPhasesOffline runs the full 4-phase loop via
+// `radiant_possess_async` and confirms the harness lands with the
+// expected scaffold even when the host has zero sampling support.
+// This is the v3.7.2 fix for the Hermes TUI documented 120s deadlock.
+func TestPossessAsync_AllPhasesOffline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp := mcpPossessAsync(json.RawMessage(`{"task":"ship the feature","workdir":"` + dir + `","profile":"standard"}`))
+	if resp.Error != nil {
+		t.Fatalf("possess_async returned error: %s", resp.Error.Message)
+	}
+
+	// Diagnostic dump — only printed on failure to keep CI signal low.
+	dump := func() string {
+		id := taskID(dir, "ship the feature")
+		st, err := loadPossessState(dir, id)
+		if err != nil {
+			return fmt.Sprintf("load err: %v", err)
+		}
+		return fmt.Sprintf("CurrentPhase=%q Phases=%+v", st.CurrentPhase, st.Phases)
+	}
+
+	// All four phase records present and done.
+	id := taskID(dir, "ship the feature")
+	st, err := loadPossessState(dir, id)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	for _, phase := range []string{"discover", "plan", "execute", "verify"} {
+		pr := st.Phases[phase]
+		if pr == nil {
+			t.Errorf("phase %q not in state.json; state=%s", phase, dump())
+			continue
+		}
+		if pr.Status != "done" {
+			t.Errorf("phase %q status = %q, want done; state=%s", phase, pr.Status, dump())
+		}
+	}
+	// AND at least one spec.md wrote to disk from one of the phases.
+	specs, _ := filepath.Glob(filepath.Join(dir, "specs", "0001-*", "spec.md"))
+	if len(specs) == 0 {
+		t.Fatalf("possess_async produced no spec.md under specs/0001-*/")
 	}
 }

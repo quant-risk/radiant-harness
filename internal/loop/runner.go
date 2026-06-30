@@ -15,10 +15,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	radctx "github.com/quant-risk/radiant-harness/internal/context"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/semantic"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	radctx "github.com/quant-risk/radiant-harness/v3/internal/context"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/semantic"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
 // Ensure os.Stdout satisfies StreamWriter at compile time.

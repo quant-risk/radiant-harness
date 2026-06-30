@@ -5,7 +5,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/pricing"
+	"github.com/quant-risk/radiant-harness/v3/internal/pricing"
 	"github.com/spf13/cobra"
 )
 

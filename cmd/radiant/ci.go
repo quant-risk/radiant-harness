@@ -110,7 +110,7 @@ jobs:
         with:
           go-version: '1.22'
       - name: Install radiant
-        run: go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+        run: go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
       - name: Validate (spec/code alignment)
         run: |
 %s          radiant validate
@@ -142,7 +142,7 @@ radiant-validate:
   variables:
     RADIANT_API_KEY: $RADIANT_API_KEY
   before_script:
-    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+    - go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
   script:
     - radiant validate%s
 
@@ -150,7 +150,7 @@ radiant-audit:
   stage: radiant
   image: golang:1.22
   before_script:
-    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+    - go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
   script:
     - radiant audit
 
@@ -158,7 +158,7 @@ radiant-security:
   stage: radiant
   image: golang:1.22
   before_script:
-    - go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+    - go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
   script:
     - radiant security --fail-on-warning
 
@@ -193,7 +193,7 @@ jobs:
       - checkout
       - run:
           name: Install radiant
-          command: go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+          command: go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
       - run:
           name: Validate (spec/code alignment)
           command: |

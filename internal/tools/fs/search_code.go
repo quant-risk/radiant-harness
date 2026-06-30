@@ -12,8 +12,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/fsutil"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/fsutil"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // DefaultSearchMaxResults caps the number of matches returned per

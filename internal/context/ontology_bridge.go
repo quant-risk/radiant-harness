@@ -1,7 +1,7 @@
 package context
 
 import (
-	"github.com/quant-risk/radiant-harness/internal/ontology"
+	"github.com/quant-risk/radiant-harness/v3/internal/ontology"
 )
 
 // OntologySkillsForDomain returns the skills that govern the given domain

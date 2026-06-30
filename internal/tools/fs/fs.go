@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/fsutil"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/fsutil"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // MaxWriteBytes caps the content size accepted by write_file. The LLM

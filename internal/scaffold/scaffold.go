@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
 //go:embed all:templates

@@ -14,7 +14,7 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
 )
 
 // mcpTool is one tool exposed by the MCP server.

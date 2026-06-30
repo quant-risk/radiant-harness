@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // MCPTool is one tool advertised by an MCP server. Matches the

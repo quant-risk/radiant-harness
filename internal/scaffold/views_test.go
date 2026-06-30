@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
 // TestGenerateViewsForAgentKnownAgents checks that every adapter

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 	"gopkg.in/yaml.v3"
 )
 

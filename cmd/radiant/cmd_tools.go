@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // toolsCmd is the parent for `radiant tools ...`. Subcommands list

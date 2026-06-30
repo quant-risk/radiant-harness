@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/gaterun"
-	"github.com/quant-risk/radiant-harness/internal/policy"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/gaterun"
+	"github.com/quant-risk/radiant-harness/v3/internal/policy"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // MaxOutputBytes mirrors gaterun.DefaultMaxOutput. Kept as a constant

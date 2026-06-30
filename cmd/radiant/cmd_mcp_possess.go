@@ -53,12 +53,12 @@ import (
 	"strings"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/hostdetect"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/loop"
-	"github.com/quant-risk/radiant-harness/internal/possess"
-	"github.com/quant-risk/radiant-harness/internal/scaffold"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/loop"
+	"github.com/quant-risk/radiant-harness/v3/internal/possess"
+	"github.com/quant-risk/radiant-harness/v3/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -74,20 +74,30 @@ func taskID(workdir, task string) string {
 
 // possessState is the on-disk shape persisted between phases.
 type possessState struct {
-	TaskID            string             `json:"task_id"`
-	Workdir           string             `json:"workdir"`
-	Task              string             `json:"task"`
-	StartedAt         time.Time          `json:"started_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	CurrentPhase      string             `json:"current_phase"` // discover|plan|execute|verify|done
+	TaskID            string                 `json:"task_id"`
+	Workdir           string                 `json:"workdir"`
+	Task              string                 `json:"task"`
+	StartedAt         time.Time              `json:"started_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+	CurrentPhase      string                 `json:"current_phase"` // discover|plan|execute|verify|done
 	Phases            map[string]*phaseResult `json:"phases"`
-	Artifacts         []string           `json:"artifacts"`
-	BootstrapDone     bool               `json:"bootstrap_done"`
-	BootstrapMessages []string           `json:"bootstrap_messages"`
+	Artifacts         []string               `json:"artifacts"`
+	BootstrapDone     bool                   `json:"bootstrap_done"`
+	BootstrapMessages []string               `json:"bootstrap_messages"`
+	// v3.7.2: extended fields used by `radiant_run_gate` /
+	// `radiant_possess_async`. Persisted so a host can resume
+	// across multiple MCP calls.
+	Profile     string `json:"profile,omitempty"`     // lean|standard|thorough
+	SpecDir     string `json:"spec_dir,omitempty"`     // workdir-relative path to specs/NNNN-slug
+	Slug        string `json:"slug,omitempty"`        // kebab-case slug derived from the task
+	Cancelled   bool   `json:"cancelled,omitempty"`   // set by AsyncGate.Cancel
+	RunMode     string `json:"run_mode,omitempty"`    // self-driven | driver-fallback-v3.7.1 | etc.
+	LastPhaseAt time.Time `json:"last_phase_at,omitempty"`
 }
 
 type phaseResult struct {
 	Status    string    `json:"status"` // pending|in_progress|done|error
+	Phase     string    `json:"phase,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitempty"`
 	Output    string    `json:"output,omitempty"`

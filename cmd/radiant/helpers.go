@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/config"
-	"github.com/quant-risk/radiant-harness/internal/engine"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/loop"
-	"github.com/quant-risk/radiant-harness/internal/scaffold"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/config"
+	"github.com/quant-risk/radiant-harness/v3/internal/engine"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/loop"
+	"github.com/quant-risk/radiant-harness/v3/internal/scaffold"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
 func init() {

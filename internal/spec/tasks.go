@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 // headerRowRe matches the header / separator rows so we can skip them.

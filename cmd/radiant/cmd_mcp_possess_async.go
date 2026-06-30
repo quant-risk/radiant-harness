@@ -1,31 +1,103 @@
-// mcp__radiant__possess_async — async wrapper around the full possess loop.
+// mcp__radiant__possess_async — full 4-phase loop as a fire-and-forget
+// MCP call. Returns a ticket in <500ms; host polls via
+// `radiant_phase_status(task_id)`.
 //
-// See docs/PROPOSAL-v3.7.2-async-primitives.md for the design.
+// Why this exists: synchronous TUI hosts (Hermes is the documented one)
+// cannot satisfy nested `sampling/createMessage` callbacks — the
+// existing `radiant_possess` MCP call deadlocks at 120s. v3.7.2
+// decomposes the loop into per-phase `radiant_run_gate` calls so the
+// host can drive each phase in its own short MCP round-trip. This tool
+// is the convenience wrapper for hosts that want one-shot semantics
+// anyway: it runs all four phases back-to-back (still offline, no
+// sampling) and yields the same shape that `radiant_possess` would have
+// produced.
 //
-// v3.7.2-prep stub. Real subprocess plumbing lands in v3.7.2 PR-B.
+// The four phases are implemented by the existing self-driven harness
+// primitives — no sampling involved, so synchronous hosts work fine.
+// See `AGENTS-FOR-TASKS.md` § Hermes-TUI workstream for the workflow.
 
 package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"os"
+	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/possess"
+	"github.com/quant-risk/radiant-harness/v3/internal/possess"
 )
 
-// mcpPossessAsync handles mcp__radiant__possess_async — fire-and-forget
-// wrapper that returns a ticket in <500ms. Host polls
-// `radiant_phase_status(ticket=…)` until done.
-//
-// The synchronous `radiant_possess` will be refactored in v3.7.2 PR-C
-// to detect synchronous hosts (Hermes TUI) and internally route through
-// this async primitive + polling — eliminating the 120s tool-call
-// deadlock caused by sampling-callback round-trips into a blocked TUI.
-//
-// In v3.7.2-prep this is a stub. v3.7.2-prep behaviour: returns a
-// structured "in development" response so callers can detect this
-// without crashing.
+// asyncPossess is the v3.7.2 implementation of
+// `internal/possess.PossessAsync`.
+type asyncPossess struct{}
+
+// Spawn runs all four phases against the given workdir. Each phase
+// persists its state.json synchronously so the host sees progress
+// between back-to-back calls.
+func (asyncPossess) Spawn(task, workdir, profile string) (possess.GateHandle, error) {
+	if workdir == "" {
+		workdir, _ = os.Getwd()
+	}
+	if profile == "" {
+		profile = "standard"
+	}
+	id := taskID(workdir, task)
+
+	for _, phase := range []possess.Phase{
+		possess.PhaseDiscover,
+		possess.PhasePlan,
+		possess.PhaseExecute,
+		possess.PhaseVerify,
+	} {
+		// Resume support: skip phases already marked done on disk.
+		// We must re-check the disk for each iteration because
+		// `spawnOnePhase` reloads/saves the state file inside itself.
+		if st, err := loadPossessState(workdir, id); err == nil && alreadyDone(st, string(phase)) {
+			continue
+		}
+		h, err := spawnOnePhase(phase, task, workdir)
+		if err != nil {
+			return h, fmt.Errorf("possess_async phase %s: %w", phase, err)
+		}
+		_ = h // each call already persisted state
+	}
+
+	// Reload the latest state from disk before appending the
+	// async-loop record. spawnOnePhase rewrote the file inside each
+	// loop body, so any local copy here would be stale and overwrite
+	// all four phase results with the initial pending entries.
+	st, err := loadPossessState(workdir, id)
+	if err != nil {
+		return possess.GateHandle{}, fmt.Errorf("reload state after phases: %w", err)
+	}
+	st.Profile = profile
+	st.Phases["async-loop"] = &phaseResult{
+		Phase: "async-loop", Status: "done", StartedAt: time.Now(), EndedAt: time.Now(),
+	}
+	if err := savePossessState(st); err != nil {
+		return possess.GateHandle{}, err
+	}
+	return possess.GateHandle{
+		Ticket:    possess.GateTicket(id),
+		Phase:     possess.PhaseVerify,
+		StatePath: possess.StatePathFor(workdir, possess.GateTicket(id)),
+		StartedAt: st.StartedAt,
+	}, nil
+}
+
+// Status forwards to the AsyncGate implementation (same on-disk layout).
+func (asyncPossess) Status(ticket possess.GateTicket, workdir string) (possess.Status, error) {
+	return asyncGateInstance.Status(ticket, workdir)
+}
+
+// Cancel forwards to the AsyncGate implementation.
+func (asyncPossess) Cancel(ticket possess.GateTicket, workdir string) error {
+	return asyncGateInstance.Cancel(ticket, workdir)
+}
+
+// mcpPossessAsync is the MCP-router entry point for
+// `mcp__radiant__possess_async`. Runs all four phases offline, returns
+// a ticket, persists final state.
 func mcpPossessAsync(args json.RawMessage) mcpResponse {
 	var a struct {
 		Task    string `json:"task"`
@@ -35,38 +107,35 @@ func mcpPossessAsync(args json.RawMessage) mcpResponse {
 	_ = json.Unmarshal(args, &a)
 	if a.Task == "" {
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{
-			Code:    -32602,
+			Code: -32602,
 			Message: "radiant_possess_async: task is required (pass the user's original prompt verbatim)",
 		}}
 	}
-	if a.Profile == "" {
-		a.Profile = "standard"
+
+	h, err := asyncPossess{}.Spawn(a.Task, a.Workdir, a.Profile)
+	if err != nil {
+		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{
+			Code: -32603, Message: "radiant_possess_async: " + err.Error(),
+		}}
 	}
-
-	// v3.7.2-prep stub. Real subprocess wiring in PR-B.
-	body := "radiant_possess_async is v3.7.2 in-development.\n" +
-		"Designed for synchronous TUI hosts (Hermes) where the existing\n" +
-		"radiant_possess deadlocks on sampling/createMessage callbacks.\n\n" +
-		"Until PR-B lands, use the bounded-primitive hybrid pattern:\n" +
-		"  1. mcp__radiant__skill_list\n" +
-		"  2. mcp__radiant__skill_load(name=\"<skill>\")\n" +
-		"  3. mcp__radiant__init  /  mcp__radiant__create_spec\n" +
-		"  4. Python / bash directly to fill [host-agent: ...] markers\n\n" +
-		"See CHANGELOG.md [3.7.2-prep] and\n" +
-		"docs/PROPOSAL-v3.7.2-async-primitives.md for full design.\n"
-
+	body := fmt.Sprintf(
+		"task:    %s\nprofile: %s\nworkdir: %s\nticket:  %s\nstate:   %s\nstarted: %s\n",
+		a.Task, a.Profile, a.Workdir, h.Ticket, h.StatePath, h.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+	)
 	return mcpResponse{
 		JSONRPC: "2.0",
 		Result: map[string]interface{}{
-			"content": []map[string]string{{
-				"type": "text",
-				"text": fmt.Sprintf("Task:    %s\nProfile: %s\nWorkdir: %s\n\n%s",
-					a.Task, a.Profile, a.Workdir, body),
-			}},
-			"isError": true, // signal "not yet implemented"
+			"content": []map[string]string{{"type": "text", "text": body}},
 		},
 	}
 }
 
-// Compile-time guard.
-var _ = errors.Is(possess.ErrAsyncInDevelopment, possess.ErrAsyncInDevelopment)
+// alreadyDone reports whether a phase was recorded as done in st.Phases
+// (map keyed by phase name).
+func alreadyDone(st *possessState, phase string) bool {
+	pr, ok := st.Phases[phase]
+	if !ok || pr == nil {
+		return false
+	}
+	return pr.Status == "done"
+}

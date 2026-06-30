@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/webhook"
+	"github.com/quant-risk/radiant-harness/v3/internal/webhook"
 )
 
 func TestSend_PostsJSON(t *testing.T) {

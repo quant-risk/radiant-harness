@@ -15,14 +15,14 @@ import (
 	"sync"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/fsutil"
-	"github.com/quant-risk/radiant-harness/internal/gaterun"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/policy"
-	"github.com/quant-risk/radiant-harness/internal/quality"
-	"github.com/quant-risk/radiant-harness/internal/spec"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/fsutil"
+	"github.com/quant-risk/radiant-harness/v3/internal/gaterun"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/policy"
+	"github.com/quant-risk/radiant-harness/v3/internal/quality"
+	"github.com/quant-risk/radiant-harness/v3/internal/spec"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // gateAllowlist is the closed set of binaries the engine will allow

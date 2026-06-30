@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/policy"
+	"github.com/quant-risk/radiant-harness/v3/internal/policy"
 )
 
 // AgentID identifies a supported AI agent.

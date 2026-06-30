@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/casetest"
+	"github.com/quant-risk/radiant-harness/v3/internal/casetest"
 	"github.com/spf13/cobra"
 )
 

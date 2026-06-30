@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/worktree"
+	"github.com/quant-risk/radiant-harness/v3/internal/worktree"
 )
 
 // retryBackoff returns the wait duration for attempt n (0-based) using

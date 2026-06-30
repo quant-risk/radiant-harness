@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/slog"
+	"github.com/quant-risk/radiant-harness/v3/internal/slog"
 )
 
 func TestLogger_Info_WritesJSON(t *testing.T) {

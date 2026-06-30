@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/quality"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/quality"
 )
 
 // ── Integration Tests (simulate real-world usage) ──

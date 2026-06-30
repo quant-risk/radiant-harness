@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/scaffold"
+	"github.com/quant-risk/radiant-harness/v3/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 

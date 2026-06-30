@@ -1,4 +1,4 @@
-module github.com/quant-risk/radiant-harness
+module github.com/quant-risk/radiant-harness/v3
 
 go 1.22
 

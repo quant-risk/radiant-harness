@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 // allAgents is the canonical list of 6 supported IDE adapters.

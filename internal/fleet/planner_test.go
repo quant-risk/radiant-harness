@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/fleet"
-	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/fleet"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
 )
 
 // ── planHeuristic (nil client) ─────────────────────────────────────────────

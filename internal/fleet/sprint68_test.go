@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/fleet"
+	"github.com/quant-risk/radiant-harness/v3/internal/fleet"
 )
 
 // ── FleetStatus JSON tags ──────────────────────────────────────────────────

@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/fsutil"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/fsutil"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // MaxReadBytes caps the file size accepted by read_file. Symmetric

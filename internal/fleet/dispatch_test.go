@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/fleet"
+	"github.com/quant-risk/radiant-harness/v3/internal/fleet"
 )
 
 var dispatchTestCounter int64

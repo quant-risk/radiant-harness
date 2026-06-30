@@ -1,6 +1,6 @@
 package scaffold
 
-import radiant "github.com/quant-risk/radiant-harness/internal"
+import radiant "github.com/quant-risk/radiant-harness/v3/internal"
 
 // adapters is the registry of all supported agent adapters.
 var adapters = map[radiant.AgentID]*radiant.AgentAdapter{

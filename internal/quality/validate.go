@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
-	"github.com/quant-risk/radiant-harness/internal/gaterun"
-	"github.com/quant-risk/radiant-harness/internal/policy"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
+	"github.com/quant-risk/radiant-harness/v3/internal/gaterun"
+	"github.com/quant-risk/radiant-harness/v3/internal/policy"
 )
 
 // allowedGateBinaries is re-exported from internal/policy so existing

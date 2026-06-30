@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	radctx "github.com/quant-risk/radiant-harness/internal/context"
-	"github.com/quant-risk/radiant-harness/internal/ontology"
+	radctx "github.com/quant-risk/radiant-harness/v3/internal/context"
+	"github.com/quant-risk/radiant-harness/v3/internal/ontology"
 	"github.com/spf13/cobra"
 )
 

@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/boot"
-	"github.com/quant-risk/radiant-harness/internal/ontology"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	"github.com/quant-risk/radiant-harness/v3/internal/boot"
+	"github.com/quant-risk/radiant-harness/v3/internal/ontology"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 	"github.com/spf13/cobra"
 )
 

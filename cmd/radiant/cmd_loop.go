@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/config"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/loop"
-	"github.com/quant-risk/radiant-harness/internal/schedule"
-	"github.com/quant-risk/radiant-harness/internal/webhook"
+	"github.com/quant-risk/radiant-harness/v3/internal/config"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/loop"
+	"github.com/quant-risk/radiant-harness/v3/internal/schedule"
+	"github.com/quant-risk/radiant-harness/v3/internal/webhook"
 	"github.com/spf13/cobra"
 )
 

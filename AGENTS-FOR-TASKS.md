@@ -30,7 +30,7 @@ path](#why-this-is-the-only-path).
 ### Heads-up: self-driven scaffold mode (v3.6.0)
 
 If your host does NOT implement `sampling/createMessage` (Codex GPT-5
-first; Cline / OpenCode / Kimi / OpenClaw / VSCode / `mavis-code`
+first; Cline / OpenCode / Kimi / OpenClaw / VSCode / MiniMax Code
 next in line), `radiant_possess` will route to **self-driven scaffold
 mode** automatically — the same four phases run, but the harness
 emits deterministic Markdown templates (one per phase) with
@@ -161,8 +161,8 @@ curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/ins
 ```
 
 Replace `hermes` with whichever agent you are running inside:
-`claude` · `codex` · `cursor` · `hermes` · `mavis-code` · `opencode` ·
-`kimi` · `openclaw` · `windsurf` · `zed` · `cline` · `vscode-copilot`.
+`claude` · `codex` · `cursor` · `hermes` · `minimax` · `opencode` ·
+`kimi` · `openclaw` · `windsurf` · `zed` · `cline` · `vscode`.
 
 If you cannot tell which one you are, pass `--setup-mcp` to autodetect:
 

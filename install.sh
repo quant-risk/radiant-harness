@@ -41,7 +41,7 @@
 #
 # Flags:
 #   --agent=<name>     auto-wire MCP for this host (claude, codex, hermes,
-#                      cursor, mavis-code, …); pass --setup-mcp alias below
+#                      cursor, minimax, …); pass --setup-mcp alias below
 #   --setup-mcp        alias for --agent=<autodetected>; runs setup-mcp
 #                      against the detected host
 #   --self-for-agent   emit explicit restart + possession instructions at
@@ -65,6 +65,12 @@ set -euo pipefail
 REPO="${REPO:-quant-risk/radiant-harness}"
 PREFIX="${PREFIX:-/usr/local/bin}"
 VERSION="${RADIANT_VERSION:-}"
+# Initialised here so `set -u` does not trip on `${AGENT_NAME}` /
+# `${SELF_FOR_AGENT}` / `${WORKDIR}` reads further down. Each one is
+# filled in by the arg-parse loop above if the user passed it.
+AGENT_NAME="${AGENT_NAME:-}"
+SELF_FOR_AGENT="${SELF_FOR_AGENT:-0}"
+WORKDIR="${WORKDIR:-$PWD}"
 SETUP_MCP=0
 VERIFY=1
 DRY_RUN=0
@@ -101,12 +107,28 @@ run() {
 }
 
 # Resolve latest release tag via GitHub API. Uses curl; no jq, no gh, no xmllint.
+#
+# Note (v3.7.2): we previously piped the body through `tr -d '\r' |
+# grep -m1 '"tag_name"' | sed ...`. That pattern races — `grep -m1`
+# closes the pipe after the first match, which sends SIGPIPE to `tr`
+# mid-flight on multi-KB JSON bodies under `set -euo pipefail`, and the
+# entire script exits with rc=141 before any install step runs.
+# Reworked to keep the producer side alive until sed has consumed its
+# input. `<<<` here-string also avoids the subshell cost of `echo`.
 resolve_latest() {
   local url="https://api.github.com/repos/$REPO/releases/latest"
   local body
   body="$(curl -fsSL "$url")" || bail "failed to fetch latest release from $REPO"
-  # tag_name comes first in the JSON; extract the first quoted string.
-  echo "$body" | tr -d '\r' | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+  # tag_name is the first match in the GitHub response; print just the
+  # version string. `head -1` so a future response that mentions
+  # tag_name more than once does not pass two lines up.
+  local tag
+  tag="$(grep -m1 '"tag_name"' <<< "$body" \
+    | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+  if [ -z "$tag" ] || [ "$tag" = "$body" ]; then
+    bail "could not parse tag_name from GitHub API response"
+  fi
+  printf '%s\n' "$tag"
 }
 
 # ---- OS / arch detection (BSD + GNU coreutils) ------------------------------
@@ -142,6 +164,14 @@ if [ -z "$VERSION" ]; then
   VERSION="$(resolve_latest)"
   say "resolved latest release: $VERSION"
 else
+  # Normalise: GitHub release tags carry the leading `v` (e.g. v3.7.2).
+  # Accept either form so a user passing `3.7.2` or `v3.7.2` both
+  # land on the right asset URL. v3.7.2-prep was the documented
+  # breakage the audit-install script now catches.
+  case "$VERSION" in
+    v*) ;;
+    *)  VERSION="v$VERSION" ;;
+  esac
   say "using pinned version: $VERSION"
 fi
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/hostdetect"
+	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
 	"github.com/spf13/cobra"
 )
 

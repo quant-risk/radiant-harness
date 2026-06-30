@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/config"
+	"github.com/quant-risk/radiant-harness/v3/internal/config"
 )
 
 func writeConfig(t *testing.T, dir, content string) {

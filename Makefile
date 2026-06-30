@@ -1,5 +1,5 @@
 # Radiant Harness — Makefile
-.PHONY: build test lint clean install release smoke test-agents audit-skills audit-docs
+.PHONY: build test lint clean install release smoke test-agents audit-skills audit-docs audit-install
 
 # CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
 # "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
@@ -48,10 +48,11 @@ install: build
 
 # Smoke test: builds, runs setup-mcp --help, host-info, verifies zero
 # HTTP-LLM symbols, checks size.
-# Also runs make audit-skills + make audit-docs — drift detectors that
-# catch the doc-vs-binary class of bugs that v3.0.0 and v3.7.1 shipped.
-# A failure here means a docs-or-bundle reference is dangling.
-smoke: build audit-skills audit-docs
+# Also runs make audit-skills + make audit-docs + make audit-install
+# — drift detectors that catch the doc-vs-binary and install-flow bugs
+# that v3.0.0 and v3.7.1 shipped. A failure here means a docs-or-bundle
+# reference is dangling, or the install path stops being drop-in.
+smoke: build audit-skills audit-docs audit-install
 	./scripts/smoke-test.sh
 
 # Cross-agent install matrix (Sprint 5). Builds first, then for each of
@@ -73,3 +74,11 @@ audit-skills:
 # in `radiant --help` output. Closes the v3.0.0 doc-drift class.
 audit-docs: build
 	./scripts/audit-docs.sh
+
+# Audit: every install path documented in AGENTS-FOR-TASKS.md must
+# reach a working `radiant` binary. Closes the v3.7.2 drop-in gap
+# (install.sh SIGPIPE, AGENT_NAME unbound, INSTALL.md drift, go
+# module repath). Path C (`go install @latest`) SKIPs until the
+# module proxy re-indexes v3.x tags.
+audit-install: build
+	./scripts/audit-install.sh

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
 )
 
 // PlannerClient is the minimal interface Planner needs from an LLM client.

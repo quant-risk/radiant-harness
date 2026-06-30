@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 // ── Context Window Edge Cases ──

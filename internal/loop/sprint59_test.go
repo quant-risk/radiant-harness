@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quant-risk/radiant-harness/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
 )
 
 // ── RunConfig.AutoRoute defaults ───────────────────────────────────────────

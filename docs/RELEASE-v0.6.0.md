@@ -94,7 +94,7 @@ CI generates them per-tag).
 ## How to install this release
 
 ```bash
-go install github.com/quant-risk/radiant-harness/cmd/radiant@v0.6.0
+go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@v0.6.0
 ```
 
 Or download from the

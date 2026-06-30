@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/fsutil"
-	"github.com/quant-risk/radiant-harness/internal/gaterun"
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/fsutil"
+	"github.com/quant-risk/radiant-harness/v3/internal/gaterun"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // Note: tests for pathIsSafe now live in internal/fsutil. The engine

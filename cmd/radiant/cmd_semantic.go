@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/quant-risk/radiant-harness/internal/semantic"
+	"github.com/quant-risk/radiant-harness/v3/internal/semantic"
 	"github.com/spf13/cobra"
 )
 

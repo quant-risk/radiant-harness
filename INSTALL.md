@@ -6,10 +6,35 @@ no API key.
 ## Quick install (recommended)
 
 ```bash
-go install github.com/quant-risk/radiant-harness/cmd/radiant@v3.2.0
+curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash
 ```
 
-This installs the tagged release to `$GOPATH/bin` (usually `~/go/bin`).
+This downloads the latest tagged release, verifies the SHA256,
+and installs `radiant` to `/usr/local/bin/radiant` (configurable with
+`PREFIX=~/.local/bin`). One step, no API key, no daemon, no runtime
+dependencies.
+
+If you'd rather pin a specific release:
+
+```bash
+RADIANT_VERSION=v3.7.2 curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/install.sh | bash
+```
+
+The installer is idempotent; re-run after upgrading.
+
+### Go install (alternative)
+
+```bash
+go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
+```
+
+> **Note:** the Go module at `github.com/quant-risk/radiant-harness`
+> still carries the v0.x tag line on the proxy. `go install @latest`
+> on a fresh `GOPATH` therefore resolves to **v0.7.0** (the legacy
+> TypeScript-era build), not v3.7.x. Prefer the `curl | bash` install
+> above, or pin with `RADIANT_VERSION=v3.7.2` until the v3 module
+> line is republished.
+
 Make sure `$GOPATH/bin` is on your `$PATH`:
 
 ```bash
@@ -17,7 +42,7 @@ Make sure `$GOPATH/bin` is on your `$PATH`:
 export PATH="$PATH:$(go env GOPATH)/bin"
 
 # verify
-radiant --version       # → radiant 3.2.0
+radiant --version       # → radiant v3.7.2 (or whatever you installed)
 ```
 
 ## Download a release binary
@@ -98,7 +123,7 @@ This auto-detects which agent you have and writes the right config file:
 
 | If you use…           | It writes…                                |
 |-----------------------|-------------------------------------------|
-| Claude Code           | `.mcp.json`                               |
+| Claude Code           | `.claude/settings.json`                   |
 | Cursor                | `.cursor/mcp.json`                        |
 | Windsurf              | `.windsurf/mcp.json`                      |
 | Zed                   | `.zed/settings.json`                      |
@@ -109,6 +134,7 @@ This auto-detects which agent you have and writes the right config file:
 | OpenClaw              | `.openclaw/openclaw.json`                 |
 | Kimi CLI              | `~/.kimi/mcp.json`                        |
 | Cline                 | `~/.cline/mcp.json`                       |
+| MiniMax Code          | `~/.MiniMax/mcp.json`                     |
 
 Force a specific agent:
 
@@ -119,7 +145,8 @@ radiant setup-mcp --dry-run         # print the JSON/YAML config that would be w
 ```
 
 Then **restart your agent**. The next time it sees a non-trivial task, it'll
-discover `radiant_run` and use it.
+discover `mcp__radiant__possess` and follow the workflow in
+`AGENTS-FOR-TASKS.md` to drive the harness.
 
 ## Verify the install
 
@@ -166,7 +193,7 @@ make smoke
 
 ```bash
 # reinstall the latest
-go install github.com/quant-risk/radiant-harness/cmd/radiant@latest
+go install github.com/quant-risk/radiant-harness/v3/cmd/radiant@latest
 
 # or re-download the binary
 curl -L -o /usr/local/bin/radiant \
@@ -219,7 +246,7 @@ CGO_ENABLED=0 go build -o bin/radiant ./cmd/radiant/
 `--global`, it writes to the project root (where you ran the command),
 not your home directory.
 
-### My agent doesn't see `radiant_run`
+### My agent doesn't see `mcp__radiant__possess`
 
 1. Restart the agent after `radiant setup-mcp` (most agents only read MCP
    config at startup).
@@ -227,7 +254,11 @@ not your home directory.
    agent isn't passing the env vars your client expects. Check
    [`docs/HOST-AGENTS.md`](docs/HOST-AGENTS.md) for the detection matrix.
 3. Open the agent's MCP config and confirm the `radiant` server is registered
-   and points at the binary path you expect.
+   and points at the binary path you expect (`radiant mcp self-test` from
+   a fresh shell will tell you the same thing).
+4. If you're connecting through `radiant_run` or another alias, switch to
+   the canonical tool name: `mcp__radiant__possess(task=…, workdir=…)`.
+   See `AGENTS-FOR-TASKS.md` § MCP tools for the full surface.
 
 ### `radiant loop start` says "no host agent connected"
 

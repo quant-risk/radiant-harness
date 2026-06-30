@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/loop"
-	"github.com/quant-risk/radiant-harness/internal/skill"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/loop"
+	"github.com/quant-risk/radiant-harness/v3/internal/skill"
 )
 
 // MCP server. Single tool: radiant_run (host-agent driven via

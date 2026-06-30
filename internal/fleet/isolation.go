@@ -3,7 +3,7 @@ package fleet
 import (
 	"fmt"
 
-	"github.com/quant-risk/radiant-harness/internal/worktree"
+	"github.com/quant-risk/radiant-harness/v3/internal/worktree"
 )
 
 // Isolator bridges the Fleet to real git worktrees so parallel agents claim

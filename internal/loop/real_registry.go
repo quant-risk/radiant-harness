@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/quant-risk/radiant-harness/internal/mcpbridge"
-	"github.com/quant-risk/radiant-harness/internal/tools"
-	"github.com/quant-risk/radiant-harness/internal/tools/fs"
-	"github.com/quant-risk/radiant-harness/internal/tools/gate"
+	"github.com/quant-risk/radiant-harness/v3/internal/mcpbridge"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools/fs"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools/gate"
 )
 
 // MCPSpec is one MCP bridge to register at startup. The CLI builds

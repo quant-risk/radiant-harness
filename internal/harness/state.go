@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 // validTransitions encodes the harness state machine. Any transition not

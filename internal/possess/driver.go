@@ -47,8 +47,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quant-risk/radiant-harness/internal/llm"
-	"github.com/quant-risk/radiant-harness/internal/tools"
+	"github.com/quant-risk/radiant-harness/v3/internal/llm"
+	"github.com/quant-risk/radiant-harness/v3/internal/tools"
 )
 
 // ErrBackendToolsUnsupported is returned by Drive when the backend

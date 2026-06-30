@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	ctx "github.com/quant-risk/radiant-harness/internal/context"
-	"github.com/quant-risk/radiant-harness/internal/routing"
+	ctx "github.com/quant-risk/radiant-harness/v3/internal/context"
+	"github.com/quant-risk/radiant-harness/v3/internal/routing"
 )
 
 // AgentFlavor controls which IDE/agent the manifest is tailored for.

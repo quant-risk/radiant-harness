@@ -2,7 +2,7 @@
 
 package loop
 
-import "github.com/quant-risk/radiant-harness/internal/llm"
+import "github.com/quant-risk/radiant-harness/v3/internal/llm"
 
 // init registers the HTTP backend builder for the Full build. The
 // Light build (//go:build with_full) does NOT have this file —

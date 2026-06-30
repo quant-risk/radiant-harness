@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	radiant "github.com/quant-risk/radiant-harness/internal"
+	radiant "github.com/quant-risk/radiant-harness/v3/internal"
 )
 
 func TestStateAtomicWriteCreatesTempThenRenames(t *testing.T) {
