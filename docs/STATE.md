@@ -98,25 +98,29 @@ alwaysApply: true
 
 ## Latest validation
 
-2026-06-30 15:30 BRT — v3.7.13 release cut, **release cut pending**:
+2026-06-30 15:45 BRT — v3.7.13 deep post-release validation, **12/12 PASS** (first pass):
 
 | Step | Description | Result |
 |------|-------------|--------|
 | A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
-| B | `radiant mcp self-test` (local build) | TBD post-release |
-| B2 | `--version` check | TBD — build BEFORE commit |
+| B | `radiant mcp self-test` (local build) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.13` (clean tag) |
 | C | `go test ./...` | PASS (32 packages, 0 FAIL) |
-| C2 | `go test ./internal/fleet ./cmd/radiant -v -run "v3_7_13|PidTree.*GreatGrandchild|FleetStatus_HTML|PhaseRedirect_Purge"` | PASS (11 new tests) |
-| D | `make audit-install` | TBD post-release |
-| E | `make test-agents` | TBD post-release |
-| F | `make test-dropin` | TBD post-release |
-| G | `./scripts/run.sh` | TBD post-release |
-| H | Clean rebuild from tag | TBD — local `v3.7.13-1-g<sha>`, published `v3.7.13` (expected divergence) |
-| I | Fetch published SHA256SUMS | TBD post-release |
-| J | REST API asset inventory | TBD post-release (7/7 expected) |
-| K | Download published darwin-arm64, SHA256 verify | TBD post-release |
-| K2 | Published binary version + self-test | TBD — `v3.7.13`, 8 tools, PASS |
-| K3 | **New v3.7.13 surfaces reachable** | TBD — phase redirect --purge, fleet status --html, fleet status --html-out |
+| C2 | `go test ./internal/fleet ./cmd/radiant -v -run "v3_7_13\|PidTree.*GreatGrandchild\|FleetStatus_HTML\|PhaseRedirect_Purge"` | PASS (13 new tests) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical SKIPs local-dirty) |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS v3.7.13 |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.13-1-ge35f3d0`, published `v3.7.13` (expected divergence) |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 verify | MATCH (`c858b0f0...`) |
+| K2 | Published binary version + self-test | `v3.7.13`, 8 tools, PASS |
+| K3 | **New v3.7.13 surfaces reachable** | PASS — phase redirect --purge, fleet status --html, fleet status --html-out all in `--help` |
+| L | Canonical install (`curl install.sh@v3.7.13`) | PASS end-to-end (used `PREFIX=~/.local/bin` to overwrite existing v3.7.12) |
+| M | **A surface (fleet status --html) real output** | PASS — wrote `report.html` (4187 bytes), contains `<title>Fleet run-x</title>`, `pre.pid-tree`, `.footer` |
+| N | **B surface (phase redirect --purge) real output** | PASS — `✓ removed redirect: abc123`, `redirect.json` gone, parent dir untouched |
+| O | **C surface (great-grandchildren symbols)** | PASS — `GreatGrandchildrenPids/Count/Alive`, `.pid.great-grandchildren` sidecar, `pre.pid-tree` CSS in installed binary |
 
 **Process-learnings (v3.7.13):**
 
@@ -149,6 +153,15 @@ alwaysApply: true
   to invoke `go build ./cmd/radiant` from the right cwd
   regardless of where `go test` was invoked (default cwd is
   the package's directory, not the project root).
+- **`PREFIX=~/.local` vs `PREFIX=~/.local/bin`**: install.sh
+  resolves `PREFIX` literally — `PREFIX=~/.local` installs to
+  `~/.local/radiant` (NOT `~/.local/bin/radiant`). To overwrite
+  the canonical install location use `PREFIX=~/.local/bin`.
+  Caught during v3.7.13 validation when `~/.local/bin/radiant`
+  stayed at v3.7.12 even after install printed `installed:
+  v3.7.13`.
+
+## Latest validation (history)
 
 2026-06-30 14:15 BRT — v3.7.12 deep post-release validation, **15/15 PASS** (second pass):
 
