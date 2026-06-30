@@ -77,6 +77,76 @@ If you see this fall back fire on a host that *should*
 support sampling, check the host's MCP subprocess env first
 (it's a host integration issue, not a harness bug).
 
+### Heads-up: when the host is Hermes TUI synchronous (v3.7.2-prep)
+
+Hermes TUI implements **synchronous tool calls** — it
+`wait_for_tool_result` before processing anything else. That
+includes nested `sampling/createMessage` requests. The full
+sequence is:
+
+```
+Hermes TUI                          radiant mcp serve
+  │                                       │
+  │── tool_call: radiant_possess(task) ───►
+  │   (TUI blocked waiting here)            │
+  │                                       │── discover (offline) ✓
+  │                                       │── plan (offline) ✓
+  │                                       │── execute needs sampling
+  │                                       │── sampling/createMessage ──► ??? 
+  │   TUI can't process it;               │     (callback is dropped)
+  │   still waiting on possess ─────►     │
+  │                                       │
+  ▼                                       ▼
+120s timeout on the tool call → fail
+```
+
+**This deadlock happens regardless of v3.7.1.** v3.7.1 closes the
+*Codex* hollow-stub case (driver surfaces -32601 mid-run → falls
+back to self-driven scaffold). It does NOT change the Hermes TUI
+flow because the deadlock is at the MCP protocol layer, before
+the driver even starts. The release notes framed the fix
+broader than the actual scope; v3.7.2+ will ship async
+primitives (`radiant_run_gate`, `radiant_possess_async`) to
+solve this properly.
+
+**Until then, the supported workstream for Hermes TUI is:**
+
+```
+1. mcp__radiant__skill_list                 # enumerate (no round-trip)
+2. mcp__radiant__skill_load(name="...")     # read SKILL.md (no round-trip)
+3. mcp__radiant__init / radiant_create_spec # scaffold (no round-trip)
+4. Python / bash directly                  # fill the [host-agent: ...] markers
+```
+
+Each MCP call is small and returns fast — none of them trap the
+TUI. The harness becomes your **research / spec-writer /
+skill-loader**; the actual code execution lives in the same chat
+where Python and bash already run. This is the same hybrid pattern
+that resolved the iFood Pago MenuFlex case end-to-end. See
+`CHANGELOG.md` `[3.7.2-prep]` for full context and operational
+notes.
+
+**Do NOT** call `mcp__radiant__possess` from a synchronous TUI host
+expecting a populated result. The harness will only land you with
+templated scaffolds and 120 s of waiting. If you need end-to-end
+execution via `radiant_possess`, use an async-capable host
+(Claude Code, or terminal `radiant run` with a configured LLM
+provider).
+
+### Heads-up: skill names changed (v3.7.2-prep)
+
+`credit-risk-modeling`, `ml-modeling`, `regulatory-compliance`,
+`risk-management` are **gone**. Real names now:
+
+- `credit-risk` (PD/LGD/EAD, IFRS 9, Basileia, scorecards)
+- `ml` (machine-learning workflow)
+- `regulatory` (Basileia, IFRS, compliance)
+- `fraud-detection`, `nova-feature`, `camada-agentica` — unchanged
+
+If you have cached skill names from prior runs, call
+`mcp__radiant__skill_list` and re-pick. `mcp__radiant__skill_load`
+on a ghost name returns an empty content block.
+
 
 
 ---

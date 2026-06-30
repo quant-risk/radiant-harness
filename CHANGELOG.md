@@ -4,6 +4,94 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.2-prep] — 2026-06-29 — Skill name drift fix + Hermes TUI workstream
+
+Two fixes ship together because both surfaced in the same Hermes TUI review
+session (2026-06-29 23:55).
+
+### Skill name drift in selfDrivenSkillHints (FIXED)
+
+`cmd/radiant/cmd_mcp_possess_self_driven.go::selfDrivenSkillHints` listed
+4 skills that don't exist as bundled directories. When a user task
+contained a generic keyword like "credit" (without the `-risk-modeling`
+suffix), the first pass picked the ghost skill, the host tried to load
+it, got nothing, and the scaffold was orphaned.
+
+| hint keyword | hint value (ghost) | real bundle |
+|---|---|---|
+| `credit` | `credit-risk-modeling` | `credit-risk` |
+| `risk` | `risk-management` | `credit-risk` (default; specific risks hit second-pass verbatim) |
+| `model`, `ml`, `forecast` | `ml-modeling` | `ml` |
+| `compliance`, `regulatory`, `basel`, `ifrs` | `regulatory-compliance` | `regulatory` |
+
+**Fixed:** hints renamed to real bundled skill names. Updated
+`cmd_mcp_runtime.go` tool descriptions (lines 58, 67, 355) and
+`internal/casetest/canned.go` test data (lines 31, 33, 36) that
+mentioned the ghost names.
+
+### Drift detector (ADDED)
+
+**`scripts/audit-skills.sh` + `make audit-skills`** — extracts every
+`{"keyword", "skill-name"}` pair from the hint map and asserts each
+skill name has a corresponding `internal/skill/skills/<name>/SKILL.md`.
+Closes the regression class — same pattern as `make audit-docs` from
+the v3.0.0 doc-drift fix.
+
+```
+$ make audit-skills
+audit-skills: 6 hint(s), 69 bundled skill(s)
+  ✓ present: camada-agentica credit-risk fraud-detection ml nova-feature regulatory
+
+✓ all hint map entries reference real bundled skills
+```
+
+### Hermes TUI synchronous workstream (DOCUMENTED)
+
+v3.7.1 release notes framed the fix as "closes Codex hollow-stub trap".
+In practice the user expectation was that Hermes TUI also worked. It
+doesn't — Hermes TUI implements synchronous tool calls (sync
+`wait_for_tool_result`), so the harness's `sampling/createMessage`
+callback never gets processed: Hermes is blocked waiting for
+`radiant_possess` to return while the harness waits for sampling to
+complete. Deadlock guaranteed at the execute phase, regardless of
+v3.7.1.
+
+**Recommended workstream for Hermes TUI hosts:**
+
+```
+1. radiant_skill_list    ← enumerates bundled skills (no round-trip)
+2. radiant_skill_load    ← reads SKILL.md content (no round-trip)
+3. radiant_init / radiant_create_spec  ← scaffolds the spec/tasks (no round-trip)
+4. Python / bash direto  ← fills the [host-agent: ...] markers
+```
+
+Each tool is small, returns fast, doesn't trap the TUI. Hermes
+becomes the research/spec-writer/skill-loader; the actual execution
+lives in the same chat where Python/bash run. This is the same
+hybrid pattern that solved the iFood Pago MenuFlex case (2026-06-29).
+
+**Operational rule (carried forward):** `radiant_possess` via MCP
+is a dead end on Hermes TUI. The supported path on synchronous
+hosts is the bounded primitive pattern above. Workstream v3.7.2 will
+add async primitives (`radiant_run_gate`, `radiant_possess_async`)
+so even `radiant_possess` doesn't trap the TUI — but until then,
+treat Hermes as a hybrid host.
+
+### Verified
+
+- `go test ./...` — 31 packages PASS, 0 FAIL.
+- `make smoke` — 17/17 OK.
+- `make audit-skills` — 6/6 hints reference real bundled skills.
+- `go vet ./...` — clean.
+
+### Files changed (commit c830e3b)
+
+- `cmd/radiant/cmd_mcp_possess_self_driven.go` — hint map renamed
+- `cmd/radiant/cmd_mcp_runtime.go` — tool descriptions updated
+- `internal/casetest/canned.go` — test data updated
+- `Makefile` — added `audit-skills` + `audit-docs` PHONY targets
+- `scripts/audit-skills.sh` — new drift detector
+
 ## [3.7.1] — 2026-06-29 — Agentic driver -32601 fallback closes Codex hollow-stub
 
 A Codex CLI run at 2026-06-29 23:44 produced
