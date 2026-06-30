@@ -181,10 +181,19 @@ func (c *Coordinator) Status() FleetStatus {
 				// still alive, we know the agent exited without
 				// reaping its helpers (orphaned). If children
 				// are also dead, it's a clean crash.
+				//
+				// v3.7.12 — extend with grandchildren counts
+				// so the operator can tell "parent died; 2
+				// helpers orphaned; 1 grandchild orphaned" from
+				// "parent died; everything cleaned up".
 				ev := fmt.Sprintf("agent pid %d not alive (liveness probe)", pid)
 				if len(tree.ChildrenPids) > 0 {
 					ev += fmt.Sprintf("; %d children recorded, %d still alive",
 						len(tree.ChildrenPids), tree.ChildCount)
+				}
+				if len(tree.GrandchildrenPids) > 0 {
+					ev += fmt.Sprintf("; %d grandchildren recorded, %d still alive",
+						len(tree.GrandchildrenPids), tree.GrandchildrenCount)
 				}
 				t.Evidence = ev
 				t.Status = TaskCrashed

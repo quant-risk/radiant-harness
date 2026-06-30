@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -100,7 +101,7 @@ Examples:
 
 	redirectCmd := &cobra.Command{
 		Use:   "redirect <old-ticket> <new-ticket>",
-		Short: "Write a follow-redirect so 'phase watch --follow=<old>' tracks the new ticket",
+		Short: "Write or list follow-redirects so 'phase watch --follow=<old>' tracks the new ticket",
 		Long: `Writes .radiant-harness/state/possess-<old-ticket>/redirect.json
 with a {"next_ticket":"<new-ticket>"} payload. A subsequent
 'radiant phase watch --follow=<old-ticket>' invocation will
@@ -118,15 +119,29 @@ reaches terminal state in the new ticket.
 
 If <old-ticket> has no state.json on disk, the redirect is still
 written (so a future phase watch that creates the state.json
-later will still pick it up — useful for forward references).`,
-		Args: cobra.ExactArgs(2),
+later will still pick it up — useful for forward references).
+
+Use --list to enumerate all redirects in the workdir (scans
+.radiant-harness/state/possess-*/redirect.json). Useful for
+cleanup after a long fleet run. --list --json emits NDJSON.`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			oldTicket := args[0]
-			newTicket := args[1]
+			list, _ := cmd.Flags().GetBool("list")
 			cwd, _ := os.Getwd()
-			return writeFollowRedirect(cwd, oldTicket, newTicket)
+			if list {
+				asJSON, _ := cmd.Flags().GetBool("json")
+				return listFollowRedirects(cwd, asJSON, os.Stdout)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("redirect requires <old> <new> args (or use --list)")
+			}
+			return writeFollowRedirect(cwd, args[0], args[1])
 		},
 	}
+	redirectCmd.Flags().Bool("list", false,
+		"List all redirects in the workdir (scans .radiant-harness/state/possess-*/redirect.json).")
+	redirectCmd.Flags().Bool("json", false,
+		"With --list, emit NDJSON instead of a formatted table.")
 
 	watchCmd := &cobra.Command{
 		Use:   "watch <task-id>",
@@ -187,6 +202,61 @@ MCP response).`,
 
 	cmd.AddCommand(statusCmd, watchCmd, redirectCmd)
 	root.AddCommand(cmd)
+
+	// `radiant phase follow <ticket>` — alias for
+	// `radiant phase watch --follow=<ticket>`. Built as a thin
+	// wrapper that invokes watchCmd directly so flag parsing,
+	// help text, and behavior stay in one place. The only
+	// difference: <ticket> is positional (not a --follow flag).
+	// Easier to type and tab-complete.
+	followCmd := &cobra.Command{
+		Use:   "follow <anchor-ticket-id>",
+		Short: "Alias for 'phase watch --follow=<ticket>' — track a ticket through redirects",
+		Long: `Convenience alias for 'phase watch --follow=<ticket-id>'.
+The follow semantics are identical to --follow on the watch
+command: the watcher tracks the anchor ticket's state initially;
+when a redirect.json appears under
+.radiant-harness/state/possess-<anchor>/redirect.json, it
+transparently switches to the new ticket.
+
+Examples:
+  radiant phase follow 04b82c5a2f19ab36 --interval=5s
+  radiant phase follow 04b82c5a2f19ab36 --on-change-exit --max-poll=30s
+  radiant phase follow 04b82c5a2f19ab36 --json | jq -c .status
+
+All flags from 'phase watch' are accepted (--interval,
+--max-poll, --json, --on-change-exit). The only difference is
+that the anchor ticket id is positional rather than a --follow
+flag, which is easier to type and tab-complete in a shell.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			anchor := args[0]
+			interval, _ := cmd.Flags().GetDuration("interval")
+			maxPoll, _ := cmd.Flags().GetDuration("max-poll")
+			asJSON, _ := cmd.Flags().GetBool("json")
+			onChange, _ := cmd.Flags().GetBool("on-change-exit")
+			cwd, _ := os.Getwd()
+			return runPhaseWatch(cwd, anchor, interval, maxPoll, asJSON, onChange, anchor, os.Stdout)
+		},
+	}
+	// Forward the same flags as watchCmd so tab-completion +
+	// --help stay in lock-step.
+	followCmd.Flags().Duration("interval", 2*time.Second,
+		"Polling interval. Smaller = more responsive, larger = less I/O.")
+	followCmd.Flags().Duration("max-poll", 0,
+		"Stop after this duration even if terminal state not reached. "+
+			"0 = no limit (default — Ctrl-C to interrupt).")
+	followCmd.Flags().Bool("json", false,
+		"Emit the structured summary JSON (one object per change) instead of formatted text.")
+	followCmd.Flags().Bool("on-change-exit", false,
+		"Exit 0 immediately after the FIRST change observed AFTER the initial snapshot.")
+	// Hidden flag to keep cobra happy when forwarding — the
+	// anchor is positional in followCmd but watchCmd expects
+	// --follow=<anchor>. Setting --follow defaults to empty
+	// here; RunE sets it explicitly before calling runPhaseWatch.
+	followCmd.Flags().String("follow", "", "Hidden: positional arg maps here.")
+	followCmd.Flags().MarkHidden("follow")
+	cmd.AddCommand(followCmd)
 }
 
 // runPhaseWatch is the body of `radiant phase watch`. Extracted
@@ -442,6 +512,102 @@ func writeFollowRedirect(workdir, oldTicket, newTicket string) error {
 func followRedirectPath(workdir, ticketID string) string {
 	return filepath.Join(workdir, ".radiant-harness", "state",
 		"possess-"+ticketID, "redirect.json")
+}
+
+// listFollowRedirects scans .radiant-harness/state/possess-*/
+// for redirect.json files and prints them either as a formatted
+// table or as NDJSON (one object per line). Exits 0 even when
+// no redirects exist (empty list is not an error).
+func listFollowRedirects(workdir string, asJSON bool, w io.Writer) error {
+	stateDir := filepath.Join(workdir, ".radiant-harness", "state")
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Empty list — no state dir at all yet. Still
+			// emit the marker so the operator gets feedback
+			// ("there's nothing to list, but we did look").
+			fmt.Fprintln(w, "(no redirects found)")
+			return nil
+		}
+		return fmt.Errorf("read state dir: %w", err)
+	}
+
+	type entry struct {
+		OldTicket   string `json:"old_ticket"`
+		NextTicket  string `json:"next_ticket"`
+		CreatedAt   string `json:"created_at"`
+		RedirectFile string `json:"redirect_file"`
+	}
+	var redirects []entry
+
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "possess-") {
+			continue
+		}
+		oldTicket := strings.TrimPrefix(e.Name(), "possess-")
+		redirectPath := followRedirectPath(workdir, oldTicket)
+		data, err := os.ReadFile(redirectPath)
+		if err != nil {
+			// No redirect.json in this state dir — skip.
+			continue
+		}
+		var payload struct {
+			NextTicket string `json:"next_ticket"`
+			CreatedAt  string `json:"created_at"`
+		}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			continue // corrupt file — skip
+		}
+		redirects = append(redirects, entry{
+			OldTicket:    oldTicket,
+			NextTicket:   payload.NextTicket,
+			CreatedAt:    payload.CreatedAt,
+			RedirectFile: redirectPath,
+		})
+	}
+
+	if asJSON {
+		enc := json.NewEncoder(w)
+		for _, r := range redirects {
+			if err := enc.Encode(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if len(redirects) == 0 {
+		fmt.Fprintln(w, "(no redirects found)")
+		return nil
+	}
+
+	fmt.Fprintf(w, "%-16s  %-16s  %-20s  %s\n", "OLD", "NEXT", "CREATED_AT", "PATH")
+	fmt.Fprintln(w, strings.Repeat("-", 80))
+	for _, r := range redirects {
+		fmt.Fprintf(w, "%-16s  %-16s  %-20s  %s\n",
+			truncateForRedirectList(r.OldTicket, 16),
+			truncateForRedirectList(r.NextTicket, 16),
+			r.CreatedAt,
+			r.RedirectFile,
+		)
+	}
+	fmt.Fprintf(w, "\n%d redirect(s) in %s\n", len(redirects), stateDir)
+	return nil
+}
+
+// truncateForRedirectList is a tiny string helper for table
+// formatting in the redirect --list output. Keeps ticket ids
+// readable when the workdir has accumulated dozens of long
+// redirect entries. Distinct from cmd_mcp_runtime.go's
+// truncate to avoid coupling the two surfaces.
+func truncateForRedirectList(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n < 1 {
+		return ""
+	}
+	return s[:n-1] + "…"
 }
 
 // isTerminalPhaseStatus returns true for states where the watcher

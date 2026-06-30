@@ -348,10 +348,13 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 	// Now that we have a real pid, write it.
 	_ = writePidFile(pidPath, cmd.Process.Pid)
 	defer removePidFile(pidPath)
-	// Also remove the children sidecar so a follow-up
-	// mcp__radiant__fleet_status doesn't surface stale child
-	// pids from a previous run of the same task id.
+	// Also remove the children + grandchildren sidecars so a
+	// follow-up mcp__radiant__fleet_status doesn't surface stale
+	// child / grandchild pids from a previous run of the same
+	// task id. v3.7.12 added the grandchildren sidecar; the
+	// children sidecar has been here since v3.7.10.
 	defer removePidFile(taskPidChildrenPath(d.cfg.Workdir, runID, task.ID))
+	defer removePidFile(taskPidGrandchildrenPath(d.cfg.Workdir, runID, task.ID))
 
 	// v3.7.10 — periodically refresh the children sidecar so
 	// mcp__radiant__fleet_status can report nested liveness
@@ -383,21 +386,42 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 }
 
 // refreshChildPidsLoop polls pgrep -P at the given interval and
-// writes the result to the children sidecar file. Exits when
-// refreshDone is closed (which signals "the agent process has
-// exited, stop polling").
+// writes the result to the children sidecar file. v3.7.12+
+// also writes the grandchildren sidecar (pgrep -P on each live
+// child). Exits when refreshDone is closed (which signals "the
+// agent process has exited, stop polling").
 func refreshChildPidsLoop(workdir, runID, taskID string, parentPid int, interval time.Duration, refreshDone <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	// Initial snapshot before the first tick so the sidecar has
 	// content right away.
-	_ = writeChildPids(workdir, runID, taskID, ChildrenPidsForParent(parentPid))
+	refreshChildAndGrandchildrenSidecars(workdir, runID, taskID, parentPid)
 	for {
 		select {
 		case <-refreshDone:
 			return
 		case <-ticker.C:
-			_ = writeChildPids(workdir, runID, taskID, ChildrenPidsForParent(parentPid))
+			refreshChildAndGrandchildrenSidecars(workdir, runID, taskID, parentPid)
 		}
 	}
+}
+
+// refreshChildAndGrandchildrenSidecars writes both the children
+// and grandchildren sidecars in a single pgrep pass. Walks the
+// live children first, then for each live child walks its own
+// children. Children that died between refreshes are filtered
+// out (the next iteration won't see them via pgrep -P, so they
+// simply stop appearing in the sidecar — no zombie data).
+func refreshChildAndGrandchildrenSidecars(workdir, runID, taskID string, parentPid int) {
+	children := ChildrenPidsForParent(parentPid)
+	_ = writeChildPids(workdir, runID, taskID, children)
+
+	var grandchildren []int
+	for _, c := range children {
+		if !pidAlive(c) {
+			continue // skip dead children — their children are orphaned
+		}
+		grandchildren = append(grandchildren, ChildrenPidsForParent(c)...)
+	}
+	_ = writeGrandchildrenPids(workdir, runID, taskID, grandchildren)
 }
