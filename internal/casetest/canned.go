@@ -28,12 +28,12 @@ func CannedResponse(phase Phase, c *Case) string {
 			"- Project: case dir, files match the menu_flex risk case shape",
 			"- Manifests present: " + manifestSummary(c.Path),
 			"- Specs: 0 found",
-			"- Bundled skills exposed: credit-risk-modeling, nova-feature, actuarial, statistics, ml-supervised",
+			"- Bundled skills exposed: credit-risk, nova-feature, actuarial, stats, ml",
 			"- Locale: pt-BR",
-			"- Operator note: ramp of " + quote(taskSummary) + " fits the credit-risk-modeling skill; risky if scoped wider.",
+			"- Operator note: ramp of " + quote(taskSummary) + " fits the credit-risk skill; risky if scoped wider.",
 			"",
 			"## Skills to apply",
-			"- credit-risk-modeling",
+			"- credit-risk",
 			"- nova-feature",
 		}, "\n")
 

@@ -1,5 +1,5 @@
 # Radiant Harness — Makefile
-.PHONY: build test lint clean install release smoke test-agents
+.PHONY: build test lint clean install release smoke test-agents audit-skills audit-docs
 
 # CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
 # "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
@@ -58,3 +58,15 @@ smoke: build
 # Manual invocation; no cron, no polling, no daemon.
 test-agents: build
 	./scripts/test-agents.sh
+
+# Audit: every skill referenced in selfDrivenSkillHints must exist as
+# a bundled skill under internal/skill/skills/. Closes the v3.7.1
+# hot-fix regression class (4/13 hints pointed at ghost skills).
+# Use --report for non-failing visibility.
+audit-skills:
+	./scripts/audit-skills.sh
+
+# Audit: every command mentioned in README/INSTALL/EXAMPLES must exist
+# in `radiant --help` output. Closes the v3.0.0 doc-drift class.
+audit-docs: build
+	./scripts/audit-docs.sh

@@ -55,7 +55,7 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 			},
 			Required: []string{"task_id"},
 		}},
-		{Name: "radiant_skill_list", Description: "Enumerate the bundled domain skills (e.g. credit-risk-modeling, nova-feature). Always call this once before invoking radiant_possess on a non-trivial task so the harness picks the right methodology.", InputSchema: mcpInputSchema{
+		{Name: "radiant_skill_list", Description: "Enumerate the bundled domain skills (e.g. credit-risk, nova-feature, regulatory, ml). Always call this once before invoking radiant_possess on a non-trivial task so the harness picks the right methodology.", InputSchema: mcpInputSchema{
 			Type: "object",
 			Properties: map[string]mcpPropertyDef{
 				"filter": {Type: "string", Description: "Optional substring filter against skill name + description."},
@@ -64,7 +64,7 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 		{Name: "radiant_skill_load", Description: "Return the full text (SKILL.md + frontmatter) of one bundled skill. Read it before deciding which skills to apply during the discover phase.", InputSchema: mcpInputSchema{
 			Type: "object",
 			Properties: map[string]mcpPropertyDef{
-				"name": {Type: "string", Description: "Skill name (e.g. credit-risk-modeling). Required."},
+				"name": {Type: "string", Description: "Skill name (e.g. credit-risk, ml, regulatory). Required."},
 			},
 			Required: []string{"name"},
 		}},
@@ -352,7 +352,7 @@ func mcpSkillList(args json.RawMessage) mcpResponse {
 	if a.Filter != "" && out.Len() == 0 {
 		out.WriteString(fmt.Sprintf("(no skills match filter %q)\n", a.Filter))
 	}
-	out.WriteString("\nTo inspect one: call radiant_skill_load(name=\"credit-risk-modeling\").\n")
+	out.WriteString("\nTo inspect one: call radiant_skill_load(name=\"credit-risk\").\n")
 	out.WriteString("Then call radiant_possess(task=..., workdir=...) to drive the run.\n")
 	return mcpResponse{
 		JSONRPC: "2.0",

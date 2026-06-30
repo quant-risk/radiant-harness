@@ -40,24 +40,30 @@ import (
 // self-driven mode get a starting point for which skills to read, not a
 // guarantee. Unrecognised tasks fall back to a single generic pointer
 // to `nova-feature` (the SDD / spec-driven-development skill).
+//
+// IMPORTANT: every value MUST reference a skill that exists in
+// `internal/skill/skills/<value>/SKILL.md`. Drift between this map and
+// the bundle was the v3.7.1 hot-fix bug (4/13 hints pointed at ghosts
+// like `credit-risk-modeling`, `risk-management`, `ml-modeling`,
+// `regulatory-compliance`). `make audit-skills` enforces this invariant.
 var selfDrivenSkillHints = []struct {
 	keyword string
 	skill   string
 }{
-	{"credit", "credit-risk-modeling"},
-	{"risk", "risk-management"},
+	{"credit", "credit-risk"},
+	{"risk", "credit-risk"},      // generic "risk" defaults to credit; specific risks (market-risk, operational-risk, liquidity-risk, model-risk) hit second-pass verbatim match below
 	{"fraud", "fraud-detection"},
-	{"model", "ml-modeling"},
-	{"ml", "ml-modeling"},
-	{"forecast", "ml-modeling"},
+	{"model", "ml"},
+	{"ml", "ml"},
+	{"forecast", "ml"},
 	{"spec", "nova-feature"},
 	{"sdd", "nova-feature"},
 	{"agent", "camada-agentica"},
 	{"harness", "camada-agentica"},
-	{"compliance", "regulatory-compliance"},
-	{"regulatory", "regulatory-compliance"},
-	{"basel", "regulatory-compliance"},
-	{"ifrs", "regulatory-compliance"},
+	{"compliance", "regulatory"},
+	{"regulatory", "regulatory"},
+	{"basel", "regulatory"},
+	{"ifrs", "regulatory"},
 }
 
 // runSelfDrivenPossess runs a full 4-phase loop without any LLM call.
@@ -260,8 +266,8 @@ func pickSelfDrivenSkills(task string) []string {
 		}
 	}
 	// Second pass: ask the skill index for any skill whose name
-	// appears verbatim in the task (catches e.g. "credit-risk-modeling"
-	// even if the keyword map missed it).
+	// appears verbatim in the task (catches e.g. "credit-risk",
+	// "market-risk", "ml" — even when the keyword map missed it).
 	if rl := skillIndex(); rl != nil {
 		for _, s := range rl {
 			name := strings.ToLower(s)
