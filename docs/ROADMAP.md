@@ -6,6 +6,17 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.8 (2026-06-30)
+
+- **Async gate pid/liveness probe.** `radiant_phase_status` now
+  cross-references the persisted subprocess pid against the
+  running OS process list. New `subprocess_alive` +
+  `subprocess_pid` fields in the summary; status escalates from
+  `in_progress` to `crashed` when the recorded pid is dead,
+  with the next-step line pointing at `mcp__radiant__run_gate`
+  so the host can resume. 3 new tests pin the contract
+  (SubprocessAlive / SubprocessCrashed / NoPidFile).
+
 ## Shipped in v3.7.7 (2026-06-30)
 
 - **Subprocess-backed async gate primitives.** `radiant

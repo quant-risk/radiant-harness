@@ -6,35 +6,34 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 11:10 BRT by mavis during v3.7.7 post-release validation
+**Last updated:** 2026-06-30 11:25 BRT by mavis during v3.7.8 release prep
 
 ## Current sprint / active feature
 
-- Active: **v3.7.7 post-release validation done; v3.7.8 kickoff.**
-- Sprint goal: ship the v3.7.8 async gate pid/liveness probe —
-  surface `alive` vs `crashed` from the pid file so a `phase_status`
-  call can distinguish a long-running detached subprocess from a
-  crashed one without re-running the gate.
-- Progress (v3.7.7 closed): (1) `radiant async-runner`
-  subcommand + `subprocessAsyncGate` / `subprocessPossessAsync`
-  impls of `possess.AsyncGate` / `possess.PossessAsync`; (2)
-  `selectedPossessAsync()` / `selectedAsyncGate()` opt-in via
-  `RADIANT_ASYNC_SUBPROCESS=1`; (3) pid file management under
-  `.radiant-harness/pids/<ticket>.pid`; (4) `RADIANT_BIN` env
-  var honored in tests; (5) 5 new tests pin the subprocess path;
-  (6) GitHub release `v3.7.7` published with 7 assets.
-- v3.7.7 post-release validation: 11/11 PASS (see below).
+- Active: **v3.7.8 release prep — async gate pid/liveness probe.**
+- Sprint goal: surface subprocess alive-vs-crashed from
+  `radiant_phase_status` so a host agent can tell the difference
+  between "phase still running" and "subprocess crashed without
+  writing an error".
+- Progress: (1) `phaseStatusSummary` extended with
+  `subprocess_alive` (bool) + `subprocess_pid` (int) fields
+  populated from `.radiant-harness/pids/<ticket>.pid`; (2) status
+  escalation from `in_progress` to `crashed` when pid is dead;
+  (3) next-step line annotated with pid + liveness; (4) format
+  helper (`content[1].text`) gains a `subprocess:` line; (5) 3
+  new tests pin the contract (SubprocessAlive / SubprocessCrashed
+  / NoPidFile); (6) full validation PASS
+  (`./scripts/run.sh` 8/8 + 2 SKIP; `go test ./cmd/radiant
+  ./internal/...` PASS).
 
 ## Next concrete action
 
-- v3.7.8 work — kickoff the async gate pid/liveness probe:
-  (1) extend `radiant_phase_status` summary with `subprocess_alive`
-  + `subprocess_pid` fields populated from
-  `asyncRunnerLiveness(workdir, ticket)`; (2) add a `--watch`
-  flag that polls the pid file every N seconds and emits an MCP
-  notification when liveness transitions alive → dead; (3)
-  tests that simulate a crashed subprocess (kill -9 + check
-  liveness) and a still-running one (sleep + check).
+- Tag v3.7.8 + build cross-platform binaries + GitHub release
+  with 7 assets (6 binaries + SHA256SUMS). Re-run
+  `make audit-install` to confirm canonical `curl | bash` resolves
+  v3.7.8.
+- After tag: continue with v3.7.9 backlog (fleet async primitives,
+  real-host opt-in for `RADIANT_ASYNC_SUBPROCESS=1`).
 
 ## Latest validation
 
@@ -123,10 +122,13 @@ Earlier in the session (v3.7.6 post-release validation):
 
 ## Deferred ideas / backlog
 
-- Async gate pid/liveness probe (`radiant_phase_status` should
-  distinguish alive from crashed without re-running the gate).
 - Fleet-mode async primitives (same status/retry guarantees as loop).
 - Real host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — needs a
   reproduction of a sampling-backed sync-host possess or fleet
   cross-process worktree need. Without a real host need, the
   inline path is correct.
+- `--watch` flag for `radiant_phase_status` — poll the pid file
+  every N seconds and emit an MCP notification when liveness
+  transitions alive → dead. Not strictly necessary (the host
+  can poll), but useful for CI hosts that want to stream
+  progress.

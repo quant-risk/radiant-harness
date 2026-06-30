@@ -4,6 +4,70 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.8] — 2026-06-30 — Async gate pid/liveness probe
+
+`radiant_phase_status` now cross-references the persisted
+subprocess pid against the running OS process list, so a host
+agent can tell the difference between "the phase is still
+running" and "the subprocess crashed without writing an error".
+
+### Changed
+
+- `phaseStatusSummary` (returned in `radiant_phase_status` MCP
+  response) gains two additive fields populated from
+  `.radiant-harness/pids/<ticket>.pid`:
+  - `subprocess_alive` (bool) — `kill -0` on the recorded pid.
+  - `subprocess_pid` (int) — the recorded pid itself.
+- Status escalation: when the recorded phase is `in_progress`
+  but `subprocess_alive=false`, status moves from `in_progress`
+  to `crashed` and the next-step line tells the host to re-call
+  `mcp__radiant__run_gate(phase=...)` to resume from where the
+  crash happened.
+- Next-step annotation when alive: `in_progress` runs that have
+  a live subprocess now show `subprocess pid=N alive — last
+  polled at <RFC3339>` so the operator can confirm the child is
+  actually running.
+- Format helper (`content[1].text`) gains a `subprocess:` line
+  when a pid is recorded (`pid=N alive` / `pid=N dead`).
+- No wire-format change for existing callers: the new fields are
+  `omitempty`, so older consumers that JSON-parse
+  `content[0].text` or the existing summary fields keep working
+  unchanged.
+
+### Why this matters
+
+The subprocess path shipped in v3.7.7 (opt-in via
+`RADIANT_ASYNC_SUBPROCESS=1`) spawns a child `radiant
+async-runner` per phase and tracks it via a pid file. Without a
+liveness check, a crashed child looks identical to a slow one
+— the host sees `in_progress` indefinitely and never knows to
+re-call the gate. v3.7.8 closes that gap by reading the pid
+file and doing `kill -0` on every `phase_status` call.
+
+### Verified
+
+- `cmd_mcp_possess_test.go::TestPhaseStatusSummary_*` 7/7 PASS:
+  - `DoneRunShape`, `MidRunShape`, `ErrorShape`,
+    `CancelledShape` (existing, v3.7.6) — unchanged behaviour.
+  - `SubprocessAlive` (NEW) — pid file pointing at the test
+    process; SubprocessAlive=true, Status stays `in_progress`,
+    NextStep mentions the live pid.
+  - `SubprocessCrashed` (NEW) — pid file pointing at a stale
+    pid (16777215, above `pid_max` on Linux/macOS);
+    SubprocessAlive=false, Status escalates to `crashed`,
+    NextStep instructs re-call `run_gate`.
+  - `NoPidFile` (NEW) — no pid file written; SubprocessAlive=
+    false, SubprocessPid=0, Status stays `in_progress` (no
+    false-positive `crashed` on the default inline path).
+- `go test ./cmd/radiant ./internal/...` PASS.
+- `./scripts/run.sh` PASS, 8/8 + 2 SKIP doctor.
+
+### Migration
+
+No migration required. `subprocess_alive` and `subprocess_pid`
+are additive on the summary JSON. Hosts that don't care about
+subprocess liveness keep working unchanged.
+
 ## [3.7.7] — 2026-06-30 — Subprocess-backed async gate primitives
 
 The async gate primitives (`radiant_possess_async` +
