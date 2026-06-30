@@ -6,39 +6,38 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 09:40 BRT by mavis during v3.7.x backlog burndown
+**Last updated:** 2026-06-30 10:35 BRT by mavis during v3.7.7 release prep
 
 ## Current sprint / active feature
 
-- Active: **v3.7.x backlog burndown** — v3.7.6 shipped, post-release
-  validation recorded, and the two open follow-ups from the v3.7.6
-  release notes (CHANGELOG backfill + run.sh flake) are now closed.
-- Sprint goal: clear the v3.7.x release-history debt before starting
-  v3.7.7 work. Two risks identified in the v3.7.6 release summary
-  were actionable in scope and are now done.
-- Progress: (1) CHANGELOG backfill for v3.7.3 / v3.7.4 / v3.7.5
-  landed in commit `82b1245` — every v3.7.x tag now has a dated
-  section, zero `[Unreleased]` placeholders remain; (2) the
-  `./scripts/run.sh` flake (root cause: `TestRunAllContextCanceled`
-  in `internal/fleet/dispatch_test.go` was asserting `ExitCode != 0`
-  on a context-cancelled subprocess, which fails ~5% of the time
-  on macOS arm64 because Go's `exec.CommandContext` can deliver
-  SIGTERM before escalating to SIGKILL — letting the shell exit
-  cleanly with code 0) is fixed in commit `435f107` — the test now
-  asserts the semantically correct invariant (either non-zero
-  exit OR fast elapsed time), `internal/fleet` 50/50 PASS in
-  isolation, `./scripts/run.sh` 10/10 PASS in a row.
+- Active: **v3.7.7 release prep** — subprocess-backed async gate
+  primitives are implemented and tested; the gemini (and 4 other
+  hosts') restart hint landed in `install.sh`; CHANGELOG and
+  ROADMAP are updated. Ready for tag + GitHub release.
+- Sprint goal: ship the v3.7.7 work per `docs/PROPOSAL-v3.7.2-async-
+  primitives.md` § v3.7.6 update — give the gate primitives a real
+  subprocess path (opt-in via `RADIANT_ASYNC_SUBPROCESS=1`) so
+  future sampling-backed sync-host and fleet cross-process needs
+  can be served without redesigning the runtime.
+- Progress: (1) `radiant async-runner` subcommand
+  (`cmd_async_runner.go`); (2) `subprocessAsyncGate` +
+  `subprocessPossessAsync` impls of `possess.AsyncGate` and
+  `possess.PossessAsync` (`cmd_mcp_async_subprocess.go`); (3)
+  `selectedPossessAsync()` / `selectedAsyncGate()` selection
+  helpers wired into `mcpPossessAsync` + `mcpRunGate`; (4) pid
+  file management under `.radiant-harness/pids/<ticket>.pid`;
+  (5) `RADIANT_BIN` env var honored so tests point at a
+  one-time-built binary instead of forking themselves; (6) 5 new
+  tests pin the subprocess path behaviour.
 
 ## Next concrete action
 
-- v3.7.7 work. Order: (1) implement async subprocess per
-  `docs/PROPOSAL-v3.7.2-async-primitives.md` § v3.7.6 update — gate
-  on a real host need first (sampling-backed sync-host possess or
-  fleet cross-process worktree); (2) async gate pid/liveness probe
-  so `radiant_phase_status` distinguishes alive from crashed without
-  re-running the gate; (3) cross-host restart hint audit (the
-  install.sh restart-hint table covers the 12 Light-mode hosts,
-  Gemini should be added per v3.7.6 wiring).
+- Tag v3.7.6 + build cross-platform binaries + GitHub release with
+  the standard 6 assets + SHA256SUMS. Then re-run `make
+  audit-install` to confirm canonical `curl | bash` resolves v3.7.7.
+- After tag: move to v3.7.8 backlog (async gate pid/liveness probe,
+  fleet async primitives, future host opt-in for
+  `RADIANT_ASYNC_SUBPROCESS=1`).
 
 ## Latest validation
 
@@ -128,12 +127,10 @@ Earlier in the session (v3.7.6 prep pass):
 
 ## Deferred ideas / backlog
 
-- Real background subprocess for `radiant_possess_async` (spec in
-  `docs/PROPOSAL-v3.7.2-async-primitives.md` § v3.7.6 update).
 - Async gate pid/liveness probe (`radiant_phase_status` should
   distinguish alive from crashed without re-running the gate).
 - Fleet-mode async primitives (same status/retry guarantees as loop).
-- Add the Gemini restart hint to `install.sh` (the
-  `--agent=<name>` restart-hint table at the bottom of install.sh
-  has 12 entries; v3.7.6 wired the gemini host matrix but did not
-  add a restart-hint case).
+- Real host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — needs a
+  reproduction of a sampling-backed sync-host possess or fleet
+  cross-process worktree need. Without a real host need, the
+  inline path is correct.

@@ -4,6 +4,82 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.7] — 2026-06-30 — Subprocess-backed async gate primitives
+
+The async gate primitives (`radiant_possess_async` +
+`radiant_run_gate`) ship two execution paths in v3.7.7. The inline
+path is unchanged; the new subprocess path is opt-in via
+`RADIANT_ASYNC_SUBPROCESS=1` and forks a `radiant async-runner`
+child process so phases can outlive the parent's tool-call window.
+
+### Added
+
+- `radiant async-runner --phase=<p> --ticket=<id> --workdir=<w>
+  --task=<task>` — the worker subcommand. Validates args, writes
+  `.radiant-harness/pids/<ticket>.pid` on entry, delegates to the
+  same `selfDriven<Phase>` helpers the inline path uses, removes
+  the pid file on exit. Hidden from `--help`; gated by
+  `RADIANT_INTERNAL=1` so a fresh shell can't trigger it.
+- `subprocessAsyncGate` + `subprocessPossessAsync` — implementations
+  of `internal/possess.AsyncGate` and `internal/possess.PossessAsync`
+  that fork `radiant async-runner` via `os/exec`. Selected via
+  `RADIANT_ASYNC_SUBPROCESS=1`; the inline path is the default.
+- `RADIANT_BIN` env var honored by `asyncRunnerSelfPath` — tests
+  point the subprocess at a one-time-built binary (rather than
+  the test binary, which would deadlock).
+- `selectedPossessAsync()` + `selectedAsyncGate()` helpers in
+  `cmd_mcp_possess_async.go` — single source of truth for the
+  inline-vs-subprocess selection; both `mcpPossessAsync` and
+  `mcpRunGate` route through them.
+
+### Why subprocess mode is opt-in, not the default
+
+The inline path closes the synchronous-host deadlock today
+(Hermes TUI) because the self-driven phases complete in
+<500 ms before the tool call returns. A subprocess fork adds
+~50 ms of overhead and the management machinery (pid files,
+`kill -0` liveness, crash recovery) is only worth paying for
+when a real host need reproduces. Per
+`docs/PROPOSAL-v3.7.2-async-primitives.md` § v3.7.6 update,
+subprocess mode is wired but not the default — turn it on
+when a sampling-backed sync-host or fleet cross-process worktree
+need reproduces. The inline path stays the default to keep
+existing deployments unchanged.
+
+### Crash recovery
+
+The subprocess path writes `state.json` after each phase
+(identical to the inline path), so a crash mid-Execute is
+recoverable: the next `mcp__radiant__run_gate` call observes
+`execute` is already `in_progress` and resumes from there. The
+pid file is best-effort cleanup on exit; a stale pid file
+indicates "this ticket was running" for operator-side diagnosis
+and is not relied on for correctness.
+
+### Verified
+
+- `cmd_async_runner_test.go` 5/5 PASS:
+  - `TestSubprocessAsync_DiscoveryRunsInChild` — subprocess
+    gate Spawn lands state.json with discover=done.
+  - `TestSubprocessAsync_FourPhasesEndToEnd` — full 4-phase
+    possess_async through the subprocess path lands the
+    canonical scaffold (spec.md / tasks.md / scripts/run.sh).
+  - `TestSubprocessAsync_PidFileLifecycle` — write/read/remove
+    semantics of the pid file helpers.
+  - `TestSubprocessAsync_CrashRecovery` — planted in_progress
+    state.json resumes correctly on next run_gate call.
+  - `TestSubprocessAsync_SpawnsChildProcess` — direct
+    invocation of `radiant async-runner` as a real subprocess.
+- `go test ./cmd/radiant/...` PASS.
+- `./scripts/run.sh` PASS (8/8 + 2 SKIP doctor).
+- Build clean; `make audit-docs` PASS.
+
+### Migration
+
+No migration required. Subprocess mode is opt-in. Set
+`RADIANT_ASYNC_SUBPROCESS=1` in the `radiant mcp serve`
+process to enable; unset (or omit) to keep the inline path.
+
 ## [3.7.6] — 2026-06-30 — Consolidation: status UX, host matrix, doc/backlog cleanup
 
 v3.7.6 is a consolidation release. It ships the v3.7.3-v3.7.5 backlog

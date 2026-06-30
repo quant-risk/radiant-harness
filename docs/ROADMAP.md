@@ -6,6 +6,16 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.7 (2026-06-30)
+
+- **Subprocess-backed async gate primitives.** `radiant
+  async-runner` subcommand + `subprocessAsyncGate` /
+  `subprocessPossessAsync` impls + pid file management. Opt-in
+  via `RADIANT_ASYNC_SUBPROCESS=1`. Inline path stays the
+  default; subprocess path is for future sampling-backed sync-
+  host or fleet cross-process needs. 5 new tests pin the
+  subprocess path behaviour.
+
 ## Shipped in v3.7.6 (2026-06-30)
 
 - **Host matrix broadened.** Google Gemini CLI added as the 13th
@@ -27,19 +37,26 @@ state, and clear enough for another agent to complete real project work.
 - **External user case removed.** MenuFlex spec purged from the
   harness repo (did not belong here).
 
+## Shipped in v3.7.6 follow-ups (2026-06-30)
+
+- **Per-agent restart hints added for 5 hosts** in `install.sh`:
+  gemini, kimi, openclaw, cline, MiniMax. The post-install
+  table now covers all 13 Light-mode hosts with vendor-specific
+  restart commands.
+
 ## Now
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| Add Gemini restart hint to `install.sh` | Consistent post-install UX | XS | Maintainers | v3.7.6 hostdetect already detects `gemini` | `--agent=gemini` prints a one-line restart instruction like the other 12 hosts |
+| Turn on `RADIANT_ASYNC_SUBPROCESS=1` for a real host that needs it (sampling-backed sync-host possess OR fleet cross-process worktree) | Concrete reproduction gates the work | M | Maintainers | Reproduce the need | Document the host, opt in by default, validate end-to-end |
 
 ## Next
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| True background subprocess async | Better long-running sync-host support | L | Maintainers | Concrete host need | `radiant_possess_async` runs phases in a detached subprocess; pid + state observable cross-process |
-| Async gate pid/liveness probe | Cross-process cancel/inspect | M | Maintainers | Subprocess path | `radiant_phase_status` distinguishes "alive" from "crashed" without re-running the gate |
+| Async gate pid/liveness probe | Cross-process cancel/inspect | M | Maintainers | v3.7.7 subprocess path | `radiant_phase_status` distinguishes "alive" from "crashed" without re-running the gate |
 | Fleet async primitives | More predictable parallel orchestration | L | Maintainers | Stable loop async | Fleet has the same status/retry guarantees as loop |
+| Backfill v3.7.3-v3.7.5 CHANGELOG entries (Done in commit 82b1245, but Worth tracking for future sprints where v3.7.0-v3.7.x history has gaps) | Honest release history | S | Maintainers | Git log for the period | Each tag has a CHANGELOG subsection with date + feature summary |
 
 ## Later
 
