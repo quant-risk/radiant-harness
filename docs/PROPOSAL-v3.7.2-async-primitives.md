@@ -149,6 +149,87 @@ CHANGELOG.md `[3.7.2]` with:
 - Full background subprocess detachment for long-running async execution — TBD future version
 - Multi-host async orchestration (Fleet mode async) — TBD future version
 
+---
+
+## v3.7.6 update — async subprocess status
+
+As of v3.7.6 (2026-06-30), `radiant_possess_async` and
+`radiant_run_gate` continue to run phases **inline in the same
+process** rather than as a detached background subprocess. The
+rationale and the cases that would change that decision are below.
+
+### Why inline is still good enough
+
+The current async gate runs the self-driven offline path against
+the host's `workdir` and persists `state.json` after each phase.
+For the offline path this is fast — discover, plan, execute, and
+verify complete in well under 500 ms because every step is a
+filesystem write (no sampling round-trip, no remote model). The
+sync-host auto-routing that depends on this primitive (Hermes TUI)
+wins because the tool call returns inside the host's outer timeout,
+which is the only thing that matters for the deadlock.
+
+A real `os/exec` subprocess would add:
+
+- A pid file + liveness probe — only useful for runs longer than
+  the host's tool-call timeout, which the offline path is not.
+- Cross-process state-file locks — currently a single process
+  owns `state.json` writes, so there is no lock contention.
+- Crash-recovery semantics — the inline path already returns a
+  ticket; if the in-process call panics, the host sees a JSON-RPC
+  error and re-calls `radiant_run_gate(phase=…)` to resume from
+  the last persisted phase.
+
+### When inline stops being good enough
+
+The inline path becomes a real bottleneck in two scenarios:
+
+1. **Sampling-backed possess on a synchronous host.** Today,
+   sync-host auto-routing still drops to self-driven offline
+   phases, so the deadlock is closed without a subprocess. If a
+   future host requires real `sampling/createMessage` calls
+   inside the 4-phase loop *and* is synchronous, the inline path
+   would block the tool call for the full sampling round-trip —
+   the same 120 s deadlock the routing was designed to prevent.
+2. **Cross-process worktree ops.** Fleet-mode async (multi-host
+   orchestration) needs independent processes per worktree so a
+   crash on one worktree does not corrupt the others. Inline
+   execution shares the orchestrator process.
+
+### Deferral plan (target: v3.7.7 or v3.8.0)
+
+When one of the above scenarios reproduces on a real host, the
+shipped plan is:
+
+1. Extract the per-phase self-driven helpers into a subcommand:
+   `radiant async-runner --phase=<p> --ticket=<id> --workdir=<w>`.
+   The subprocess writes `state.json` and exits non-zero on
+   failure; the MCP tool spawns it via `os/exec` and returns the
+   ticket + pid.
+2. Add a `pids/<ticket>.pid` file under `.radiant-harness/pids/`
+   so `radiant_phase_status` can poll liveness without re-reading
+   every trace event.
+3. Add an `os/exec`-backed implementation of `internal/possess.
+   AsyncGate` and `PossessAsync`; keep the existing inline
+   implementations as the "single-process" fallback (so the
+   drop-in `radiant mcp serve` continues to work without a
+   subprocess manager).
+4. Tests:
+   - `TestAsyncRunner_RunsAsSubprocess` — spawns the
+     subcommand, asserts pid file lands, asserts state.json is
+     observable from a sibling process.
+   - `TestAsyncRunner_LongRunning` — stubs a slow phase (>30 s
+     wall-clock) and asserts the host sees the ticket within
+     ~500 ms.
+   - `TestAsyncRunner_CrashRecovery` — SIGKILLs the subprocess
+     mid-Execute; next `radiant_run_gate` call resumes from
+     the persisted state.
+
+No implementation in v3.7.6. The v3.7.6 docs (CHANGELOG,
+docs/ROADMAP.md) explicitly note the deferral so a future
+release can ship the subprocess path without re-justifying the
+design.
+
 ## Decision needed
 
 Approve this proposal so the v3.7.2 workstream can land in 3-4 PRs:

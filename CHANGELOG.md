@@ -4,6 +4,131 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.6] — 2026-06-30 — Consolidation: status UX, host matrix, doc/backlog cleanup
+
+v3.7.6 is a consolidation release. It ships the v3.7.3-v3.7.5 backlog
+of doc/backlog cleanups (the three commits `913f7d3`, `cec74bc`,
+`9fe13cf` since v3.7.5), tightens the `radiant_phase_status` contract
+so a host agent can resume a run without re-parsing state.json,
+extends the cross-agent install matrix to include Google Gemini CLI
+(13th host), and turns `scripts/run.sh` into a single-call validation
+entrypoint that exercises the full install/test/audit matrix.
+
+No sampling-loop behaviour changed. No MCP wire format changed. The
+`summary` field on `radiant_phase_status` is additive — older callers
+that JSON-parse `content[0].text` keep working unchanged.
+
+### Highlights
+
+- **`radiant_phase_status` returns a structured `summary`.** The
+  v3.7.6 response carries `result.summary` with `status`,
+  `current_phase`, `next_step`, `resume_command`, `pending_files`,
+  `pending_marker_count`, `last_gate`, and a compact per-phase map.
+  The raw state.json dump is still present in `content[0].text` for
+  backwards compatibility. This closes the "host agent has to read
+  state.json itself to know whether to retry" gap that v3.7.2 left
+  open. Five new contract tests pin the four phases × {done,
+  in_progress, error, cancelled} matrix.
+- **Google Gemini CLI added to the host matrix.** `setup-mcp
+  --agent=gemini` writes `~/.gemini/settings.json` (user) or
+  `./.gemini/settings.json` (project) with the standard
+  `mcpServers` JSON shape — same as Claude/Cursor. Detection
+  signal: `GEMINI_CLI`, `GEMINI_PROJECT_ROOT`, `GEMINI_API_KEY`.
+  Restart hint: `relaunch gemini-cli`. The 12-agent matrix in
+  `scripts/host-agent-matrix.json` is now 13; `make test-agents`
+  asserts all 13 sandbox installs.
+- **`scripts/run.sh` is the canonical validation entrypoint.**
+  v3.7.6 extends the previous 4-command script to cover the full
+  matrix: `mcp self-test`, `doctor`, `doctor --mcp` (both
+  informational when no host is wired), `go test ./cmd/radiant
+  ./internal/...`, `go test ./...`, `audit-docs`, `audit-skills`,
+  `audit-install`, `test-agents`, `test-dropin`. Doctor is
+  surfaced as SKIP (not FAIL) in a fresh shell, so the script
+  is reliable from CI and from inside a host session.
+- **`radiant_run_gate` + `radiant_possess_async` documented.**
+  AGENTS-FOR-TASKS.md § MCP tools now lists all 6 primitives
+  (was 4 — `radiant_run_gate` and `radiant_possess_async` were
+  on the wire but missing from the docs table).
+- **External MenuFlex case spec removed.** Commit `913f7d3` —
+  the user-case spec did not belong in the harness repo. The
+  removal is recorded for audit; nothing else in the repo
+  referenced the case.
+- **Backlog consolidation.** Commit `cec74bc` consolidates the
+  docs (`docs/ROADMAP.md`, `docs/STATE.md`, `docs/PROPOSAL-v3.7.2-async-primitives.md`)
+  and closes the placeholder spec/doc open work into explicit
+  status records. Commit `9fe13cf` documents the final validation
+  pass.
+- **Async subprocess deferred.** The v3.7.2 PROPOSAL called for a
+  real background subprocess for `radiant_possess_async`. The
+  current implementation runs phases synchronously in-process
+  (the offline self-driven path is already short — typical run is
+  <500 ms, so a subprocess adds little). v3.7.6 keeps the existing
+  inline path and adds a follow-up spec for the cases that would
+  justify a real subprocess (long-running Claude Code sampling
+  loops, cross-process worktree ops).
+
+### Changed
+
+- `internal/hostdetect/hostdetect.go`: added `AgentGeminiCLI` constant
+  + signature (`GEMINI_CLI`/`GEMINI_PROJECT_ROOT`/`GEMINI_API_KEY` env,
+  `gemini`/`gemini-cli` parent binaries, `SupportsSampling=true`).
+- `cmd/radiant/cmd_doctor.go::mcpConfigPath` + `probeRadiantEntry`:
+  added `gemini-cli` case → `~/.gemini/settings.json` with the
+  standard `mcpServers` JSON shape.
+- `cmd/radiant/cmd_setup_mcp.go::mcpConfigFor`: added `gemini` case
+  using the existing `mergeMCPJSON` helper (same JSON layout as
+  Claude/Cursor). Updated the unknown-agent error message.
+- `cmd/radiant/cmd_mcp_runtime.go::mcpPhaseStatus`: returns
+  `result.summary` (structured `phaseStatusSummary` + a rich text
+  block in `content[1].text`) alongside the raw state dump.
+- `scripts/host-agent-matrix.json`: 13th agent row for `gemini`.
+- `scripts/run.sh`: rewritten as a fail-collecting matrix; doctor
+  steps surfaced as SKIP, real gates (audit-install, test-agents,
+  test-dropin, full `go test ./...`) now exercised.
+- `AGENTS-FOR-TASKS.md`: MCP tools table now lists all 6
+  primitives with parameters and a sync-host alternative
+  workflow. Agent list includes `gemini`.
+- `INSTALL.md` + `README.md`: agent table updated to 13 entries
+  with the Gemini row + detect signal.
+
+### Added
+
+- `cmd/radiant/cmd_mcp_runtime.go`: `phaseStatusSummary`,
+  `phaseMini`, `phaseGateSummary` types + `buildPhaseStatusSummary`
+  + `formatPhaseStatusSummary` + `extractLastGate` helpers.
+- `cmd/radiant/cmd_mcp_possess_test.go`: 5 new tests pinning the
+  v3.7.6 contract (`TestPhaseStatusSummary_DoneRunShape`,
+  `TestPhaseStatusSummary_MidRunShape`,
+  `TestPhaseStatusSummary_ErrorShape`,
+  `TestPhaseStatusSummary_CancelledShape`,
+  `TestMCPPhaseStatus_ReturnsSummaryField`).
+- `internal/hostdetect/hostdetect_test.go::TestDetect_GeminiCLI`.
+
+### Verified
+
+- `./scripts/run.sh` PASS (8 PASS, 2 SKIP — doctor + doctor --mcp
+  in a host-less shell are correctly informational, not failures).
+- `make audit-install` PASS (canonical `curl | bash` path will
+  PASS once v3.7.6 is published — the SKIP in the validation
+  above was because the local tree was 3 commits ahead of v3.7.5).
+- `make test-agents` PASS (13/13 agents simulated install).
+- `make test-dropin` PASS against v3.7.6.
+- `go test ./cmd/radiant ./internal/...` PASS.
+- `go test ./...` PASS (full module).
+- `radiant mcp self-test` PASS, exposes 6 MCP tools.
+- Build clean (`go vet ./...` clean, `go build ./...` clean).
+
+### Migration
+
+No migration required. The `summary` field on
+`radiant_phase_status` is additive; older callers that JSON-parse
+`content[0].text` keep working unchanged. Hosts that key off
+the raw state.json shape continue to see the same fields.
+
+Hosts running v3.7.6 inside a Gemini CLI session: run
+`radiant setup-mcp --agent=gemini --global` once, then `relaunch
+gemini-cli` for the MCP server entry to land.
+
 ## [Unreleased] — drop-in CLI auto-route
 
 `radiant loop start`, `radiant run`, and `radiant fleet start` from a
