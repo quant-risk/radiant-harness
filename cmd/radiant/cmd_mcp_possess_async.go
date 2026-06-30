@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/quant-risk/radiant-harness/v3/internal/possess"
@@ -30,6 +31,37 @@ import (
 // asyncPossess is the v3.7.2 implementation of
 // `internal/possess.PossessAsync`.
 type asyncPossess struct{}
+
+// subprocessAsyncEnabled reports whether the parent `radiant mcp
+// serve` should run the gate primitives as a `radiant async-runner`
+// subprocess instead of inline. Opt-in via env var so the default
+// inline behaviour (v3.7.0-v3.7.6) is unchanged for existing
+// deployments.
+func subprocessAsyncEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("RADIANT_ASYNC_SUBPROCESS")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// selectedPossessAsync returns the inline `asyncPossess` impl by
+// default, or the subprocess-backed `subprocessPossessAsync` when
+// RADIANT_ASYNC_SUBPROCESS=1 is set. The two impls are drop-in
+// replacements for `internal/possess.PossessAsync`.
+func selectedPossessAsync() possess.PossessAsync {
+	if subprocessAsyncEnabled() {
+		return subprocessPossessAsync{}
+	}
+	return asyncPossess{}
+}
+
+// selectedAsyncGate returns the inline or subprocess AsyncGate impl
+// based on the same env var. Drop-in replacement for
+// `internal/possess.AsyncGate`.
+func selectedAsyncGate() possess.AsyncGate {
+	if subprocessAsyncEnabled() {
+		return subprocessAsyncGate{}
+	}
+	return asyncGate{}
+}
 
 // Spawn runs all four phases against the given workdir. Each phase
 // persists its state.json synchronously so the host sees progress
@@ -112,7 +144,7 @@ func mcpPossessAsync(args json.RawMessage) mcpResponse {
 		}}
 	}
 
-	h, err := asyncPossess{}.Spawn(a.Task, a.Workdir, a.Profile)
+	h, err := selectedPossessAsync().Spawn(a.Task, a.Workdir, a.Profile)
 	if err != nil {
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{
 			Code: -32603, Message: "radiant_possess_async: " + err.Error(),
@@ -153,7 +185,7 @@ func runAsyncPossessForBackend(workdir, task, profile string) (*possessState, er
 	if workdir == "" {
 		workdir, _ = os.Getwd()
 	}
-	h, err := asyncPossess{}.Spawn(task, workdir, profile)
+	h, err := selectedPossessAsync().Spawn(task, workdir, profile)
 	if err != nil {
 		return nil, err
 	}

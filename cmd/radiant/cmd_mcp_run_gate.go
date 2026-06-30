@@ -109,7 +109,7 @@ func mcpRunGate(args json.RawMessage) mcpResponse {
 		a.Workdir, _ = os.Getwd()
 	}
 
-	h, err := spawnOnePhase(possess.Phase(a.Phase), a.Task, a.Workdir)
+	h, err := selectedAsyncGate().Spawn(possess.Phase(a.Phase), a.Task, a.Workdir)
 	if err != nil {
 		return mcpResponse{JSONRPC: "2.0", Error: &mcpError{
 			Code: -32603, Message: "radiant_run_gate: " + err.Error(),
