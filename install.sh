@@ -31,8 +31,10 @@
 # The agent that receives the task then sees:
 #   - `mcp__radiant__possess(task=..., workdir=...)` available as an MCP tool.
 # Calling that tool is what triggers harness possession of the agent.
-# The harness drives the rest (read skills, scaffold dirs, decompose
-# the task, write code, run gates) via bounded sampling round-trips.
+# On hosts with MCP sampling, the harness drives bounded sampling
+# round-trips. On hosts without sampling (Codex, for example), it
+# switches to self-driven handoff: scaffold + explicit next actions
+# for the host agent's native tools.
 #
 # Env overrides:
 #   RADIANT_VERSION  pin a specific version (e.g. v3.3.0); default = latest
@@ -276,9 +278,10 @@ cat <<EOF
 
     mcp__radiant__possess(task="<the goal>", workdir="<cwd>")
 
-  The harness takes over via sampling/createMessage: reads the bundled
-  skills, scaffolds AGENTS.md / docs / specs, decomposes into bounded
-  phases, writes code, runs gates, returns a trace.
+  The harness takes over. If the host supports sampling/createMessage,
+  it drives bounded sampling round-trips. If not, it returns a
+  Self-driven handoff with the spec dir, files to update, verification
+  command, and remaining [host-agent: fill in] markers.
 
 EOF
 
@@ -359,7 +362,8 @@ Then call:
       profile = "standard"
   )
 
-The harness takes over via sampling/createMessage.
+The harness takes over via sampling/createMessage when available, or
+returns a Self-driven handoff when this host does not implement sampling.
 TXT
   say "agent-bootstrap files written to: $WORKDIR/.radiant-harness/"
   say "  - AGENTS.md    (the contract)"

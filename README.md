@@ -431,7 +431,13 @@ From inside Claude Code (or any wired agent):
 
 > *"use radiant-harness to add a /healthz endpoint with tests"*
 
-Your agent calls `radiant_run`, the harness spins up the loop, every LLM call routes back to your agent via MCP `sampling/createMessage`, and you get a JSONL trace at `.radiant-harness/traces/<run-id>.jsonl`.
+Your agent calls `mcp__radiant__possess`, the harness spins up the
+bounded flow, and inference routes back through MCP
+`sampling/createMessage` when the host supports it. If the host does
+not support sampling, the same call returns a `Self-driven handoff`
+with the spec dir, files to update, verification command, and remaining
+`[host-agent: fill in]` markers so the agent can continue with native
+tools.
 
 ---
 
@@ -768,13 +774,13 @@ radiant-harness/
 ## FAQ
 
 **Q: Why no API key?**
-A: Every LLM call is delegated to the host agent via MCP `sampling/createMessage`. Your agent already has a model configured; the harness just drives the loop. The binary has zero HTTP egress for LLM calls — verified at build time via `nm`/`strings`.
+A: Every LLM call is delegated to the host agent via MCP `sampling/createMessage` when available. If the host does not implement sampling, possession switches to self-driven handoff instead of calling an external API. The binary has zero HTTP egress for LLM calls — verified at build time via `nm`/`strings`.
 
 **Q: I'm an agent — what tools can I call?**
 A: Four bounded primitives — `radiant_skill_list`, `radiant_skill_load`, `radiant_possess`, `radiant_phase_status` — plus the legacy alias `radiant_run`. The whole contract (install, wire-up, tool reference, sampling round-trip format, failure modes) lives in **[`AGENTS-FOR-TASKS.md`](AGENTS-FOR-TASKS.md)**, not here. Use it for non-trivial tasks; for trivial ones (typo fix, single-file read), don't call any of them.
 
 **Q: How do I run a loop from my shell instead of from inside an agent?**
-A: `radiant loop start "your goal"`. The harness drives the loop itself and calls `sampling/createMessage` to whatever agent you wired in via `radiant setup-mcp`. If no agent is connected, you get a clear "run `radiant setup-mcp` first" error.
+A: Prefer the MCP path: ask the agent to call `mcp__radiant__possess(task=…, workdir=…)`. `radiant loop start "your goal"` is for environments where a sampling-capable host is already wired; if no agent is connected, you get a clear "run `radiant setup-mcp` first" error.
 
 **Q: Is the harness sending my code anywhere?**
 A: No. The binary has zero HTTP egress for LLM calls (verified via `nm`/`strings`). The only outbound traffic is to the MCP stdio channel, which goes to your local agent.

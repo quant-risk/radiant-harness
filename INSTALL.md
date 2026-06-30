@@ -262,8 +262,20 @@ not your home directory.
 
 ### `radiant loop start` says "no host agent connected"
 
-The harness needs an MCP-compatible agent on the other end of stdio to
-satisfy LLM calls (via `sampling/createMessage`). Two options:
+The shell loop needs an MCP-compatible agent on the other end of stdio to
+satisfy LLM calls (via `sampling/createMessage`). For normal agent use,
+prefer the MCP tool:
+
+```text
+mcp__radiant__possess(task="<the user's prompt>", workdir="<cwd>")
+```
+
+That call works on both sampling hosts and non-sampling hosts. If the
+host does not implement sampling, the tool returns a `Self-driven
+handoff` with the spec dir, files to update, verification command, and
+remaining `[host-agent: fill in]` markers.
+
+If you specifically need the shell loop, use one of these options:
 
 1. Run `radiant setup-mcp` from inside your agent (Claude Code, Cursor,
    Hermes, …), restart it, then re-run the loop. The agent becomes the
