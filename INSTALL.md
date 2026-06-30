@@ -187,6 +187,12 @@ ls -lh bin/radiant    # ≈ 11 MB
 
 # 17/17 checks pass:
 make smoke
+
+# Public drop-in E2E:
+# installs the latest release, calls MCP radiant_possess, simulates a
+# non-sampling host, follows the Self-driven handoff, implements a tiny
+# Go case, and runs its validation script.
+make test-dropin
 ```
 
 ## Updating

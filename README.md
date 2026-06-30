@@ -326,7 +326,15 @@ make build  &&  ./bin/radiant setup-mcp
 radiant --version
 radiant host-info     # auto-detects which agent invoked this
 make smoke            # 17/17 OK (binary-side: bytes, no HTTP-LLM, all commands)
+make test-dropin      # installs latest release, calls MCP, follows self-driven handoff, runs a tiny Go case
 ```
+
+`make test-dropin` is the public drop-in proof. It creates a clean
+temporary case, installs the latest GitHub release through `install.sh`,
+starts the installed MCP server, calls `radiant_possess`, simulates a
+host that rejects `sampling/createMessage`, follows the returned
+Self-driven handoff, implements a minimal Go command, and verifies it
+with `./scripts/run.sh`.
 
 ```text
 $ radiant host-info
