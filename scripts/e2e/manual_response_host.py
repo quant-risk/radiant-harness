@@ -81,19 +81,37 @@ def main():
         path = f"/tmp/mcp-prompt-{prompt_id}.md"
         with open(path, "w") as f:
             f.write(content)
-        print(f"\n{'='*70}")
-        print(f"SAMPLING REQUEST id={prompt_id}")
-        print(f"  → /tmp/mcp-prompt-{prompt_id}.md")
-        print(f"  operator (Mavis): review the prompt, then save your")
-        print(f"  response to /tmp/mcp-response-{prompt_id}.md")
-        print(f"{'='*70}\n")
+        print(f"\n{'='*70}", flush=True)
+        print(f"SAMPLING REQUEST id={prompt_id}", flush=True)
+        print(f"  → /tmp/mcp-prompt-{prompt_id}.md", flush=True)
+        print(f"  operator (Mavis): review the prompt, then save your", flush=True)
+        print(f"  response to /tmp/mcp-response-{prompt_id}.md", flush=True)
+        print(f"{'='*70}\n", flush=True)
 
-    def read_response(prompt_id):
+    def read_response(prompt_id, timeout=110):
+        """Poll for /tmp/mcp-response-<id>.md. Times out before the harness
+        hits its own 2-minute sampling deadline so the host returns its
+        sentinel to the harness — the driver then continues (response
+        present) or downgrades (timeout reached → driver fallback).
+        """
         path = f"/tmp/mcp-response-{prompt_id}.md"
-        while not os.path.exists(path):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if os.path.exists(path):
+                # Wait briefly so the file is fully written.
+                for _ in range(20):
+                    try:
+                        if os.path.getsize(path) > 0:
+                            break
+                    except OSError:
+                        pass
+                    time.sleep(0.05)
+                with open(path) as f:
+                    return f.read()
             time.sleep(0.3)
-        with open(path) as f:
-            return f.read()
+        raise TimeoutError(
+            f"no response at {path} within {timeout}s — operator did not respond in time"
+        )
 
     # 1. initialize
     print("[1/5] initialize")
@@ -160,13 +178,32 @@ def main():
                 response_text = read_response(prompt_id)
                 print(f"      ✓ got response ({len(response_text)} chars)")
 
+                # The response may be either:
+                #   - Plain text (treated as a single text block)
+                #   - A JSON array with text + tool_use blocks
+                #   - A JSON array with content blocks (Anthropic-style)
+                # Try to parse as JSON; otherwise wrap as a single text block.
+                response_content = None
+                stripped = response_text.lstrip()
+                if stripped.startswith("["):
+                    try:
+                        parsed = json.loads(stripped)
+                        if isinstance(parsed, list):
+                            response_content = parsed
+                    except Exception:
+                        pass
+                if response_content is None:
+                    response_content = [
+                        {"type": "text", "text": response_text}
+                    ]
+
                 # Send back as sampling/createMessage response
                 send({
                     "jsonrpc": "2.0",
                     "id": prompt_id,
                     "result": {
                         "role": "assistant",
-                        "content": {"type": "text", "text": response_text},
+                        "content": response_content,
                     },
                 })
 

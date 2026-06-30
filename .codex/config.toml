@@ -1,0 +1,3 @@
+[mcp_servers.radiant]
+command = "/Users/henrique/.local/bin/radiant"
+args = ["mcp", "serve"]
