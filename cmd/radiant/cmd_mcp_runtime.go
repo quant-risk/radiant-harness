@@ -1,4 +1,3 @@
-
 // MCP runtime. runMCPServe here is the sole MCP server entry point.
 // It dispatches every tool call through `callMCPTool`, which routes
 // inference via MCP sampling/createMessage back to the host agent.
@@ -13,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -224,6 +224,9 @@ func mcpPossessWithBackend(args json.RawMessage, backend llm.Backend) mcpRespons
 	out.WriteString(fmt.Sprintf("Task:          %s\n", a.Task))
 	out.WriteString(fmt.Sprintf("Profile:       %s\n", a.Profile))
 	out.WriteString(fmt.Sprintf("Phases done:   %s\n", state.CurrentPhase))
+	if state.RunMode != "" {
+		out.WriteString(fmt.Sprintf("Mode:          %s\n", state.RunMode))
+	}
 	if err != nil {
 		out.WriteString(fmt.Sprintf("Exit:          %v\n", err))
 		return mcpResponse{
@@ -237,6 +240,9 @@ func mcpPossessWithBackend(args json.RawMessage, backend llm.Backend) mcpRespons
 	out.WriteString(fmt.Sprintf("Exit:          success\n"))
 	out.WriteString(fmt.Sprintf("Artifacts:     %v\n", state.Artifacts))
 	out.WriteString(fmt.Sprintf("State file:    %s\n", possessStatePath(a.Workdir, id)))
+	if state.RunMode == "self-driven" {
+		out.WriteString(selfDrivenMCPGuidance(a.Workdir, state))
+	}
 
 	return mcpResponse{
 		JSONRPC: "2.0",
@@ -245,6 +251,44 @@ func mcpPossessWithBackend(args json.RawMessage, backend llm.Backend) mcpRespons
 			"isError": false,
 		},
 	}
+}
+
+func selfDrivenMCPGuidance(workdir string, st *possessState) string {
+	pending := countHostAgentMarkers(workdir)
+	var b strings.Builder
+	b.WriteString("\nSelf-driven handoff:\n")
+	b.WriteString("  Radiant scaffolded the run because this host does not provide MCP sampling.\n")
+	b.WriteString("  The host agent must now use its native tools to replace [host-agent: fill in] markers.\n")
+	if st.SpecDir != "" {
+		b.WriteString(fmt.Sprintf("  Spec dir:      %s\n", st.SpecDir))
+	}
+	b.WriteString("  Read first:    .radiant-harness/CONTEXT.md\n")
+	b.WriteString("  Then update:   spec.md, tasks.md, scripts/run.sh, docs/README.md, .radiant-harness/handoff.md\n")
+	b.WriteString("  Verify with:   scripts/run.sh and radiant_phase_status\n")
+	b.WriteString(fmt.Sprintf("  Pending marks: %d\n", pending))
+	return b.String()
+}
+
+func countHostAgentMarkers(workdir string) int {
+	count := 0
+	_ = filepath.WalkDir(workdir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			if d != nil && d.IsDir() && d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.Contains(path, string(filepath.Separator)+".git"+string(filepath.Separator)) {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		count += strings.Count(string(data), "[host-agent: fill in")
+		return nil
+	})
+	return count
 }
 
 // mcpPhaseStatus returns the persisted progress of a previous possess run.

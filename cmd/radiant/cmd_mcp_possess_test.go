@@ -98,6 +98,43 @@ func TestRunPossessWithBackendFallsBackToSelfDriven(t *testing.T) {
 	}
 }
 
+func TestMCPPossessSelfDrivenResponseGuidesHostAgent(t *testing.T) {
+	dir := t.TempDir()
+	args, _ := json.Marshal(map[string]string{
+		"task":    "ship the feature",
+		"workdir": dir,
+		"profile": "lean",
+	})
+
+	resp := mcpPossessWithBackend(args, unsupportedSamplingBackend{})
+	if resp.Error != nil {
+		t.Fatalf("mcp possess returned protocol error: %v", resp.Error)
+	}
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Result = %T, want map", resp.Result)
+	}
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("isError = true, want false")
+	}
+	content, ok := result["content"].([]map[string]string)
+	if !ok || len(content) == 0 {
+		t.Fatalf("content = %#v, want text content", result["content"])
+	}
+	text := content[0]["text"]
+	for _, want := range []string{
+		"Mode:          self-driven",
+		"Self-driven handoff:",
+		"host agent must now use its native tools",
+		"Pending marks:",
+		"specs/0001-ship-the-feature",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("response missing %q:\n%s", want, text)
+		}
+	}
+}
+
 // TestRouteAgenticErr_FallsBackOnSamplingUnsupported reproduces the
 // 2026-06-29 Codex failure mode: the agentic driver returns
 // -32601 mid-run because the host's MCP server doesn't implement

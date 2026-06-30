@@ -452,6 +452,10 @@ v3.6.0 fixes that. Two changes:
    **Markdown templates** with `[host-agent: fill in ...]`
    markers. You replace the markers with real content using your
    own tools (the scaffold is the artifact; the content is yours).
+   The `radiant_possess` response includes a `Self-driven handoff`
+   block with the spec dir, files to update, verification command,
+   and remaining marker count so the host agent can continue without
+   guessing what to do next.
 2. **Public safe-CLI commands.** `radiant spec`, `radiant audit`,
    `radiant skills`, `radiant context` no longer require
    `RADIANT_INTERNAL=1`. Hosts with shell access can drive the SDD

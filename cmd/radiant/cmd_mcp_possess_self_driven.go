@@ -6,13 +6,13 @@
 // harness no longer degrades to a hollow stub. Instead it runs
 // `runSelfDrivenPossess`, a deterministic 4-phase pipeline that:
 //
-//   1. **discover** — filesystem sniff + bundled-skill scan → CONTEXT.md
-//   2. **plan**     — spec.md + tasks.md templated against the task slug
-//   3. **execute**  — scaffold scripts/, docs/, AGENTS.md with placeholders
-//      that the host agent can fill in with its own tools
-//   4. **verify**   — every artefact gets a `[host-agent: fill in]`
-//      marker so the next agent that opens the project knows exactly
-//      which sections need its understanding
+//  1. **discover** — filesystem sniff + bundled-skill scan → CONTEXT.md
+//  2. **plan**     — spec.md + tasks.md templated against the task slug
+//  3. **execute**  — scaffold scripts/, docs/, AGENTS.md with placeholders
+//     that the host agent can fill in with its own tools
+//  4. **verify**   — every artefact gets a `[host-agent: fill in]`
+//     marker so the next agent that opens the project knows exactly
+//     which sections need its understanding
 //
 // The state file, phases, and bootstrap layout match the LLM-driven
 // path so `radiant_phase_status` reports the same shape regardless of
@@ -51,7 +51,7 @@ var selfDrivenSkillHints = []struct {
 	skill   string
 }{
 	{"credit", "credit-risk"},
-	{"risk", "credit-risk"},      // generic "risk" defaults to credit; specific risks (market-risk, operational-risk, liquidity-risk, model-risk) hit second-pass verbatim match below
+	{"risk", "credit-risk"}, // generic "risk" defaults to credit; specific risks (market-risk, operational-risk, liquidity-risk, model-risk) hit second-pass verbatim match below
 	{"fraud", "fraud-detection"},
 	{"model", "ml"},
 	{"ml", "ml"},
@@ -102,6 +102,11 @@ func runSelfDrivenPossess(ctx context.Context, workdir, task, profile string, w 
 		slug = "task"
 	}
 	specDir := filepath.Join(workdir, "specs", "0001-"+slug)
+	st.Profile = profile
+	st.Slug = slug
+	st.SpecDir = filepath.Join("specs", "0001-"+slug)
+	st.RunMode = "self-driven"
+	_ = savePossessState(st)
 
 	phases := []struct {
 		name string
@@ -501,7 +506,7 @@ func selfDrivenVerify(workdir, specDir string, w io.Writer) error {
 		}
 		totalFiles++
 		data, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(data), selfDrivenMarker("", "")) {
+		if err == nil && strings.Contains(string(data), "[host-agent: fill in") {
 			templatedFiles++
 		}
 		return nil

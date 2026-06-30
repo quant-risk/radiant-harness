@@ -45,6 +45,13 @@ replace the markers with real content using your own tools, and run
 `radiant_phase_status(task_id="…")` to see exactly which files are
 still templated.
 
+The MCP response from `radiant_possess` also includes a short
+`Self-driven handoff` block: the run mode, spec directory, first file
+to read, files to update, verification command, and count of remaining
+`[host-agent: fill in]` markers. Treat that block as the handoff from
+the harness to you: the harness has planned and scaffolded; the host
+agent now fills and verifies with native tools.
+
 **Do not** try `RADIANT_INTERNAL=1 radiant possess` to bypass this —
 internal mode is for CI. The self-driven path is the supported
 behaviour on hosts that don't sample.
