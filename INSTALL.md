@@ -125,6 +125,7 @@ This auto-detects which agent you have and writes the right config file:
 |-----------------------|-------------------------------------------|
 | Claude Code           | `.claude/settings.json`                   |
 | Cursor                | `.cursor/mcp.json`                        |
+| Google Gemini CLI     | `.gemini/settings.json`                   |
 | Windsurf              | `.windsurf/mcp.json`                      |
 | Zed                   | `.zed/settings.json`                      |
 | VS Code Copilot       | `.vscode/mcp.json`                        |
@@ -139,7 +140,7 @@ This auto-detects which agent you have and writes the right config file:
 Force a specific agent:
 
 ```bash
-radiant setup-mcp --agent=claude    # or cursor, codex, hermes, …
+radiant setup-mcp --agent=claude    # or cursor, gemini, codex, hermes, …
 radiant setup-mcp --global          # write to ~/.config/<agent>/…
 radiant setup-mcp --dry-run         # print the JSON/YAML config that would be written
 ```

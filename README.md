@@ -685,12 +685,16 @@ broke on 2026-06-29. This command exists to reproduce it offline.
 
 ## Supported agents
 
-`setup-mcp` knows about **11 agents** today. Auto-detect scans your working directory for `.claude/`, `.codex/`, `.hermes/`, etc. and global fallbacks (`~/.kimi`, `~/.cline`) for CLI-only tools.
+`setup-mcp` knows about **13 agents** today (v3.7.6 added Google
+Gemini CLI). Auto-detect scans your working directory for `.claude/`,
+`.codex/`, `.hermes/`, `.gemini/`, etc. and global fallbacks (`~/.kimi`,
+`~/.cline`, `~/.gemini`) for CLI-only tools.
 
 | Agent             | Config file               | Format         | Detect signal                          |
 |-------------------|---------------------------|----------------|----------------------------------------|
 | **Claude Code**   | `.mcp.json`               | JSON           | `CLAUDE_CODE_*` env                    |
 | **Cursor**        | `.cursor/mcp.json`        | JSON           | `CURSOR_*` env                         |
+| **Google Gemini CLI** | `.gemini/settings.json` | JSON         | `GEMINI_*` env                         |
 | **Windsurf**      | `.windsurf/mcp.json`      | JSON           | (project marker)                       |
 | **Zed**           | `.zed/settings.json`      | JSON           | (project marker)                       |
 | **VS Code Copilot** | `.vscode/mcp.json`      | JSON           | `VSCODE_*` env                         |

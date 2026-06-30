@@ -167,8 +167,9 @@ curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/main/ins
 ```
 
 Replace `hermes` with whichever agent you are running inside:
-`claude` · `codex` · `cursor` · `hermes` · `minimax` · `opencode` ·
-`kimi` · `openclaw` · `windsurf` · `zed` · `cline` · `vscode`.
+`claude` · `codex` · `cursor` · `gemini` · `hermes` · `minimax` ·
+`opencode` · `kimi` · `openclaw` · `windsurf` · `zed` · `cline` ·
+`vscode`.
 
 If you cannot tell which one you are, pass `--setup-mcp` to autodetect:
 
@@ -205,17 +206,19 @@ After reload you should see `radiant_possess`, `radiant_phase_status`,
 
 ## MCP tools
 
-The harness exposes **four bounded primitives + one legacy alias** as MCP
-tools. The loop is decomposed into bounded calls on purpose — see
-[§ Why this is the only path](#why-this-is-the-only-path) for the production
-post-mortem that led to this design.
+The harness exposes **six bounded primitives** as MCP tools (the legacy
+`radiant_run` alias was removed in v3.7.4). The loop is decomposed into
+bounded calls on purpose — see [§ Why this is the only path](#why-this-is-the-only-path)
+for the production post-mortem that led to this design.
 
 | Tool | When | Parameters |
 |------|------|------------|
 | `radiant_skill_list` | Always call once on non-trivial work. | `filter?: string` (substring against name + description) |
 | `radiant_skill_load` | Read one bundled skill's `SKILL.md` + `frontmatter.yaml`. | `name: string` (required) |
 | **`radiant_possess`** | The main call: drives the user's task through discover → plan → execute → verify. | `task: string` (required, verbatim from user) · `workdir?: string` (absolute path, default = agent CWD) · `profile?: "lean" \| "standard" \| "thorough"` (default `standard`) |
-| `radiant_phase_status` | Inspect / resume tracking of a `radiant_possess` run. | `task_id: string` (16-char prefix from the trace) · `workdir?: string` |
+| `radiant_run_gate` | Run ONE phase (discover \| plan \| execute \| verify) through the offline self-driven path. Synchronous TUI hosts (Hermes) prefer this over `radiant_possess` to avoid the 120s sampling deadlock. | `phase: string` (required, one of discover/plan/execute/verify) · `task: string` (required) · `workdir?: string` |
+| `radiant_possess_async` | Offline wrapper around the full 4-phase loop. Returns a ticket immediately; host polls `radiant_phase_status`. Use when a synchronous host cannot safely run sampling-backed `radiant_possess`. | `task: string` (required) · `workdir?: string` · `profile?: "lean" \| "standard" \| "thorough"` (default `standard`) |
+| `radiant_phase_status` | Inspect / resume tracking of a `radiant_possess` run. v3.7.6+ returns a structured `summary` field with next step, resume command, pending files/markers, last gate, and clear error/cancel state. | `task_id: string` (16-char prefix from the trace) · `workdir?: string` |
 
 ### Typical workflow
 
@@ -229,6 +232,19 @@ post-mortem that led to this design.
    )
 4. (optional) mcp__radiant__phase_status(task_id="…")        # read the trace mid-run
 5. report the trace + artifacts + gate results back to the user
+```
+
+### Synchronous-host alternative (Hermes TUI, OpenCode, MiniMax)
+
+```text
+1. mcp__radiant__possess_async(
+       task     = "<the user's original prompt, verbatim>",
+       workdir  = "<absolute path of the project directory>",
+       profile  = "standard",
+   )
+   → returns a ticket in <500 ms (no sampling round-trip)
+2. poll mcp__radiant__phase_status(task_id="<ticket>") until status=done
+3. report the artifacts + gate results back to the user
 ```
 | Tool | When | Parameters |
 |------|------|------------|
