@@ -190,12 +190,26 @@ func registerFleetCmds(root *cobra.Command) {
 			cwd, _ := os.Getwd()
 			runID := args[0]
 			asJSON, _ := cmd.Flags().GetBool("json")
+			asHTML, _ := cmd.Flags().GetBool("html")
+			htmlOut, _ := cmd.Flags().GetString("html-out")
 			store, err := fleet.LoadStore(cwd, runID)
 			if err != nil {
 				return fmt.Errorf("load fleet %q: %w", runID, err)
 			}
 			coord := fleet.NewCoordinator(store, 0)
 			status := coord.Status()
+			if asHTML {
+				html := fleet.FormatStatusHTML(status)
+				if htmlOut != "" {
+					if err := os.WriteFile(htmlOut, []byte(html), 0o644); err != nil {
+						return fmt.Errorf("write html to %q: %w", htmlOut, err)
+					}
+					fmt.Fprintf(os.Stdout, "wrote fleet HTML report to %s (%d bytes)\n", htmlOut, len(html))
+					return nil
+				}
+				fmt.Print(html)
+				return nil
+			}
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
@@ -206,6 +220,8 @@ func registerFleetCmds(root *cobra.Command) {
 		},
 	}
 	fleetStatusCmd.Flags().Bool("json", false, "Output as JSON")
+	fleetStatusCmd.Flags().Bool("html", false, "Output a self-contained HTML report with visual pid tree (parent → child → grandchild → great-grandchild)")
+	fleetStatusCmd.Flags().String("html-out", "", "Write HTML report to this file instead of stdout")
 
 	fleetSummaryCmd := &cobra.Command{
 		Use:   "summary <run-id>",

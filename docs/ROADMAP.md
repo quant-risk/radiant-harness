@@ -6,6 +6,31 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.13 (2026-06-30)
+
+- **`radiant phase redirect --purge=<ticket-id>`** — explicit
+  cleanup of a stale follow redirect without nuking state. Removes
+  only `.radiant-harness/state/possess-<id>/redirect.json`; spec,
+  tasks, other redirects untouched. Exits 1 on missing file so
+  CI / lints catch accidental purges.
+- **Recursive pid tree — great-grandchildren** — `PidTree` gains
+  `GreatGrandchildrenPids` + `GreatGrandchildrenAlive` +
+  `GreatGrandchildrenCount`. New `.pid.great-grandchildren`
+  sidecar (newline-separated integers) written alongside the
+  children + grandchildren sidecars. Crashed-evidence string
+  in `Coordinator.Status()` includes great-grandchildren counts.
+- **`radiant fleet status <run-id> --html`** — self-contained
+  HTML report with visual nested pid tree (parent → child →
+  grandchild → great-grandchild) in Unicode box-drawing glyphs
+  inside a `<pre>` block. Color-coded by liveness (alive =
+  green, dead = red, vacuous = muted). No external CSS / JS /
+  CDN — renders offline in any browser or mail client.
+  `radiant fleet status <run-id> --html --html-out=<path>`
+  variant writes to disk.
+
+11 new tests pin the contract (4 redirect purge + 6 HTML + 7
+pidtree = 17 total, split 4 CLI purge + 6 CLI HTML + 7 pidtree).
+
 ## Shipped in v3.7.12 (2026-06-30)
 
 - **`radiant phase redirect --list`** — scan workdir for

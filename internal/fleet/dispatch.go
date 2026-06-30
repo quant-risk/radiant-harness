@@ -348,13 +348,15 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 	// Now that we have a real pid, write it.
 	_ = writePidFile(pidPath, cmd.Process.Pid)
 	defer removePidFile(pidPath)
-	// Also remove the children + grandchildren sidecars so a
-	// follow-up mcp__radiant__fleet_status doesn't surface stale
-	// child / grandchild pids from a previous run of the same
-	// task id. v3.7.12 added the grandchildren sidecar; the
-	// children sidecar has been here since v3.7.10.
+	// Also remove the children + grandchildren + great-
+	// grandchildren sidecars so a follow-up
+	// mcp__radiant__fleet_status doesn't surface stale pids
+	// from a previous run of the same task id. v3.7.10 added
+	// children; v3.7.12 added grandchildren; v3.7.13 added
+	// great-grandchildren.
 	defer removePidFile(taskPidChildrenPath(d.cfg.Workdir, runID, task.ID))
 	defer removePidFile(taskPidGrandchildrenPath(d.cfg.Workdir, runID, task.ID))
+	defer removePidFile(taskPidGreatGrandchildrenPath(d.cfg.Workdir, runID, task.ID))
 
 	// v3.7.10 — periodically refresh the children sidecar so
 	// mcp__radiant__fleet_status can report nested liveness
@@ -388,40 +390,53 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 // refreshChildPidsLoop polls pgrep -P at the given interval and
 // writes the result to the children sidecar file. v3.7.12+
 // also writes the grandchildren sidecar (pgrep -P on each live
-// child). Exits when refreshDone is closed (which signals "the
-// agent process has exited, stop polling").
+// child). v3.7.13+ writes the great-grandchildren sidecar too
+// (pgrep -P on each live grandchild). Exits when refreshDone is
+// closed (which signals "the agent process has exited, stop
+// polling").
 func refreshChildPidsLoop(workdir, runID, taskID string, parentPid int, interval time.Duration, refreshDone <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	// Initial snapshot before the first tick so the sidecar has
 	// content right away.
-	refreshChildAndGrandchildrenSidecars(workdir, runID, taskID, parentPid)
+	refreshChildTreeSidecars(workdir, runID, taskID, parentPid)
 	for {
 		select {
 		case <-refreshDone:
 			return
 		case <-ticker.C:
-			refreshChildAndGrandchildrenSidecars(workdir, runID, taskID, parentPid)
+			refreshChildTreeSidecars(workdir, runID, taskID, parentPid)
 		}
 	}
 }
 
-// refreshChildAndGrandchildrenSidecars writes both the children
-// and grandchildren sidecars in a single pgrep pass. Walks the
+// refreshChildTreeSidecars writes children + grandchildren +
+// great-grandchildren sidecars in a single pgrep pass. Walks the
 // live children first, then for each live child walks its own
-// children. Children that died between refreshes are filtered
-// out (the next iteration won't see them via pgrep -P, so they
-// simply stop appearing in the sidecar — no zombie data).
-func refreshChildAndGrandchildrenSidecars(workdir, runID, taskID string, parentPid int) {
+// children, then for each live grandchild walks its own children.
+// Children / grandchildren / great-grandchildren that died
+// between refreshes are filtered out (the next iteration won't
+// see them via pgrep -P, so they simply stop appearing in the
+// sidecar — no zombie data).
+func refreshChildTreeSidecars(workdir, runID, taskID string, parentPid int) {
 	children := ChildrenPidsForParent(parentPid)
 	_ = writeChildPids(workdir, runID, taskID, children)
 
 	var grandchildren []int
+	var greatGrandchildren []int
 	for _, c := range children {
 		if !pidAlive(c) {
-			continue // skip dead children — their children are orphaned
+			continue
 		}
-		grandchildren = append(grandchildren, ChildrenPidsForParent(c)...)
+		cgc := ChildrenPidsForParent(c)
+		grandchildren = append(grandchildren, cgc...)
+		for _, gc := range cgc {
+			if !pidAlive(gc) {
+				continue
+			}
+			greatGrandchildren = append(greatGrandchildren, ChildrenPidsForParent(gc)...)
+		}
 	}
 	_ = writeGrandchildrenPids(workdir, runID, taskID, grandchildren)
+	_ = writeGreatGrandchildrenPids(workdir, runID, taskID, greatGrandchildren)
 }

@@ -127,13 +127,24 @@ cleanup after a long fleet run. --list --json emits NDJSON.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			list, _ := cmd.Flags().GetBool("list")
+			purge, _ := cmd.Flags().GetString("purge")
 			cwd, _ := os.Getwd()
-			if list {
+
+			// Exactly one of: --list, --purge, or positional
+			// <old> <new>. Mutually exclusive flags so the operator
+			// can't accidentally combine (e.g. --list + --purge
+			// would be ambiguous).
+			switch {
+			case list && purge != "":
+				return fmt.Errorf("--list and --purge are mutually exclusive")
+			case list:
 				asJSON, _ := cmd.Flags().GetBool("json")
 				return listFollowRedirects(cwd, asJSON, os.Stdout)
+			case purge != "":
+				return purgeFollowRedirect(cwd, purge)
 			}
 			if len(args) != 2 {
-				return fmt.Errorf("redirect requires <old> <new> args (or use --list)")
+				return fmt.Errorf("redirect requires <old> <new> args (or use --list or --purge=<ticket>)")
 			}
 			return writeFollowRedirect(cwd, args[0], args[1])
 		},
@@ -142,6 +153,10 @@ cleanup after a long fleet run. --list --json emits NDJSON.`,
 		"List all redirects in the workdir (scans .radiant-harness/state/possess-*/redirect.json).")
 	redirectCmd.Flags().Bool("json", false,
 		"With --list, emit NDJSON instead of a formatted table.")
+	redirectCmd.Flags().String("purge", "",
+		"Remove the redirect.json for the given ticket id (explicit cleanup without removing the state.json). "+
+			"Returns 0 if the redirect was removed, 1 if no redirect existed for the ticket. "+
+			"Mutually exclusive with --list.")
 
 	watchCmd := &cobra.Command{
 		Use:   "watch <task-id>",
@@ -514,7 +529,40 @@ func followRedirectPath(workdir, ticketID string) string {
 		"possess-"+ticketID, "redirect.json")
 }
 
-// listFollowRedirects scans .radiant-harness/state/possess-*/
+// purgeFollowRedirect removes the redirect.json under
+// .radiant-harness/state/possess-<ticket>/ without touching the
+// state.json itself. Returns nil (success) if the file was
+// removed; returns a sentinel error if the file didn't exist
+// so the caller can exit non-zero for CI/lint detection.
+//
+// Does NOT remove the state.json — the operator might still be
+// watching the ticket through `phase watch` or `phase follow`
+// and the persisted state is needed for that. The redirect is
+// only the follow-pointer; clearing it means future watches
+// won't transparently switch.
+func purgeFollowRedirect(workdir, ticketID string) error {
+	return purgeFollowRedirectW(workdir, ticketID, os.Stdout, os.Stderr)
+}
+
+// purgeFollowRedirectW is the writer-injecting testable form of
+// purgeFollowRedirect. Used by the v3.7.13 unit tests so we can
+// capture output without going through cobra. v3.7.13 — added
+// so the redirect --purge contract is testable end-to-end without
+// building the binary.
+func purgeFollowRedirectW(workdir, ticketID string, stdout, stderr io.Writer) error {
+	path := followRedirectPath(workdir, ticketID)
+	err := os.Remove(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "phase redirect: no redirect found for %s (looked at %s)\n",
+				ticketID, path)
+			return fmt.Errorf("no redirect for ticket %q", ticketID)
+		}
+		return fmt.Errorf("remove redirect: %w", err)
+	}
+	fmt.Fprintf(stdout, "✓ removed redirect: %s\n  %s\n", ticketID, path)
+	return nil
+}
 // for redirect.json files and prints them either as a formatted
 // table or as NDJSON (one object per line). Exits 0 even when
 // no redirects exist (empty list is not an error).

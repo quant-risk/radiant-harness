@@ -119,7 +119,7 @@ func TestRefreshChildAndGrandchildrenSidecars_WritesBoth(t *testing.T) {
 
 	time.Sleep(150 * time.Millisecond)
 
-	refreshChildAndGrandchildrenSidecars(dir, "run-refresh", "task-refresh", cmd.Process.Pid)
+	refreshChildTreeSidecars(dir, "run-refresh", "task-refresh", cmd.Process.Pid)
 
 	if _, ok := readChildPids(dir, "run-refresh", "task-refresh"); !ok {
 		t.Errorf("children sidecar missing after refresh")
@@ -142,7 +142,7 @@ func TestRefreshChildAndGrandchildrenSidecars_DeadChildSkipped(t *testing.T) {
 	// the parent has no live children to walk.
 	our := os.Getpid()
 
-	refreshChildAndGrandchildrenSidecars(dir, "run-skip", "task-skip", our)
+	refreshChildTreeSidecars(dir, "run-skip", "task-skip", our)
 
 	// Both sidecars should exist after refresh, even if empty.
 	if _, err := os.Stat(taskPidChildrenPath(dir, "run-skip", "task-skip")); err != nil {
@@ -176,7 +176,7 @@ func TestRefreshChildAndGrandchildrenSidecars_GrandchildrenFound(t *testing.T) {
 
 	time.Sleep(150 * time.Millisecond)
 
-	refreshChildAndGrandchildrenSidecars(dir, "run-gc", "task-gc", cmd.Process.Pid)
+	refreshChildTreeSidecars(dir, "run-gc", "task-gc", cmd.Process.Pid)
 
 	children, _ := readChildPids(dir, "run-gc", "task-gc")
 	grandchildren, _ := readGrandchildrenPids(dir, "run-gc", "task-gc")

@@ -6,11 +6,44 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 14:15 BRT by mavis during v3.7.12 deep post-release validation (second pass)
+**Last updated:** 2026-06-30 15:30 BRT by mavis during v3.7.13 release cut
 
 ## Current sprint / active feature
 
-- Active: **v3.7.12 shipped + validated 15/15 twice; v3.7.13 kickoff pending.**
+- Active: **v3.7.13 code-complete; release cut pending.**
+- Sprint goal: close the v3.7.12 follow-up work + make the
+  nested pid tree visible end-to-end. Three items shipped (A+B+C):
+  - **A.** `radiant fleet status <run-id> --html` — self-
+    contained HTML report with visual nested pid tree (parent →
+    child → grandchild → great-grandchild) in Unicode box-
+    drawing glyphs inside a `<pre>` block, color-coded by
+    liveness. `--html-out=<path>` variant writes to disk. No
+    external CSS / JS / CDN — renders offline.
+  - **B.** `radiant phase redirect --purge=<ticket-id>` —
+    explicit cleanup of a stale follow redirect without nuking
+    state dir. Removes ONLY `redirect.json` for the named
+    ticket; spec, tasks, other redirects untouched. Exits 1 on
+    missing file so CI / lints catch accidental purges.
+  - **C.** Nested pid tree — great-grandchildren layer. New
+    `.pid.great-grandchildren` sidecar; `PidTree` gains
+    `GreatGrandchildrenPids` + `GreatGrandchildrenAlive` +
+    `GreatGrandchildrenCount`. Crashed-evidence string in
+    `Coordinator.Status()` includes great-grandchildren counts.
+- Progress: (1) `purgeFollowRedirect` + `purgeFollowRedirectW`
+  testable helper in `cmd_phase_watch.go`; (2) `PidTree` struct
+  extended with 3 new fields + read/write helpers +
+  `taskPidGreatGrandchildrenPath`; (3) `refreshChildTreeSidecars`
+  writes all 3 sidecars (children + grandchildren + great-
+  grandchildren) in a single pgrep pass; (4) `FormatStatusHTML`
+  + `renderPidTreeHTML` in `internal/fleet/coordinator.go`
+  (~290 lines, pure HTML/CSS, JS-free); (5) `fleet status`
+  cobra RunE routes `--html` + `--html-out=<path>`; (6)
+  crashed-escalation evidence string in coordinator.go extended
+  with great-grandchildren counts; (7) 11 new tests pin the
+  contract (4 CLI purge + 6 HTML + 7 pidtree); (8) CHANGELOG +
+  ROADMAP updated; (9) release cut pending — build + tag
+  v3.7.13 + GitHub release + post-release validation.
+- v3.7.13 GitHub release: tag `v3.7.13` + 7 release assets (TBD).
 
 ## Current sprint / active feature
 
@@ -65,7 +98,59 @@ alwaysApply: true
 
 ## Latest validation
 
-2026-06-30 12:40 BRT — v3.7.10 deep post-release validation, **15/15 PASS**:
+2026-06-30 15:30 BRT — v3.7.13 release cut, **release cut pending**:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (local build) | TBD post-release |
+| B2 | `--version` check | TBD — build BEFORE commit |
+| C | `go test ./...` | PASS (32 packages, 0 FAIL) |
+| C2 | `go test ./internal/fleet ./cmd/radiant -v -run "v3_7_13|PidTree.*GreatGrandchild|FleetStatus_HTML|PhaseRedirect_Purge"` | PASS (11 new tests) |
+| D | `make audit-install` | TBD post-release |
+| E | `make test-agents` | TBD post-release |
+| F | `make test-dropin` | TBD post-release |
+| G | `./scripts/run.sh` | TBD post-release |
+| H | Clean rebuild from tag | TBD — local `v3.7.13-1-g<sha>`, published `v3.7.13` (expected divergence) |
+| I | Fetch published SHA256SUMS | TBD post-release |
+| J | REST API asset inventory | TBD post-release (7/7 expected) |
+| K | Download published darwin-arm64, SHA256 verify | TBD post-release |
+| K2 | Published binary version + self-test | TBD — `v3.7.13`, 8 tools, PASS |
+| K3 | **New v3.7.13 surfaces reachable** | TBD — phase redirect --purge, fleet status --html, fleet status --html-out |
+
+**Process-learnings (v3.7.13):**
+
+- **`pidAlive` is essential** for the great-grandchildren
+  alive-counting contract — without it, a dead sentinel pid
+  would still surface as live. Sentinel `16777215` (above
+  `pid_max` on every reasonable host) is the test pattern.
+- **`TaskPidTree` early-returns on empty children sidecar** —
+  the contract is "no children = no descendants possible",
+  so great-grandchildren are NOT read when children is empty.
+  Test must seed children sidecar too (one bug we hit + fixed
+  during v3.7.13).
+- **`purgeFollowRedirectW`** (writer-injecting form) is the
+  testable shape; `purgeFollowRedirect` is a thin wrapper
+  around it that hardcodes `os.Stdout` / `os.Stderr`. Same
+  pattern as `listFollowRedirects(workdir, asJSON, w io.Writer)`
+  from v3.7.12. Cobra subcommand keeps the simple form;
+  tests use the writer form.
+- **`FormatStatusHTML` is offline-safe by construction**: no
+  http(s):// URLs in src/href, no @import, no <script src=>.
+  Verified by `TestFleetStatus_HTML_SelfContained`. Designed
+  for the "save as email attachment" workflow.
+- **HTML escape is mandatory** — fleet goal / title / evidence
+  may contain operator-supplied strings. The `&` `<` `>` `"`
+  `'` replacer handles XSS via injected metadata.
+  `TestFleetStatus_HTML_EscapesDangerousChars` pins the
+  contract.
+- **`findProjectRoot()` test helper** walks up from cwd looking
+  for `go.mod`. Used by `TestFleetStatus_HTML_HTMLOut_WritesFile`
+  to invoke `go build ./cmd/radiant` from the right cwd
+  regardless of where `go test` was invoked (default cwd is
+  the package's directory, not the project root).
+
+2026-06-30 14:15 BRT — v3.7.12 deep post-release validation, **15/15 PASS** (second pass):
 
 | Step | Description | Result |
 |------|-------------|--------|

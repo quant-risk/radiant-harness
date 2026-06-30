@@ -227,6 +227,8 @@ const taskPidChildrenSuffix = ".children"
 
 const taskPidGrandchildrenSuffix = ".grandchildren"
 
+const taskPidGreatGrandchildrenSuffix = ".great-grandchildren"
+
 // taskPidChildrenPath returns the sidecar children pid file path
 // for a fleet task agent.
 func taskPidChildrenPath(workdir, runID, taskID string) string {
@@ -240,29 +242,42 @@ func taskPidGrandchildrenPath(workdir, runID, taskID string) string {
 	return taskPidPath(workdir, runID, taskID) + taskPidGrandchildrenSuffix
 }
 
+// taskPidGreatGrandchildrenPath returns the sidecar great-
+// grandchildren pid file path. v3.7.13+ — yet another level
+// deeper than the grandchildren sidecar.
+func taskPidGreatGrandchildrenPath(workdir, runID, taskID string) string {
+	return taskPidPath(workdir, runID, taskID) + taskPidGreatGrandchildrenSuffix
+}
+
 // PidTree describes the liveness of a fleet task agent, its
-// children, and (v3.7.12+) its grandchildren. ParentAlive mirrors
-// the v3.7.9 TaskLive.Alive field; ChildrenAlive is true only when
-// every recorded child pid is alive (an empty Children list =
-// trivially true). GrandchildrenAlive adds recursive depth for
-// the common "agent → helper → subprocess" pattern (a `radiant
-// loop start` agent that runs a Python helper which spawns a
-// `git worktree add` subprocess, for example).
+// children, grandchildren, and (v3.7.13+) great-grandchildren.
+// ParentAlive mirrors the v3.7.9 TaskLive.Alive field;
+// ChildrenAlive is true only when every recorded child pid is
+// alive (an empty Children list = trivially true).
+// GrandchildrenAlive adds recursive depth for the common
+// "agent → helper → subprocess" pattern (a `radiant loop start`
+// agent that runs a Python helper which spawns a `git worktree
+// add` subprocess, for example). GreatGrandchildrenAlive adds
+// another layer for the rarer "agent → helper → sub-helper →
+// subprocess" case.
 type PidTree struct {
-	ParentPid         int   `json:"parent_pid"`
-	ParentAlive       bool  `json:"parent_alive"`
-	ChildrenPids      []int `json:"children_pids,omitempty"`
-	ChildrenAlive     bool  `json:"children_alive"`
-	GrandchildrenPids []int `json:"grandchildren_pids,omitempty"`
-	GrandchildrenAlive bool `json:"grandchildren_alive"`
+	ParentPid                int   `json:"parent_pid"`
+	ParentAlive              bool  `json:"parent_alive"`
+	ChildrenPids             []int `json:"children_pids,omitempty"`
+	ChildrenAlive            bool  `json:"children_alive"`
+	GrandchildrenPids        []int `json:"grandchildren_pids,omitempty"`
+	GrandchildrenAlive       bool  `json:"grandchildren_alive"`
+	GreatGrandchildrenPids   []int `json:"great_grandchildren_pids,omitempty"`
+	GreatGrandchildrenAlive  bool  `json:"great_grandchildren_alive"`
 	// ChildCount is the number of currently-live children — when
 	// children have died and been reaped, this can be smaller
-	// than len(ChildrenPids). GrandchildrenCount is the same for
-	// grandchildren. Useful for the "orphaned N helpers" +
-	// "N helpers' helpers" diagnosis in the surfaced status
-	// string.
-	ChildCount         int `json:"child_count"`
-	GrandchildrenCount int `json:"grandchildren_count"`
+	// than len(ChildrenPids). GrandchildrenCount + GreatGrandchildrenCount
+	// follow the same pattern. Useful for the "orphaned N
+	// helpers" + "N helpers' helpers" + "N sub-sub-helpers"
+	// diagnosis in the surfaced status string.
+	ChildCount                int `json:"child_count"`
+	GrandchildrenCount        int `json:"grandchildren_count"`
+	GreatGrandchildrenCount   int `json:"great_grandchildren_count"`
 }
 
 // writeChildPids serializes a slice of int pids to the children
@@ -344,6 +359,42 @@ func writeGrandchildrenPids(workdir, runID, taskID string, pids []int) error {
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
+// readGreatGrandchildrenPids returns the recorded great-
+// grandchildren pid list. v3.7.13+.
+func readGreatGrandchildrenPids(workdir, runID, taskID string) ([]int, bool) {
+	data, err := os.ReadFile(taskPidGreatGrandchildrenPath(workdir, runID, taskID))
+	if err != nil {
+		return nil, false
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids, true
+}
+
+// writeGreatGrandchildrenPids serializes pids to the great-
+// grandchildren sidecar. Same newline-separated format.
+func writeGreatGrandchildrenPids(workdir, runID, taskID string, pids []int) error {
+	path := taskPidGreatGrandchildrenPath(workdir, runID, taskID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var sb strings.Builder
+	for _, p := range pids {
+		fmt.Fprintf(&sb, "%d\n", p)
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
 // TaskPidTree returns the nested liveness for a single task,
 // including grandchildren (v3.7.12+). (alive=false, pid=0)
 // parent means the parent pid file is gone — caller should treat
@@ -394,6 +445,25 @@ func TaskPidTree(workdir, runID, taskID string) PidTree {
 		tree.GrandchildrenCount = gcAlive
 	} else {
 		tree.GrandchildrenAlive = true // vacuously true
+	}
+
+	// v3.7.13 — great-grandchildren. Same pattern as above,
+	// one level deeper. Rarer in practice (most fleet tasks
+	// don't go past grandchildren) but the surface is here for
+	// the operator who needs it.
+	ggChildren, ggcOK := readGreatGrandchildrenPids(workdir, runID, taskID)
+	if ggcOK && len(ggChildren) > 0 {
+		tree.GreatGrandchildrenPids = ggChildren
+		ggcAlive := 0
+		for _, p := range ggChildren {
+			if pidAlive(p) {
+				ggcAlive++
+			}
+		}
+		tree.GreatGrandchildrenAlive = ggcAlive == len(ggChildren)
+		tree.GreatGrandchildrenCount = ggcAlive
+	} else {
+		tree.GreatGrandchildrenAlive = true // vacuously true
 	}
 
 	return tree

@@ -4,6 +4,154 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.13] — 2026-06-30 — phase redirect --purge + great-grandchildren pid tree + fleet status --html
+
+Three backlog items closed in one sprint, all closing the
+v3.7.12 follow-up work and the "make nested pid tree visible
+end-to-end" promise from v3.7.10.
+
+### Added
+
+- **`radiant phase redirect --purge=<ticket-id>`** — explicit
+  cleanup of a stale follow redirect without nuking the entire
+  state directory. Closes the v3.7.12 design gap where the only
+  ways to clear a redirect were (a) delete the file by hand or
+  (b) re-point the redirect to a new ticket (which leaves the
+  file on disk forever, growing `.radiant-harness/state/possess-*`
+  over time). Designed for the operator who wants to "start clean
+  without deleting spec state" — purges ONLY the `redirect.json`
+  for the named ticket, leaves everything else (spec.md,
+  tasks.md, the state dir, other redirects) untouched.
+
+  Behavior:
+  - `radiant phase redirect --purge=<id>` — removes
+    `.radiant-harness/state/possess-<id>/redirect.json`, prints
+    `✓ removed redirect: <id>` + the file path, exits 0.
+  - `radiant phase redirect --purge=<id>` against a ticket with
+    no redirect file — exits 1 with
+    `phase redirect: no redirect found for <id> (looked at <path>)`
+    so CI / lints can detect accidental purges of non-existent
+    redirects (same contract as `git rm` on a missing file).
+  - `radiant phase redirect --list` and `--purge` are mutually
+    exclusive — you can't combine them in one invocation
+    (ambiguous intent; pick one).
+
+  Defense-in-depth contract: this is the operator-facing escape
+  hatch for "the watch is stuck following an old ticket". The
+  `redirect` subcommand is gated behind `RADIANT_INTERNAL=1` like
+  the rest of the `phase` namespace, so the purge flag is only
+  reachable from inside an MCP host or with the explicit
+  `RADIANT_INTERNAL=1` env override (defense against accidental
+  `radiant phase redirect --purge=production-ticket` from a
+  fresh shell).
+
+- **Nested pid tree — great-grandchildren layer (v3.7.13)** —
+  the v3.7.10 children sidecar + v3.7.12 grandchildren sidecar
+  are now joined by a third sidecar: `.pid.great-grandchildren`.
+  Same newline-separated int format, same atomic write + defer
+  cleanup on agent exit, same defense-in-depth
+  `sanitizePidComponent` path traversal check. `PidTree` struct
+  gains three new fields:
+
+  ```go
+  GreatGrandchildrenPids   []int `json:"great_grandchildren_pids,omitempty"`
+  GreatGrandchildrenAlive  bool  `json:"great_grandchildren_alive"`
+  GreatGrandchildrenCount  int   `json:"great_grandchildren_count"`
+  ```
+
+  Coverage added in `internal/fleet/pidtree_great_grandchildren_test.go`:
+  happy path (all alive), one-dead accounting, no-sidecar
+  vacuously-true semantics, write/read roundtrip, path-layout
+  suffix convention, refreshChildTreeSidecars writes all 3
+  sidecars, dead-child-skip-descendants filter, path-traversal
+  defense.
+
+  Real-world use case: an agent that runs a Python helper which
+  spawns a `git worktree add` which spawns an `rsync` — that's
+  parent → child → grandchild → great-grandchild, four levels
+  deep. Before v3.7.13 the operator saw "parent died, 1 helper
+  orphaned"; now they see "parent died, 1 helper orphaned, 1
+  helper's helper orphaned, 1 subprocess orphaned" — they can
+  tell exactly which subprocess to kill by hand.
+
+  The crashed-escalation evidence string in
+  `internal/fleet/coordinator.go` now includes the great-
+  grandchildren count too:
+
+  ```
+  agent pid 12345 not alive (liveness probe); 2 children
+  recorded, 1 still alive; 1 grandchildren recorded, 1 still
+  alive; 1 great-grandchildren recorded, 0 still alive
+  ```
+
+- **`radiant fleet status <run-id> --html`** — new flag on the
+  existing `fleet status` subcommand. Emits a self-contained HTML
+  report (no external CSS, no JavaScript, no remote fonts, no
+  CDN) with a visual nested pid tree (parent → child → grandchild
+  → great-grandchild) drawn in Unicode box-drawing glyphs inside
+  a `<pre>` block. Each node is color-coded by liveness — alive
+  = green, dead = red, vacuous = muted.
+
+  Sub-flags:
+  - `radiant fleet status <run-id> --html` — prints the HTML
+    report to stdout (pipeable to a browser or mail client).
+  - `radiant fleet status <run-id> --html --html-out=<path>` —
+    writes the HTML report to disk, prints a `wrote fleet HTML
+    report to <path> (<bytes> bytes)` line. Designed for the
+    operator who wants to bookmark the report or attach it to
+    a ticket.
+
+  The HTML escape contract is strictly enforced: goal, titles,
+  evidence, agent IDs, worktree dirs, redirect paths — all
+  passed through a `&` / `<` / `>` / `"` / `'` replacer. A
+  malicious fleet goal like `<script>alert("xss")</script>` is
+  rendered as escaped text, never executed. Covered by
+  `TestFleetStatus_HTML_EscapesDangerousChars`.
+
+  Designed to render offline: works in `file://`, works in a
+  mail client, works in `curl ... | less`. Verified by
+  `TestFleetStatus_HTML_SelfContained` (no http/https URLs in
+  src/href, no @import, no <script src=>).
+
+  Closes the v3.7.10 promise of "operator can scan orphaned
+  helpers at a glance" without parsing JSON by hand.
+
+### Tests
+
+- 4 new `cmd/radiant/v3_7_13_test.go` tests:
+  - `TestPhaseRedirect_Purge_RemovesFile` — happy path
+  - `TestPhaseRedirect_Purge_MissingFile` — exit 1 on missing
+  - `TestPhaseRedirect_Purge_DoesNotNukeStateDir` — other
+    redirects in same state dir survive
+  - `TestPhaseRedirect_Purge_PreservesSpec` — spec.md / tasks.md
+    untouched
+  - `TestFleetStatus_HTML_RendersBasicStructure` — DOCTYPE +
+    h1 + counts + pills + footer
+  - `TestFleetStatus_HTML_RendersPidTree` — full 4-level tree
+    with alive/dead classes
+  - `TestFleetStatus_HTML_EmptyRun` — empty placeholder
+  - `TestFleetStatus_HTML_EscapesDangerousChars` — XSS defense
+  - `TestFleetStatus_HTML_SelfContained` — no remote deps
+  - `TestFleetStatus_HTML_HTMLOut_WritesFile` — end-to-end
+    binary build + CLI invoke + file write
+
+- 7 new `internal/fleet/pidtree_great_grandchildren_test.go`
+  tests:
+  - `TestPidTree_GreatGrandchildren_NoGGCSidecar` — vacuous
+  - `TestWriteGreatGrandchildrenPids_Roundtrip` — roundtrip
+  - `TestTaskPidGreatGrandchildrenPath_Layout` — suffix
+  - `TestRefreshChildTreeSidecars_WritesAllThree` — 3-layer
+  - `TestRefreshChildTreeSidecars_DeadChildSkipsDescendants` —
+    dead-child filter
+  - `TestPidTree_GreatGrandchildren_OneDead` — alive/dead
+    accounting
+  - `TestPidTree_GreatGrandchildrenPath_DefendsAgainstTraversal`
+    — path-traversal defense
+
+Total: 11 new tests, 2 new CLI flags (`--purge=<id>` + `--html`),
+1 new third-level pid sidecar (`.pid.great-grandchildren`), 1 new
+renderer (`FormatStatusHTML`).
+
 ## [3.7.12] — 2026-06-30 — phase redirect --list + phase follow + grandchildren pid tree
 
 Three backlog items closed in one sprint, all closing the
