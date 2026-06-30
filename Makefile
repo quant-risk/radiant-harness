@@ -1,5 +1,5 @@
 # Radiant Harness — Makefile
-.PHONY: build test lint clean install release smoke test-agents audit-skills audit-docs audit-install
+.PHONY: build test lint clean install release smoke test-agents test-dropin audit-skills audit-docs audit-install
 
 # CGO_ENABLED=0 is required on macOS arm64 + Go 1.22.x to avoid the
 # "dyld: missing LC_UUID load command" abort trap. The Dockerfile already
@@ -62,6 +62,12 @@ smoke: build audit-skills audit-docs audit-install
 # Manual invocation; no cron, no polling, no daemon.
 test-agents: build
 	./scripts/test-agents.sh
+
+# Public drop-in E2E: install a released radiant binary, call MCP
+# radiant_possess from a host that rejects sampling/createMessage, follow
+# the Self-driven handoff, implement a tiny Go case, and run the gate.
+test-dropin:
+	python3 scripts/e2e/dropin_self_driven_e2e.py
 
 # Audit: every skill referenced in selfDrivenSkillHints must exist as
 # a bundled skill under internal/skill/skills/. Closes the v3.7.1
