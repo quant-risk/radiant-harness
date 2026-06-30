@@ -117,7 +117,33 @@ written file.
 
 ### Post-release validation
 
-2026-06-30 13:10 BRT — **15/15 PASS** after `v3.7.11` tag + release (12 base + 3 v3.7.11-specific surface checks):
+2026-06-30 13:15 BRT — **15/15 PASS** after `v3.7.11` tag + release (12 base + 3 v3.7.11-specific surface checks), second pass:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.11` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical SKIPs local-dirty) |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS (v3.7.11 SHA256SUMS verified) |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.11-1-g82cd89b` (post-validation-commit divergence, expected; published binaries built before tag and SHA-match the published SHA256SUMS) |
+| I | Fetch published SHA256SUMS | OK — basename-only format confirmed (`radiant-darwin-arm64`, no `dist/` prefix) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`d7e7d1c...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.11`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.11`, `mcp self-test` PASS with 8 tools |
+| M | **`--on-change-exit` on real seeded state** (canonical-installed v3.7.11 binary at `~/.local/bin/radiant`) | PASS — initial emit (in_progress) + background flip to done at t+400ms + second emit (done) + exit 0 |
+| N | **`--follow=<ticket>` + `phase redirect` mid-watch** (canonical-installed v3.7.11 binary) | PASS — initial emit (A in_progress) + redirect A→B at t+400ms + watch detected + printed `phase watch: --follow redirect v3711-deep-A → v3711-deep-B` line + attempted B load |
+| O | **`--help` surfaces reachable on canonical-installed v3.7.11 binary** | PASS — `phase watch --help` documents `--on-change-exit` + `--follow`; `phase redirect --help` documents the protocol |
+
+**Surface checks (M/N/O) used the CANONICAL-INSTALLED binary at `~/.local/bin/radiant`** (not the freshly-built `dist/radiant-darwin-arm64`) — this is the strongest form of validation because it exercises the exact artifact a host would get after `curl install.sh@tag | bash`. The previous v3.7.11 validation round (moments ago) used `dist/` directly; this second pass exercises the install.sh path end-to-end.
+
+Earlier in the session (first validation pass): 15/15 PASS — see commit `82cd89b`.
+
+## [3.7.10] — 2026-06-30 — --watch, nested pid tree, async-host opt-in matrix
 
 | Step | Description | Result |
 |------|-------------|--------|
