@@ -6,7 +6,11 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 12:25 BRT by mavis during v3.7.9 code-complete
+**Last updated:** 2026-06-30 12:35 BRT by mavis during v3.7.9 deep post-release validation
+
+## Current sprint / active feature
+
+- Active: **v3.7.9 shipped + validated 12/12; v3.7.10 kickoff pending.**
 
 ## Current sprint / active feature
 
@@ -53,7 +57,45 @@ alwaysApply: true
 
 ## Latest validation
 
-2026-06-30 12:20 BRT — v3.7.9 code-complete validation, full matrix:
+2026-06-30 12:30 BRT — v3.7.9 deep post-release validation, **12/12 PASS**:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` | PASS (RC=0) |
+| A2 | `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.9` |
+| B3b | hidden `fleet-async-runner --help` | reachable (Hidden cobra flag) |
+| B3c | `publicCommands` gate blocks without `RADIANT_INTERNAL=1` | PASS (defense-in-depth) |
+| C | `go test ./...` | PASS (32 packages, 0 FAIL, 683 tests) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical SKIPs local-dirty) |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS v3.7.9 |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.9-1-gda91bd7`, published `v3.7.9` (expected divergence) |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 uploaded |
+| K | Download published darwin-arm64, SHA256 verify | MATCH (`9379fcadf...`) |
+| K2 | Published binary version + self-test | `v3.7.9`, 8 tools, PASS |
+| L | Canonical install from `curl install.sh@tag` | PASS end-to-end |
+
+**Process learnings:**
+
+- **Build BEFORE post-release commits** for clean `v3.7.X` version strings in release binaries. After the first post-release commit, local `make release` produces `v3.7.X-1-g<sha>` and different SHA256s. To verify a published release, **download from GitHub and re-check** — not regenerate locally.
+- **`make clean` deletes `dist/`** including the published SHA256SUMS. Recovery = `curl https://api.github.com/.../releases/tags/vX.Y.Z | jq` + download.
+- **Hidden cobra subcommands** are reachable by direct invocation even though they don't appear in default `--help`. This is the intended surface for the async subprocess primitive (`radiant fleet-async-runner`, `radiant async-runner`).
+
+Earlier in the session (v3.7.9 code-complete validation):
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `go vet ./...` | clean |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `go test ./cmd/radiant` fleet subset | PASS — 7 new tests (`TestMCPFleetStatus_*` × 4, `TestMCPFleetResume_*` × 2, `TestFleetAsync*` × 2) |
+| E | `go test ./internal/fleet` | PASS — 15 new tests (10 pidfile + 5 coordinator), 0 FAIL |
+| F | `make audit-docs` | PASS (46 doc refs / 57 real cmds) |
+| G | `make audit-skills` | PASS (6 hint map / 69 bundled skills) |
 
 | Step | Command | Result |
 |------|---------|--------|

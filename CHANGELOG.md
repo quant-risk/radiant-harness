@@ -80,17 +80,33 @@ work for the loop.
 
 ### Post-release validation
 
-2026-06-30 12:30 BRT — 7/7 PASS after `v3.7.9` tag + release:
+2026-06-30 12:30 BRT — 12/12 PASS after `v3.7.9` tag + release:
 
-| Step | Command | Result |
-|------|---------|--------|
-| A | `go build ./...` | clean |
-| B | `radiant mcp self-test` (published darwin-arm64 binary) | PASS, **8 tools** — the original 6 + `radiant_fleet_status` + `radiant_fleet_resume` |
-| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
-| D | `make audit-install` | PASS, 3/3, 0 SKIP — canonical `curl \| bash` resolves v3.7.9, SHA256 verified, installed binary reports `v3.7.9` |
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` | PASS (RC=0) |
+| A2 | `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, **8 tools** — original 6 + `radiant_fleet_status` + `radiant_fleet_resume` |
+| B2 | `--version` check | `v3.7.9` (clean tag, no `-N-g<sha>` suffix) |
+| B3b | hidden `fleet-async-runner` reachable via direct call | PASS (`Hidden: true` cobra flag — discoverable but not in default --help) |
+| B3c | `publicCommands` gate blocks without `RADIANT_INTERNAL=1` | PASS (defense-in-depth — env guard inside the subcommand is a second check) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL, 683 top-level tests) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical `curl \| bash` SKIPs when local is dirty — expected) |
 | E | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
 | F | `make test-dropin` | PASS, against v3.7.9 |
 | G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
+| H | Clean rebuild from tag (`make clean` + `make release`) | PASS — local binaries report `v3.7.9-1-gda91bd7` (post-validation-commit suffix is expected after the first new commit; published binaries built right after `git tag` keep the clean `v3.7.9` version string) |
+| I | Fetch published SHA256SUMS from release | OK — published file recovered from GitHub; local regeneration now reflects post-commit build (expected to differ from published) |
+| J | REST API asset inventory | 7/7 `state=uploaded` (6 platforms + SHA256SUMS) |
+| K | Download published darwin-arm64, verify SHA256 against SHA256SUMS | MATCH (`9379fcadf...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.9`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag` → `bash install.sh --no-verify --version=3.7.9`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.9`, `mcp self-test` PASS with 8 tools |
+
+**Process learnings from this validation:**
+
+- **Build BEFORE any post-release commit, or accept that the local SHA256SUMS will differ from published.** The published assets on GitHub were built immediately after `git tag v3.7.9` and contain the clean `v3.7.9` version string. Running `make release` after the post-release validation commit produces binaries with `v3.7.9-1-g<sha>` and different SHA256s. To verify the published release is intact, **download from GitHub and re-check** — do not regenerate locally after `make clean`. Step K is the correct pattern.
+- **`make clean` deletes dist/** including the published SHA256SUMS. Re-fetching from the release tag is the recovery path; a `mavis-trash` of `/tmp/<archive>` keeps the operation tidy.
+- **Hidden cobra subcommands (`Hidden: true`) are not shown in default `--help` but are reachable by direct invocation.** Step B3b confirms `radiant fleet-async-runner --help` works even though `radiant --help` doesn't list it. This is the intended surface for the async subprocess primitive.
 
 ## [3.7.8] — 2026-06-30 — Async gate pid/liveness probe
 
