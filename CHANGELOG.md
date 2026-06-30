@@ -486,7 +486,7 @@ phase, regardless of v3.7.1.
 Each tool is small, returns fast, doesn't trap the TUI. Hermes
 becomes the research/spec-writer/skill-loader; the actual execution
 lives in the same chat where Python/bash run. This is the same
-hybrid pattern that solved the iFood Pago MenuFlex case (2026-06-29).
+hybrid pattern validated in an external user case on 2026-06-29.
 
 **Operational rule (carried forward):** `radiant_possess` via MCP
 is a dead end on Hermes TUI. The supported path on synchronous
