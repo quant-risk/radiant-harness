@@ -323,6 +323,16 @@ type phaseStatusSummary struct {
 	Phases             map[string]*phaseMini `json:"phases"`
 	StartedAt          string                `json:"started_at,omitempty"`
 	LastUpdateAt       string                `json:"last_update_at,omitempty"`
+	// Subprocess liveness (v3.7.8+) — populated from
+	// `.radiant-harness/pids/<ticket>.pid`. When the run mode is
+	// subprocess-backed (RADIANT_ASYNC_SUBPROCESS=1), the parent
+	// `radiant mcp serve` process is NOT the one running the phase
+	// work — a child `radiant async-runner` is. A status of
+	// `in_progress` with SubprocessAlive=false indicates the child
+	// died without writing an error to state.json (crash); the
+	// host should re-call `radiant_run_gate` to resume.
+	SubprocessAlive bool   `json:"subprocess_alive,omitempty"`
+	SubprocessPid   int    `json:"subprocess_pid,omitempty"`
 }
 
 type phaseGateSummary struct {
@@ -375,7 +385,12 @@ func buildPhaseStatusSummary(st *possessState, workdir string) phaseStatusSummar
 		}
 		out.Phases[p] = mini
 	}
-	// Composite status: cancelled > error > done > in_progress > pending.
+	// Composite status: cancelled > error > crashed > done > in_progress > pending.
+	//
+	// The "crashed" branch is v3.7.8 — fires only when state.json
+	// records the phase as in_progress but the subprocess pid
+	// file points at a dead process. Without this check, a
+	// crashed child looks like "still in progress" indefinitely.
 	switch {
 	case st.Cancelled:
 		out.Status = "cancelled"
@@ -413,6 +428,26 @@ func buildPhaseStatusSummary(st *possessState, workdir string) phaseStatusSummar
 		out.ResumeCommand = fmt.Sprintf(
 			"mcp__radiant__run_gate(phase=%q, task=%q, workdir=%q)",
 			next, st.Task, st.Workdir)
+	}
+
+	// Subprocess liveness (v3.7.8). If a pid file exists, populate
+	// SubprocessAlive + SubprocessPid. When the recorded phase is
+	// in_progress but the subprocess is dead, escalate status to
+	// "crashed" so the host agent can re-call the gate to resume
+	// instead of waiting for a phase that will never finish.
+	if alive, pid := asyncRunnerLiveness(workdir, st.TaskID); pid > 0 {
+		out.SubprocessAlive = alive
+		out.SubprocessPid = pid
+		if !alive && out.Status == "in_progress" {
+			out.Status = "crashed"
+			out.NextStep = fmt.Sprintf(
+				"subprocess pid=%d died without writing an error to state.json. Re-call `mcp__radiant__run_gate(phase=%q, ...)` to resume from where the crash happened.",
+				pid, st.CurrentPhase)
+		} else if alive {
+			out.NextStep = fmt.Sprintf(
+				"%s (subprocess pid=%d alive — last polled at %s)",
+				out.NextStep, pid, time.Now().UTC().Format("2006-01-02T15:04:05Z"))
+		}
 	}
 
 	// Self-driven runs surface pending files + marker count so the
@@ -565,6 +600,16 @@ func formatPhaseStatusSummary(s phaseStatusSummary) string {
 		b.WriteString(fmt.Sprintf("run mode:     %s\n", s.RunMode))
 	}
 	b.WriteString(fmt.Sprintf("current:      %s\n", s.CurrentPhase))
+	if s.SubprocessPid > 0 {
+		// Subprocess liveness line — only shown when a pid file
+		// is recorded (i.e. the run went through the subprocess
+		// gate path).
+		live := "dead"
+		if s.SubprocessAlive {
+			live = "alive"
+		}
+		b.WriteString(fmt.Sprintf("subprocess:   pid=%d %s\n", s.SubprocessPid, live))
+	}
 	b.WriteString(fmt.Sprintf("next step:    %s\n", s.NextStep))
 	if s.ResumeCommand != "" {
 		b.WriteString(fmt.Sprintf("resume with:  %s\n", s.ResumeCommand))

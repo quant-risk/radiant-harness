@@ -665,3 +665,145 @@ func keysOf(m map[string]interface{}) []string {
 	}
 	return keys
 }
+
+// TestPhaseStatusSummary_SubprocessAlive pins the v3.7.8 contract
+// for the happy path: when a pid file is recorded AND the recorded
+// pid is still alive, the summary surfaces SubprocessAlive=true and
+// SubprocessPid=N. Status stays "in_progress" (the subprocess is
+// actively running) and the next-step line is annotated with the
+// live pid.
+func TestPhaseStatusSummary_SubprocessAlive(t *testing.T) {
+	dir := t.TempDir()
+	id := "feedfacefeedface"
+	st := &possessState{
+		TaskID:       id,
+		Workdir:      dir,
+		Task:         "alive subprocess test",
+		StartedAt:    time.Now().Add(-time.Minute),
+		UpdatedAt:    time.Now(),
+		CurrentPhase: "execute",
+		RunMode:      "self-driven",
+		Phases: map[string]*phaseResult{
+			"discover": {Status: "done"},
+			"plan":     {Status: "done"},
+			"execute":  {Status: "in_progress"},
+			"verify":   {Status: "pending"},
+		},
+	}
+	if err := savePossessState(st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+	// Record the test process pid so the liveness check passes
+	// (the test binary is "alive" while the test runs).
+	writeAsyncRunnerPid(dir, id, os.Getpid())
+	defer removeAsyncRunnerPid(dir, id)
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if !sum.SubprocessAlive {
+		t.Errorf("SubprocessAlive = false, want true (test pid is alive)")
+	}
+	if sum.SubprocessPid != os.Getpid() {
+		t.Errorf("SubprocessPid = %d, want %d", sum.SubprocessPid, os.Getpid())
+	}
+	if sum.Status != "in_progress" {
+		t.Errorf("Status = %q, want in_progress (subprocess is alive)", sum.Status)
+	}
+	if !strings.Contains(sum.NextStep, "subprocess pid=") {
+		t.Errorf("NextStep %q should mention the live subprocess pid", sum.NextStep)
+	}
+}
+
+// TestPhaseStatusSummary_SubprocessCrashed pins the v3.7.8
+// escalation path: phase recorded as in_progress, but the
+// recorded pid is dead (test process exits before the assertion
+// runs — we use a deliberately stale pid that FindProcess can't
+// find). Status must escalate to "crashed" so the host agent
+// knows to re-call run_gate to resume, not wait forever.
+func TestPhaseStatusSummary_SubprocessCrashed(t *testing.T) {
+	dir := t.TempDir()
+	id := "deadbeefdeadbeef"
+	st := &possessState{
+		TaskID:       id,
+		Workdir:      dir,
+		Task:         "crashed subprocess test",
+		StartedAt:    time.Now().Add(-time.Minute),
+		UpdatedAt:    time.Now(),
+		CurrentPhase: "execute",
+		RunMode:      "self-driven",
+		Phases: map[string]*phaseResult{
+			"discover": {Status: "done"},
+			"plan":     {Status: "done"},
+			"execute":  {Status: "in_progress"},
+			"verify":   {Status: "pending"},
+		},
+	}
+	if err := savePossessState(st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+	// Use a pid that exists at lookup time but is guaranteed
+	// to be dead — kill -0 returns an error for zombies. PID 1
+	// (launchd on macOS/Linux) is alive but is a poor choice;
+	// instead we use a pid that's extremely unlikely to exist on
+	// any sane system: PID 0 is invalid; PID 2^22 is conventional
+	// way above pid_max on Linux/macOS. Use 0xFFFFFF (16777215)
+	// which is above pid_max on both Linux (32768 by default) and
+	// macOS (99999).
+	stalePID := 16777215
+	writeAsyncRunnerPid(dir, id, stalePID)
+	defer removeAsyncRunnerPid(dir, id)
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.SubprocessAlive {
+		t.Errorf("SubprocessAlive = true, want false (pid %d is stale)", stalePID)
+	}
+	if sum.SubprocessPid != stalePID {
+		t.Errorf("SubprocessPid = %d, want %d", sum.SubprocessPid, stalePID)
+	}
+	if sum.Status != "crashed" {
+		t.Errorf("Status = %q, want crashed (phase in_progress but subprocess dead)", sum.Status)
+	}
+	if !strings.Contains(sum.NextStep, "subprocess pid=") {
+		t.Errorf("NextStep %q should mention the dead subprocess pid", sum.NextStep)
+	}
+	if !strings.Contains(sum.NextStep, "run_gate") {
+		t.Errorf("NextStep %q should instruct the host to re-call run_gate", sum.NextStep)
+	}
+}
+
+// TestPhaseStatusSummary_NoPidFile asserts that without a pid
+// file the summary fields are zero values — no false positive
+// "alive=false" status on runs that never went through the
+// subprocess path (the inline default).
+func TestPhaseStatusSummary_NoPidFile(t *testing.T) {
+	dir := t.TempDir()
+	id := "0123456789abcdef"
+	st := &possessState{
+		TaskID:       id,
+		Workdir:      dir,
+		Task:         "no pid file",
+		StartedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		CurrentPhase: "execute",
+		Phases: map[string]*phaseResult{
+			"discover": {Status: "done"},
+			"plan":     {Status: "done"},
+			"execute":  {Status: "in_progress"},
+			"verify":   {Status: "pending"},
+		},
+	}
+	if err := savePossessState(st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.SubprocessAlive {
+		t.Errorf("SubprocessAlive = true, want false (no pid file present)")
+	}
+	if sum.SubprocessPid != 0 {
+		t.Errorf("SubprocessPid = %d, want 0 (no pid file present)", sum.SubprocessPid)
+	}
+	// No pid file → no crashed escalation either.
+	if sum.Status == "crashed" {
+		t.Errorf("Status = crashed, want in_progress (no pid file means inline path, not crashed)")
+	}
+}
