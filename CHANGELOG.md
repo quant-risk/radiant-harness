@@ -80,6 +80,28 @@ No migration required. Subprocess mode is opt-in. Set
 `RADIANT_ASYNC_SUBPROCESS=1` in the `radiant mcp serve`
 process to enable; unset (or omit) to keep the inline path.
 
+### Post-release validation (2026-06-30 11:00 BRT)
+
+End-to-end re-validation after the GitHub release was
+published (tag `v3.7.7` + 7 release assets at
+`github.com/quant-risk/radiant-harness/releases/tag/v3.7.7`):
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `radiant mcp self-test` | PASS, 6 tools |
+| C | `go test ./cmd/radiant ./internal/...` | PASS (32 packages, 0 FAIL) |
+| D | `go test ./...` (full module) | PASS |
+| E | `make audit-docs` | PASS (46/57) |
+| F | `make audit-skills` | PASS (6/69) |
+| G | `make audit-install` | **PASS, 3/3, 0 SKIP** — canonical `curl \| bash` resolves v3.7.7, SHA256 verified, installed binary reports `v3.7.7` |
+| H | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| I | `make test-dropin` | PASS against v3.7.7 |
+| J | canonical install end-to-end (`curl` published asset, chmod, `--version`, `mcp self-test`) | PASS — `v3.7.7`, 6 tools, total 9 ms |
+| K | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
+
+See `docs/STATE.md` § Latest validation for the full table.
+
 ## [3.7.6] — 2026-06-30 — Consolidation: status UX, host matrix, doc/backlog cleanup
 
 v3.7.6 is a consolidation release. It ships the v3.7.3-v3.7.5 backlog
