@@ -4,6 +4,180 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.2] — 2026-06-30 — Close the drop-in install gap
+
+Three install-path bugs reproduced on the 2026-06-29 drop-in rehearsal
+are fixed. After v3.7.2 the canonical `curl | bash` line ends in a
+working `v3.7.2` binary with all 7 MCP tools wired on every supported
+host agent.
+
+### Fixed: `install.sh:resolve_latest` SIGPIPE on macOS arm64 (T1)
+
+The previous implementation piped the 20 KB GitHub API body through
+`echo | tr -d '\r' | grep -m1 '"tag_name"' | sed -E 's/.../\1/'`. Under
+`set -euo pipefail`, `grep -m1` closes the pipe after the first match
+and SIGPIPEs `tr` mid-flight — the script exits with `rc=141` and no
+output past `==> detected target: darwin-arm64`. Replaced the chain
+with `grep -m1 '"tag_name"' <<< "$body"` (here-string — producer side
+stays alive until sed finishes). The `tr -d '\r'` step was unused on
+POSIX JSON anyway.
+
+### Fixed: `install.sh` post-install `set -u` AGENT_NAME warning (T2)
+
+`AGENT_NAME`, `SELF_FOR_AGENT`, and `WORKDIR` were read by the
+post-install message block under `set -u` even when the caller didn't
+pass `--agent=` — exit-1 instead of exit-0 with `AGENT_NAME: unbound
+variable` to stderr. Initialised all three at the top of the script:
+
+```bash
+AGENT_NAME="${AGENT_NAME:-}"
+SELF_FOR_AGENT="${SELF_FOR_AGENT:-0}"
+WORKDIR="${WORKDIR:-$PWD}"
+```
+
+Also: `RADIANT_VERSION=3.7.2` (no leading `v`) now normalises to
+`v3.7.2` before building the asset URL, so users passing either form
+land on the same release.
+
+### Changed: module path repathed to `/v3` (T4)
+
+The legacy `module github.com/quant-risk/radiant-harness` Go path
+shipped only v0.6.0 and v0.7.0 (the TypeScript-era product line)
+on `proxy.golang.org` — `go install @latest` returned v0.7.0, which
+contradicts the v3 Light premise (no API key, no `chatAnthropic`
+symbol, MCP-sampling driven). v3.7.2 repaths to
+`module github.com/quant-risk/radiant-harness/v3` and updates all
+74 internal imports + the CI workflows + the doc references.
+**Caveat:** the Go module proxy still mirrors the v0.x line for the
+un-versioned path, so `go install ... @latest` continues to resolve
+to v0.7.0 until `pkg.go.dev` re-indexes. The drop-in primary path
+remains `curl | bash`. Tracked in `specs/0001-v3.7.2-close-dropin-gap/spec.md`
+as Q1.
+
+### Removed: `install.sh` docstring drift (`mavis-code` → `minimax`)
+
+The `--agent=` argv docstring and the agent name tables in
+`AGENTS-FOR-TASKS.md`, `INSTALL.md`, and `README.md` mentioned the
+legacy alias `mavis-code` for what is now `MiniMax Code` (canonically
+`minimax-code` / short `minimax`). Aligned all four locations.
+
+### Removed: `install.sh` INSTALL.md drift (T3)
+
+- `go install ...@v3.2.0` snippet → replaced with the
+  `curl | bash` quick-install path; the `go install` alternative
+  notes the v0.7.0 vs v3.x divergence.
+- "If you use…" table lists 12 agents (added MiniMax row; was 11).
+- "Claude Code → `.mcp.json`" → `.claude/settings.json` (the actual
+  file `cmd_setup_mcp.go::mcpConfigFor` writes to).
+- "discovers `radiant_run`" → `mcp__radiant__possess` (`radiant_run`
+  is now an explicit **DEPRECATED** alias; new code must call
+  `radiant_possess`).
+- "My agent doesn't see `radiant_run`" → rewritten to the canonical
+  tool name and linked to `AGENTS-FOR-TASKS.md` § MCP tools.
+
+### Removed: stubs replaced with real implementations (T5)
+
+`mcp__radiant__run_gate` and `mcp__radiant__possess_async` were stubs
+in v3.7.2-prep that responded with a `v3.7.2 in-development` body.
+v3.7.2 ships real implementations:
+
+- `radiant_run_gate(phase, task, workdir)` runs the chosen phase
+  against the workdir, persists `state.json`, and returns a
+  populated handle within `<500ms`. Four short MCP calls
+  (`discover → plan → execute → verify`) replace the single 120 s
+  blocking `radiant_possess` call that deadlocks on synchronous
+  TUI hosts (Hermes).
+- `radiant_possess_async(task, workdir, profile)` runs the full
+  4-phase loop offline, persists `state.json` after each phase,
+  returns a ticket immediately. Host polls via
+  `radiant_phase_status(task_id)`.
+- `possessState` gains `Profile`, `SpecDir`, `Slug`, `Cancelled`,
+  `RunMode`, `LastPhaseAt` so a host can resume across MCP calls.
+
+`AGENTS-FOR-TASKS.md` § Hermes-TUI workstream is now reachable: any
+synchronous-host agent can drop the bounded primitives hybrid pattern
+they were relying on in v3.7.2-prep.
+
+Four new regression tests in `cmd/radiant/cmd_mcp_possess_test.go`:
+
+- `TestRunGate_DiscoverOffline` — CONTEXT.md land + state done.
+- `TestRunGate_PlanThenExecute` — chained phases; both done.
+- `TestRunGate_RejectsInvalidPhase` — sentinel `-32602` for unknown
+  phase; no state side-effects.
+- `TestPossessAsync_AllPhasesOffline` — full 4-phase loop; all done
+  on disk; spec.md present.
+
+### Added: `make audit-install` drift detector (T6)
+
+`scripts/audit-install.sh` exercise-tests three install paths on a
+fresh sandbox `$HOME` + `$proj/` and asserts each lands on a working
+binary. Wired into `make smoke` alongside `audit-skills` and
+`audit-docs`:
+
+| Path | Behaviour at v3.7.2 |
+|---|---|
+| A. `curl \| bash` canonical | **PASS** (when local build matches a tagged release; SKIP with reason when `*-dirty` / `g<sha>`) |
+| B. direct-tarball download | **PASS** (200 from `releases/latest`) |
+| C. `go install @latest` (v3) | **SKIP** with reason — module proxy still indexes v0.7.0 legacy; re-index is a `pkg.go.dev` operator-side action |
+
+```
+smoke: build audit-skills audit-docs audit-install
+```
+
+`smoke-test.sh` whitelist extended to accept `v3.7.2`.
+
+### Verified
+
+- `go test ./... —short` — 31 packages, 1 pre-existing flaky
+  (`fleet.TestRunAllContextCanceled` — passes when run in isolation;
+  tracked separately).
+- `make smoke` — audit-skills 6/6, audit-docs 46/57 (0 drift),
+  audit-install 2 PASS + 1 SKIP, smoke-test 16/16.
+- `make test-agents` — 12/12 PASS on the cross-agent matrix
+  (Claude, Cursor, Hermes, Codex, OpenCode, Kimi, OpenClaw, Cline,
+  Windsurf, Zed, VSCode, MiniMax).
+- `make release` — 6 cross-platform targets built:
+  linux-{amd64,arm64}, darwin-{amd64,arm64},
+  windows-{amd64,arm64}.exe. All 11.0–12.3 MB, **zero** HTTP-LLM
+  symbols on every target, `SHA256SUMS` generated.
+- E2E drop-in rehearsal against public v3.7.2 release:
+  - Path A (`curl | bash`): binary installed, `radiant --version`
+    reports `v3.7.2`, `mcp self-test` PASS with 7 tools.
+  - Path B (direct-tarball): same.
+- GitHub Release: `quant-risk/radiant-harness/releases/tag/v3.7.2`.
+
+### Known caveats (forwarded into v3.7.3 notes)
+
+1. **Go module proxy v0.x index.** New `go install ... /v3/cmd/radiant`
+   at `@latest` returns `v0.7.0` (legacy TS-era product line) on the
+   `pkg.golang.org` proxy until someone re-indexes the v3 tags. The
+   audit-install script flags this as SKIP (not FAIL) and documents
+   the workaround (`curl | bash`). Tracked as Q1.
+2. **Hermes TUI `radiant_possess` deadlock at the MCP protocol
+   layer.** v3.7.2 ships the gate-routing primitives
+   (`radiant_run_gate` / `radiant_possess_async`) but the protocol-
+   level synchronous-callback deadlock is independent. Hosts that
+   need end-to-end execution in a synchronous TUI must use the
+   4-tool hybrid pattern documented in `AGENTS-FOR-TASKS.md`.
+3. **`radiant_run` alias kept for back-compat** but marked
+   **DEPRECATED**. New code must call `mcp__radiant__possess`. Will
+   be removed in v3.8.0 unless a host agent surfaces a blocking
+   reason via issue tracker.
+
+### Install / upgrade
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/v3.7.2/install.sh | bash
+```
+
+Verify:
+
+```bash
+RADIANT_VERSION=v3.7.2 bash <(curl -fsSL https://raw.githubusercontent.com/quant-risk/radiant-harness/v3.7.2/install.sh) --prefix=/usr/local/bin
+/usr/local/bin/radiant --version   # → v3.7.2
+/usr/local/bin/radiant mcp self-test   # PASS, 7 tools
+```
+
 ## [3.7.2-prep] — 2026-06-29 — Skill name drift + Hermes async primitives skeleton + audit-docs
 
 Four commits ship together because all three surfaced in the same
