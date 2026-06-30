@@ -1,28 +1,23 @@
-# spec.md — 0001-smoke-test-pos-reinicio-confirmar-que-radiant-possess-guia-o-age
+# Spec — smoke test pós-reinício do radiant_possess self-driven
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed.
 
 ## Goal
 
-```
-smoke test pos-reinicio: confirmar que radiant_possess guia o agente em modo self-driven quando sampling nao existe
-```
-
+Confirmar após reinício que `radiant_possess` guia o agente em modo
+self-driven quando sampling não existe.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=c8f1bf409906c1c5 phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=c8f1bf409906c1c5 phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=c8f1bf409906c1c5 phase=plan] (high-level — refine below)
+- MCP server inicia e lista os tools esperados.
+- `radiant_possess` retorna handoff self-driven em host sem sampling.
+- O host consegue preencher os artefatos e executar a verificação.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=c8f1bf409906c1c5 phase=plan] (sketch; expand)
+- Testar todos os hosts documentados em um único smoke test.
 
-## Profile
+## Verification
 
-- lean
-
----
-[host-agent: fill in — task_id=c8f1bf409906c1c5 phase=plan]
+- `radiant mcp self-test`
+- `make test-dropin`

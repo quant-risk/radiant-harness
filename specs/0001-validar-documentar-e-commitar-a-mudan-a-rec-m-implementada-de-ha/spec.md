@@ -1,28 +1,24 @@
-# spec.md — 0001-validar-documentar-e-commitar-a-mudan-a-rec-m-implementada-de-ha
+# Spec — validar, documentar e commitar handoff self-driven
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed.
 
 ## Goal
 
-```
-Validar, documentar e commitar a mudança recém-implementada de handoff self-driven no radiant_possess para Codex sem MCP sampling. Escopo: verificar testes relevantes, documentar comportamento operacional, preservar mudanças não relacionadas no workspace e criar commit apenas com arquivos da mudança.
-```
-
+Validar, documentar e commitar a mudança de handoff self-driven no
+`radiant_possess` para hosts sem MCP sampling.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] (high-level — refine below)
+- Testes relevantes passam.
+- README/AGENTS/INSTALL descrevem o comportamento operacional.
+- O commit contém apenas mudanças relacionadas ao harness.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] (sketch; expand)
+- Resolver casos externos do usuário.
 
-## Profile
+## Verification
 
-- standard
-
----
-[host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan]
+- `go test ./cmd/radiant`
+- `make test-dropin`
+- commits `e6950c3`, `62096da`, `501f272`, `f0f8186`, `f706801`

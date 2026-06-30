@@ -1,28 +1,29 @@
-# spec.md — 0001-corrigir-o-projeto-para-funcionar-100-com-radiant-harness-escopo
+# Spec — corrigir o projeto para funcionar com radiant-harness
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed by v3.7.5 validation and follow-up cleanup on 2026-06-30.
 
 ## Goal
 
-```
-Corrigir o projeto para funcionar 100% com radiant-harness. Escopo: validar e ajustar configuração MCP/Codex, garantir que boot/loop/possess tenham caminho operacional, consolidar a ontologia/world model de forma utilizável se faltar, preservar mudanças existentes do usuário, não editar manualmente fora do Radiant, e produzir evidências objetivas de verificação. Se alguma etapa exigir reinício do host agent, documentar exatamente o que ficou corrigido e o que depende do reinício.
-```
-
+Corrigir o projeto para funcionar com radiant-harness, incluindo MCP/Codex,
+possess/self-driven, ontologia utilizável, preservação de mudanças do usuário
+e evidências objetivas de verificação.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=661e99ce2f99e6ef phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=661e99ce2f99e6ef phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=661e99ce2f99e6ef phase=plan] (high-level — refine below)
+- MCP setup, `radiant doctor`, `radiant mcp self-test`, and drop-in
+  installation path are documented and testable.
+- `radiant_possess` has a self-driven fallback for hosts without sampling.
+- The ontology and project docs identify where context, skills, specs, and
+  architecture live.
+- Verification evidence exists in tests and release artifacts.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=661e99ce2f99e6ef phase=plan] (sketch; expand)
+- Guarantee every possible third-party host runtime without host-specific setup.
+- Preserve unrelated user cases in this repository.
 
-## Profile
+## Verification
 
-- thorough
-
----
-[host-agent: fill in — task_id=661e99ce2f99e6ef phase=plan]
+- `make test-dropin`
+- `go test ./cmd/radiant ./internal/...`
+- `radiant mcp self-test`

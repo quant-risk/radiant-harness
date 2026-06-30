@@ -1,19 +1,9 @@
-# tasks.md — 0001-empacotar-todas-as-mudan-as-pendentes-validar-commitar-e-subir-p
+# Tasks — empacotar, validar, commitar e subir mudanças
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+).
-> The host agent should fill in concrete subtasks under each stub below.
+Status: closed.
 
-## Tasks
-
-1. [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] — break into 2–3 concrete subtasks.
-2. [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] — break into 2–3 concrete subtasks.
-3. [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] — break into 2–3 concrete subtasks.
-
-## Gates (suggested)
-
-- `go build ./...` (or stack equivalent) → PASS
-- `go test ./...` (or stack equivalent) → PASS
-- [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] — describe the manual verification step.
-
----
-[host-agent: fill in — task_id=12dddeff40c1d726 phase=plan]
+- [x] Review pending changes.
+- [x] Run validation gates.
+- [x] Commit harness changes.
+- [x] Push `main` to GitHub.
+- [x] Publish release artifacts.

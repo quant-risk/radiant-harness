@@ -1,28 +1,25 @@
-# spec.md — 0001-implementar-fallback-self-driven-para-codex-quando-mcp-sampling
+# Spec — fallback self-driven para Codex sem MCP sampling
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed.
 
 ## Goal
 
-```
-Implementar fallback self-driven para Codex quando MCP sampling/createMessage não for suportado. Requisitos: detectar erro JSON-RPC -32601/method sampling.createMessage ou sampling/createMessage; não encerrar como critical_failure nesses casos; registrar estado/trace como self-driven/awaiting_host_action; permitir que o fluxo seja retomável via resume/status; preservar compatibilidade com hosts que suportam sampling; adicionar/ajustar verificação mínima para provar que o erro vira modo self-driven em vez de falha crítica.
-```
-
+Quando MCP sampling/createMessage não existir, `radiant_possess` deve guiar o
+host agent em modo self-driven em vez de encerrar como falha crítica.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=43e8c85f6936619e phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=43e8c85f6936619e phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=43e8c85f6936619e phase=plan] (high-level — refine below)
+- Erros JSON-RPC `-32601` de sampling viram handoff self-driven.
+- O estado registra modo self-driven e arquivos pendentes.
+- A resposta MCP informa claramente os arquivos e o próximo passo do host.
+- Há regressão cobrindo o handoff sem sampling.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=43e8c85f6936619e phase=plan] (sketch; expand)
+- Fazer o harness editar arquivos sozinho fora do host agent.
+- Remover suporte para hosts que possuem sampling.
 
-## Profile
+## Verification
 
-- thorough
-
----
-[host-agent: fill in — task_id=43e8c85f6936619e phase=plan]
+- `go test ./cmd/radiant -run TestRadPossessJSONRPCRegression`
+- `make test-dropin`

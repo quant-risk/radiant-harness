@@ -6,29 +6,58 @@ alwaysApply: false
 
 # System Architecture
 
-> **Consolidated** view of the system by 5 axes (+ security and operational). Each section is a
-> **short summary + link** to detail (ADRs, context-map, diagrams, TESTING). Generated/updated
-> in `/kickoff`. **Keep lean** — detail lives in linked docs, this is the map.
-
 ## 1. Tech stack
-<Languages, frameworks, runtime, package management, target versions.>
+
+- Go module `github.com/quant-risk/radiant-harness/v3`.
+- Cobra-style CLI under `cmd/radiant`.
+- Local MCP JSON-RPC server for host-agent integration.
+- Bash/Python validation and release scripts.
+- Markdown specs, docs, skills, and state files as first-class artifacts.
 
 ## 2. Base architecture
-<Style (modular monolith / services / serverless), layers (DDD), main bounded contexts.>
+
+radiant-harness is a local CLI plus MCP runtime. The main bounded contexts are:
+
+- CLI commands: install, doctor, setup, loop, fleet, MCP, docs, telemetry.
+- MCP possession: `radiant_possess`, self-driven fallback, async/offline
+  primitives, phase status.
+- Loop engine: single-goal Discover -> Plan -> Execute -> Verify -> Persist.
+- Fleet engine: decomposition, dispatch, retry, and summary.
+- Skills and ontology: bundled domain instructions and compact world model.
+- Install/release: cross-agent setup, drop-in installer, release artifacts.
 
 ## 3. Infra
-<Cloud/provider, environments (dev/stg/prod), deploy model, IaC, cost.>
+
+The harness is local-first. It installs a single `radiant` binary, writes MCP
+configuration for supported host agents, and persists state under
+`.radiant-harness/`. Public distribution is through GitHub releases and
+`install.sh`.
 
 ## 4. Quality
-<Test strategy (pyramid), minimum coverage, lint/format, static analysis (type-check/complexity/SAST), review policy.>
+
+Quality is enforced by Go tests, MCP self-test, install audit, drop-in E2E,
+agent matrix checks, and release artifact validation. `scripts/run.sh` is the
+project-level verification entrypoint.
 
 ## 5. Observability
-<Structured logs, metrics, tracing, alerts and SLO/SLI of the system.>
+
+Runs persist state, traces, and handoff files under `.radiant-harness/`.
+Loop/fleet commands expose status/history/export/diff views. MCP tools return
+structured JSON-RPC errors for invalid input and operational failures.
 
 ## 6. Security
-<Authentication and authorization, controls and policies, data protection (PII/encryption),
-compliance (LGPD/GDPR/…), secrets management.>
+
+The v3 line avoids direct HTTP LLM calls in the harness runtime. Agent reasoning
+is routed through host-provided MCP sampling or self-driven handoff. Gate
+execution uses policy allowlists for risky shell commands.
 
 ## 7. Operational
-<Deploy and rollback, monitoring and alerts (who is paged), backup and recovery,
-incident runbook. Links to Infra (3) and Observability (5).>
+
+Primary operator flow:
+
+1. Install with `install.sh`.
+2. Run `radiant setup-mcp --agent=<host>`.
+3. Restart the host agent.
+4. Use `radiant_possess` through MCP, or self-driven/async primitives when the
+   host cannot sample.
+5. Validate with `radiant doctor`, `radiant mcp self-test`, and project gates.

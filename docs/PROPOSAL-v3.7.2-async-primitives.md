@@ -106,27 +106,26 @@ the full wall-clock time, but no sampling-callback deadlock.
 
 ## Implementation plan
 
-### Step 1 — design + types (this proposal + skeleton)
+### Step 1 — design + types (completed)
 
 Files:
-- `cmd/radiant/cmd_mcp_run_gate.go` — MCP tool handler stub (returns "v3.7.2 in development" for now)
-- `cmd/radiant/cmd_mcp_possess_async.go` — MCP tool handler stub
+- `cmd/radiant/cmd_mcp_run_gate.go` — MCP tool handler for one offline phase
+- `cmd/radiant/cmd_mcp_possess_async.go` — MCP tool handler for the full offline loop
 - `internal/possess/async.go` — `AsyncGate` interface, ticket generation, state-path helper
 - `cmd/radiant/cmd_mcp_runtime.go` — register the 2 new tools
 - `cmd/radiant/cmd_mcp_possess.go` — refactor: `radiant_possess` for sync hosts fires `possess_async` internally
 
-### Step 2 — real implementation
+### Step 2 — real implementation (completed for self-driven offline mode)
 
-- `internal/possess/async.go` — actual subprocess spawn (`exec.CommandContext`),
-  polling tick (1s default), state persistence to `.radiant-harness/state/<ticket>/`,
-  completion / failure detection via state.json `current_phase == "verify" && status == "done"`.
-- Wire into `internal/loop/Loop.RunOnePhase` (existing offline-phase runner).
+- MCP handlers persist state to `.radiant-harness/state/<ticket>/`.
+- `radiant_run_gate` runs one self-driven phase.
+- `radiant_possess_async` runs all four self-driven phases.
+- `radiant_phase_status` reads the persisted state.
 - Tests:
-  - `TestAsyncGate_SpawnAndPoll` — fire `run_gate(phase=discover)` → poll until done
-  - `TestPossessAsync_HermesSubprocessSurvivesToolCallTimeout` — simulate Hermes
-    by giving the subprocess 200ms wall-clock; assert state.json reaches discover:done
-  - `TestSyncPossess_DetectsSynchronousHostAndUsesAsyncPath` — host detection mocks
-    Hermes capability, asserts internal async refactor fires
+  - `TestRunGate_DiscoverOffline`
+  - `TestRunGate_PlanThenExecute`
+  - `TestRunGate_RejectsInvalidPhase`
+  - `TestPossessAsync_AllPhasesOffline`
 
 ### Step 3 — AGENTS-FOR-TASKS.md update
 
@@ -147,7 +146,7 @@ CHANGELOG.md `[3.7.2]` with:
 ## What's NOT in v3.7.2
 
 - Real-time streaming of progress (websocket to host) — TBD future version
-- Cancellation API for `possess_async` from host — TBD future version
+- Full background subprocess detachment for long-running async execution — TBD future version
 - Multi-host async orchestration (Fleet mode async) — TBD future version
 
 ## Decision needed

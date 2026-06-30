@@ -1,28 +1,30 @@
-# spec.md — 0001-validar-e-corrigir-o-fluxo-drop-in-para-outro-agente-quando-o-us
+# Spec — corrigir fluxo drop-in para outro agente
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed by v3.7.5 drop-in E2E.
 
 ## Goal
 
-```
-Validar e corrigir o fluxo drop-in para outro agente: quando o usuário disser 'Resolva esse case usando https://github.com/quant-risk/radiant-harness', o agente deve conseguir instalar/configurar o harness, expor MCP, entrar em possess/self-driven quando sampling não existir e concluir sem erro operacional. Se houver lacunas em README/INSTALL/install.sh/MCP setup/testes, corrigir, validar, commitar e subir.
-```
-
+Quando um usuário pedir a outro agente para resolver um case usando
+`https://github.com/quant-risk/radiant-harness`, esse agente deve conseguir
+instalar, configurar MCP, entrar em possess/self-driven quando necessário e
+concluir sem erro operacional conhecido.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=1a433c01a123b633 phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=1a433c01a123b633 phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=1a433c01a123b633 phase=plan] (high-level — refine below)
+- `install.sh` instala a release correta.
+- `radiant setup-mcp` e instruções por host estão documentadas.
+- O MCP expõe os tools esperados.
+- Host sem sampling recebe handoff self-driven utilizável.
+- O E2E público simula instalação e execução.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=1a433c01a123b633 phase=plan] (sketch; expand)
+- Garantir execução sem reinício quando o host exige reload de MCP.
+- Garantir hosts não documentados.
 
-## Profile
+## Verification
 
-- thorough
-
----
-[host-agent: fill in — task_id=1a433c01a123b633 phase=plan]
+- `make test-dropin`
+- `make test-agents`
+- `make audit-install`
+- release `v3.7.5`

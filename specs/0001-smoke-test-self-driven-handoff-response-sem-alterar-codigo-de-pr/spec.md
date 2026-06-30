@@ -1,28 +1,21 @@
-# spec.md — 0001-smoke-test-self-driven-handoff-response-sem-alterar-codigo-de-pr
+# Spec — smoke test do handoff self-driven
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed.
 
 ## Goal
 
-```
-smoke test self-driven handoff response sem alterar codigo de produto
-```
-
+Validar a resposta de handoff self-driven sem alterar código de produto.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=e3a1cc3dac4147b8 phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=e3a1cc3dac4147b8 phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=e3a1cc3dac4147b8 phase=plan] (high-level — refine below)
+- A resposta cita modo self-driven.
+- A resposta aponta arquivos gerados e pendências.
+- Nenhuma alteração funcional de produto é necessária para o smoke test.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=e3a1cc3dac4147b8 phase=plan] (sketch; expand)
+- Resolver uma tarefa de domínio real.
 
-## Profile
+## Verification
 
-- lean
-
----
-[host-agent: fill in — task_id=e3a1cc3dac4147b8 phase=plan]
+- `go test ./cmd/radiant -run TestRadPossessJSONRPCRegression`

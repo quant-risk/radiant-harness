@@ -1,28 +1,26 @@
-# spec.md — 0001-validar-novamente-o-e2e-drop-in-self-driven-rec-m-adicionado-doc
+# Spec — revalidar E2E drop-in self-driven
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed.
 
 ## Goal
 
-```
-Validar novamente o E2E drop-in self-driven recém-adicionado, documentar como rodar o teste e commitar a documentação final. Escopo: rodar make test-dropin, go test ./..., mcp self-test, atualizar docs se faltar referência ao teste, commitar e preservar working tree limpa.
-```
-
+Revalidar o E2E drop-in self-driven, documentar como rodar o teste e commitar
+a documentação final.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=338f24444806740b phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=338f24444806740b phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=338f24444806740b phase=plan] (high-level — refine below)
+- `make test-dropin` passa.
+- `go test ./...` passa.
+- `radiant mcp self-test` passa.
+- A documentação referencia o teste.
+- A árvore de trabalho fica limpa após commit.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=338f24444806740b phase=plan] (sketch; expand)
+- Adicionar novo comportamento funcional além da validação/documentação.
 
-## Profile
+## Verification
 
-- standard
-
----
-[host-agent: fill in — task_id=338f24444806740b phase=plan]
+- `make test-dropin`
+- `go test ./...`
+- `radiant mcp self-test`

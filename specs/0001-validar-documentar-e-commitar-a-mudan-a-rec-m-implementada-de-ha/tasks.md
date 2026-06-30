@@ -1,19 +1,8 @@
-# tasks.md — 0001-validar-documentar-e-commitar-a-mudan-a-rec-m-implementada-de-ha
+# Tasks — validar, documentar e commitar handoff self-driven
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+).
-> The host agent should fill in concrete subtasks under each stub below.
+Status: closed.
 
-## Tasks
-
-1. [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] — break into 2–3 concrete subtasks.
-2. [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] — break into 2–3 concrete subtasks.
-3. [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] — break into 2–3 concrete subtasks.
-
-## Gates (suggested)
-
-- `go build ./...` (or stack equivalent) → PASS
-- `go test ./...` (or stack equivalent) → PASS
-- [host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan] — describe the manual verification step.
-
----
-[host-agent: fill in — task_id=55b77f9fbbfa03c0 phase=plan]
+- [x] Run targeted regression tests.
+- [x] Update operational docs.
+- [x] Commit and push the self-driven changes.
+- [x] Validate drop-in installation.

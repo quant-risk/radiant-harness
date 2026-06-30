@@ -1,28 +1,27 @@
-# spec.md — 0001-empacotar-todas-as-mudan-as-pendentes-validar-commitar-e-subir-p
+# Spec — empacotar, validar, commitar e subir mudanças
 
-> Templated by `radiant-harness` self-driven mode (v3.6.0+) on 2026-06-30.
-> Replace the [host-agent: fill in] markers with real acceptance criteria.
+Status: closed by the v3.7.5 release and subsequent cleanup commits.
 
 ## Goal
 
-```
-Empacotar todas as mudanças pendentes, validar, commitar e subir para o GitHub como versão atualizada. Escopo: incluir artefatos gerados e mudanças restantes, preservar histórico, verificar status/remoto/branch, criar commit final e push.
-```
-
+Empacotar mudanças pendentes, validar, criar commits e subir para o GitHub
+como versão atualizada.
 
 ## Acceptance criteria
 
-- AC1: [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] (high-level — refine below)
-- AC2: [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] (high-level — refine below)
-- AC3: [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] (high-level — refine below)
+- Working tree reviewed before staging.
+- Validation gates pass before push.
+- Commits are pushed to `main`.
+- Public GitHub release exists for the drop-in package.
 
 ## Non-goals
 
-- [host-agent: fill in — task_id=12dddeff40c1d726 phase=plan] (sketch; expand)
+- Rewriting unrelated history.
+- Bundling personal user cases into the harness.
 
-## Profile
+## Verification
 
-- standard
-
----
-[host-agent: fill in — task_id=12dddeff40c1d726 phase=plan]
+- `git status --short`
+- `go test ./...`
+- `make test-dropin`
+- GitHub release `v3.7.5`

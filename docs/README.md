@@ -1,30 +1,40 @@
-# docs/README.md
+# radiant-harness Docs
 
-> Templated by `radiant-harness` self-driven mode on 2026-06-30.
+This directory documents the harness as a reusable agent-control system,
+not a single task run.
 
-## What this project does
+## What the project does
 
+radiant-harness installs a local `radiant` CLI and MCP server that lets a
+host agent run work through a governed Discover -> Plan -> Execute ->
+Verify -> Persist loop. When the host supports MCP sampling, the harness
+drives the agent phase by phase. When sampling is unavailable, it falls
+back to self-driven scaffolds with explicit handoff markers so the host
+agent can continue with its own native tools.
+
+## Main docs
+
+| File | Purpose |
+|------|---------|
+| `ARCHITECTURE.md` | high-level system and module map |
+| `HOST-AGENTS.md` | host-agent integration model |
+| `LOOP-ENGINE.md` | loop execution model |
+| `ONTOLOGY.md` | world model and domain vocabulary |
+| `STATE.md` | current project state and next actions |
+| `glossary.md` | canonical terms |
+| `ROADMAP.md` | current Now/Next/Later backlog |
+| `engineering/TESTING.md` | verification strategy |
+
+## Validation
+
+Run the project validation entrypoint:
+
+```bash
+./scripts/run.sh
 ```
-Remover a spec MenuFlex do repositório porque pertence a outro contexto do usuário, não ao backlog do radiant-harness. Em seguida avaliar o restante das pendências reais: specs placeholder, docs de produto/roadmap/glossário e próximos passos para consolidar o harness.
+
+For the public drop-in path specifically:
+
+```bash
+make test-dropin
 ```
-
-
-## Layout produced by the harness
-
-| Path | Origin | Status |
-|---|---|---|
-| `AGENTS.md` | generated (radiant-harness v3.6.0+) | templated |
-| `docs/README.md` | generated this file | templated |
-| `docs/CONTEXT.md` | generated (moved to .radiant-harness/CONTEXT.md in self-driven mode) | templated |
-| `specs/0001-remover-a-spec-menuflex-do-reposit-rio-porque-pertence-a-outro-c/spec.md` | templated | templated |
-| `specs/0001-remover-a-spec-menuflex-do-reposit-rio-porque-pertence-a-outro-c/tasks.md` | templated | templated |
-| `scripts/run.sh` | templated entrypoint | templated |
-
-## Next step
-
-The host agent should read every templated file, replace each
-task-specific marker with the real content, and then run the entrypoint
-`./scripts/run.sh` to validate end-to-end.
-
----
-This task removes the unrelated MenuFlex case and leaves broader radiant-harness backlog cleanup for a separate pass.

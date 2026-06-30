@@ -519,8 +519,8 @@ hybrid host.
 - `README.md` — `integrate` → `integrations` typo fixed
 - `internal/possess/async.go` — interfaces + stubs + types
 - `internal/possess/async_test.go` — 5 unit tests
-- `cmd/radiant/cmd_mcp_run_gate.go` — MCP handler stub
-- `cmd/radiant/cmd_mcp_possess_async.go` — MCP handler stub
+- `cmd/radiant/cmd_mcp_run_gate.go` — MCP handler for offline phase runs
+- `cmd/radiant/cmd_mcp_possess_async.go` — MCP handler for the offline 4-phase loop
 - `docs/PROPOSAL-v3.7.2-async-primitives.md` — design doc
 - `CHANGELOG.md` — this entry
 - `AGENTS-FOR-TASKS.md` — 2 new heads-ups (Hermes synchronous + skill names)

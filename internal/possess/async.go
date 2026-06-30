@@ -9,7 +9,7 @@
 // timeout (120s on Hermes) without populating the workdir with real
 // execution.
 //
-// v3.7.2 decomposes `radiant_possess` into async primitives:
+// v3.7.2 decomposes `radiant_possess` into async/offline primitives:
 //
 //   - AsyncGate — runs ONE phase (discover|plan|execute|verify) in a
 //     subprocess, returns a ticket the host polls. NO sampling callback
@@ -17,8 +17,10 @@
 //   - PossessAsync — fires the full 4-phase loop as a subprocess, returns
 //     a ticket immediately. Host polls via phase_status until done.
 //
-// These primitives are stubs in v3.7.2-prep (this commit). Real
-// subprocess wiring lands in PR-B (per the proposal).
+// The MCP handlers in cmd/radiant implement these primitives with the
+// self-driven offline path. The stub structs below remain as explicit
+// sentinel implementations for tests and callers that have not wired a
+// concrete runner.
 package possess
 
 import (
@@ -29,9 +31,9 @@ import (
 	"time"
 )
 
-// ErrAsyncInDevelopment is returned by all AsyncGate / PossessAsync
-// entry points in v3.7.2-prep. Replace with real implementation in
-// v3.7.2 PR-B.
+// ErrAsyncInDevelopment is returned only by the sentinel stub
+// implementations below. Production MCP handlers use concrete
+// cmd/radiant implementations.
 var ErrAsyncInDevelopment = errors.New("async gate primitives are v3.7.2 in-development (see docs/PROPOSAL-v3.7.2-async-primitives.md)")
 
 // Phase is one of the four radiant-possess phases.
@@ -79,9 +81,7 @@ type Status struct {
 }
 
 // AsyncGate runs ONE phase in the background. The interface is what
-// the v3.7.2 PR-B will implement via subprocess + state.json polling.
-//
-// In v3.7.2-prep the only implementation returns ErrAsyncInDevelopment.
+// concrete implementations expose via state.json polling.
 type AsyncGate interface {
 	Spawn(phase Phase, task, workdir string) (GateHandle, error)
 	Status(ticket GateTicket, workdir string) (Status, error)
@@ -92,16 +92,15 @@ type AsyncGate interface {
 // a ticket the host polls via `radiant_phase_status`. The MCP tool call
 // itself takes <500ms (just subprocess spawn + ticket return).
 //
-// In v3.7.2-prep the only implementation returns ErrAsyncInDevelopment.
+// concrete implementations expose via state.json polling.
 type PossessAsync interface {
 	Spawn(task, workdir, profile string) (GateHandle, error)
 	Status(ticket GateTicket, workdir string) (Status, error)
 	Cancel(ticket GateTicket, workdir string) error
 }
 
-// StubAsyncGate is the v3.7.2-prep placeholder. Every method returns
-// ErrAsyncInDevelopment. Replaced by the real subprocess-based
-// implementation in v3.7.2 PR-B.
+// StubAsyncGate is a sentinel implementation. Every method returns
+// ErrAsyncInDevelopment so tests and unconfigured callers fail clearly.
 type StubAsyncGate struct{}
 
 // Spawn returns ErrAsyncInDevelopment.
@@ -119,7 +118,7 @@ func (StubAsyncGate) Cancel(ticket GateTicket, workdir string) error {
 	return fmt.Errorf("AsyncGate.Cancel(%q): %w", ticket, ErrAsyncInDevelopment)
 }
 
-// StubPossessAsync is the v3.7.2-prep placeholder.
+// StubPossessAsync is a sentinel implementation.
 type StubPossessAsync struct{}
 
 // Spawn returns ErrAsyncInDevelopment.
