@@ -4,6 +4,82 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.9] — 2026-06-30 — Fleet async primitives (parity with loop)
+
+The fleet lifecycle now has the same status / retry / liveness
+contract that the loop got in v3.7.7 + v3.7.8. Two new MCP
+tools (`radiant_fleet_status` + `radiant_fleet_resume`) let a
+host agent drive the fleet from the wire without shelling out,
+matching the way `radiant_phase_status` + `radiant_possess_async`
+work for the loop.
+
+### Added
+
+- **`mcp__radiant__fleet_status(run_id, workdir?)`** — returns
+  the structured `FleetStatus` JSON: task counts by status,
+  per-task liveness (pid + alive), dispatcher liveness, conflict
+  list, raw JSON dump, and an automatic next-step hint. The
+  hint is `radiant_fleet_resume(run_id=...)` when failed or
+  crashed tasks exist, or `radiant fleet plan` when the run has
+  no tasks yet.
+- **`mcp__radiant__fleet_resume(run_id, workdir?, model?, auto_route?)`** —
+  wraps `Dispatcher.ResumeAll` so the host can re-dispatch
+  failed / crashed tasks without leaving the MCP transport.
+  Honors `RADIANT_FLEET_ASYNC_SUBPROCESS` (inline by default;
+  set to 1 to fork a detached subprocess and return immediately
+  with the dispatcher pid).
+- **Coordinator.WithLivenessDir(workdir)** — opt-in liveness
+  probe. When set, `Status()` populates `DispatcherAlive`,
+  `DispatcherPid`, and a `TaskLiveness` map keyed by task ID.
+  Default (no liveness dir) leaves all three fields off —
+  existing CLI / JSON consumers see no wire-format change.
+- **`TaskCrashed`** — new lifecycle state. A task the store
+  still considers `assigned` but whose pid file points at a
+  dead process is escalated to `TaskCrashed` automatically on
+  the next `Status()` call. Mirrors the `phaseStatusSummary`
+  crashed branch that v3.7.8 added for the loop.
+- **`Store.CrashTask(taskID, evidence)`** — persists the
+  crashed status + evidence across process restarts.
+- **Dispatcher subprocess gate** — `DispatchConfig.AsyncSubprocess`
+  + `DispatchConfig.Workdir`. When enabled, `RunAll` forks
+  `radiant fleet-async-runner <run-id>` (a new hidden subcommand
+  gated by `RADIANT_FLEET_ASYNC_RUNNER=1`) and returns immediately
+  with the dispatcher pid. Parity with v3.7.7's loop async-runner.
+  Inline is still the default — opt-in only.
+- **Per-task pid files** — `.radiant-harness/fleet/pids/agent-<runID>-<taskID>.pid`.
+  Written by `spawnAgent` before `cmd.Start`, removed via
+  `defer` after `cmd.Wait`. Always on (not gated by subprocess
+  mode) so the liveness probe works for inline dispatchers too.
+- **Per-dispatcher pid files** — `.radiant-harness/fleet/pids/dispatcher-<runID>.pid`.
+  Written by the fleet-async-runner subprocess on boot, removed
+  on exit.
+- **`sanitizePidComponent`** — defense-in-depth against path
+  traversal in run / task IDs. Slashes, backslashes, `..` and
+  non-`[A-Za-z0-9._-]` characters are replaced with `_` before
+  being joined into a pid path.
+
+### Changed
+
+- `Dispatcher.RunAll` now writes per-task pid files around
+  each `spawnAgent`. The wire shape of the fleet store JSON is
+  unchanged — pid tracking lives entirely on disk in the pid
+  directory.
+- `Coordinator.Status()` gains the v3.7.9 liveness fields. The
+  `omitempty` JSON tags mean old callers see no change.
+- The full-server MCP dispatcher (helpers.go::callMCPTool)
+  routes `radiant_fleet_status` / `radiant_fleet_resume` to
+  the existing CLI subcommands for backwards compatibility.
+
+### Deferred
+
+- Per-task pid is per-OS-process only — the agent's own child
+  processes (e.g. a `loop start` invocations inside the worktree
+  spawning a sub-helper) are not tracked. If a real fleet
+  reproduce shows a need for nested liveness, v3.7.10 will
+  promote this to a recursive pid namespace.
+
+### Post-release validation (TBD — pending release cut)
+
 ## [3.7.8] — 2026-06-30 — Async gate pid/liveness probe
 
 `radiant_phase_status` now cross-references the persisted

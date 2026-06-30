@@ -6,38 +6,75 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 11:35 BRT by mavis during v3.7.8 post-release validation
+**Last updated:** 2026-06-30 12:25 BRT by mavis during v3.7.9 code-complete
 
 ## Current sprint / active feature
 
-- Active: **v3.7.8 post-release validation done; v3.7.9 kickoff.**
-- Sprint goal: surface subprocess alive-vs-crashed from
-  `radiant_phase_status` so a host agent can tell the difference
-  between "phase still running" and "subprocess crashed without
-  writing an error".
-- Progress (v3.7.8 closed): (1) `phaseStatusSummary` extended
-  with `subprocess_alive` (bool) + `subprocess_pid` (int) fields
-  populated from `.radiant-harness/pids/<ticket>.pid`; (2) status
-  escalation from `in_progress` to `crashed` when pid is dead;
-  (3) next-step line annotated with pid + liveness; (4) format
-  helper (`content[1].text`) gains a `subprocess:` line; (5) 3
-  new tests pin the contract (SubprocessAlive / SubprocessCrashed
-  / NoPidFile); (6) full validation 7/7 PASS (see below).
-- v3.7.8 GitHub release: tag `v3.7.8` + 7 release assets.
+- Active: **v3.7.9 code-complete; release cut pending.**
+- Sprint goal: fleet gets the same status/retry/liveness
+  contract as the loop. Three layers shipped (A+B+C):
+  - **A.** `mcp__radiant__fleet_status` +
+    `mcp__radiant__fleet_resume` MCP tools (host can drive
+    fleet from the wire).
+  - **B.** Liveness probe via `Coordinator.WithLivenessDir`:
+    `DispatcherAlive` + `DispatcherPid` + per-task
+    `TaskLiveness` map; `TaskAssigned` with dead pid escalates
+    to `TaskCrashed`.
+  - **C.** Subprocess gate on dispatcher via
+    `DispatchConfig.AsyncSubprocess` +
+    `radiant fleet-async-runner <run-id>` (Hidden subcommand
+    gated by `RADIANT_FLEET_ASYNC_RUNNER=1`).
+- Progress (v3.7.9 closed): (1) `internal/fleet/pidfile.go`
+  with per-task + per-dispatcher pid paths, sanitize helper,
+  WriteDispatcherPid / RemoveDispatcherPid exports; (2)
+  DispatchConfig gains AsyncSubprocess + Workdir, RunAll forks
+  subprocess when enabled, spawnAgent writes per-task pid
+  file before Start and removes it via defer; (3)
+  Coordinator.WithLivenessDir + Status() liveness fields +
+  crashed escalation; (4) TaskCrashed lifecycle + Store.
+  CrashTask; (5) cmd_mcp_fleet_async.go with mcpFleetStatus +
+  mcpFleetResume tools + fleetAsyncSubprocessEnabled helper;
+  (6) cmd_fleet_async_runner.go subcommand; (7) 22 new tests
+  pinning the contract (10 pidfile, 5 coordinator, 7 MCP);
+  (8) full validation 7/7 PASS — see below.
+- v3.7.9 GitHub release: tag `v3.7.9` + 7 release assets (TBD).
 
 ## Next concrete action
 
-- v3.7.9 work. Order: (1) Fleet async primitives — same
-  status/retry guarantees as loop but for fleet ops; (2) real
-  host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — needs a
-  reproduction of a sampling-backed sync-host possess need
-  before turning the subprocess path on by default for any
-  host; (3) `--watch` flag for `radiant_phase_status` (poll
-  pid file + emit MCP notifications on alive→dead transitions).
+- v3.7.10 backlog. Order: (1) Real host opt-in for
+  `RADIANT_FLEET_ASYNC_SUBPROCESS=1` — needs a reproduction of
+  a sampling-backed fleet cross-process need (CI host with
+  hard MCP tool-call deadline against a large fleet) before
+  turning the subprocess path on by default; (2) `--watch`
+  flag for `radiant_phase_status` (poll pid file + emit MCP
+  notifications on alive→dead transitions); (3) Per-task
+  nested pid tracking (recursive liveness) for fleet — which
+  child process died, not just that one did.
 
 ## Latest validation
 
-2026-06-30 11:00 BRT — v3.7.7 post-release validation, full matrix:
+2026-06-30 12:20 BRT — v3.7.9 code-complete validation, full matrix:
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `go vet ./...` | clean |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `go test ./cmd/radiant` fleet subset | PASS — 7 new tests (`TestMCPFleetStatus_*` × 4, `TestMCPFleetResume_*` × 2, `TestFleetAsync*` × 2) |
+| E | `go test ./internal/fleet` | PASS — 15 new tests (10 pidfile + 5 coordinator), 0 FAIL |
+| F | `make audit-docs` | PASS (46 doc refs / 57 real cmds) |
+| G | `make audit-skills` | PASS (6 hint map / 69 bundled skills) |
+
+Earlier in the session (v3.7.8 post-release validation):
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `radiant mcp self-test` | PASS, 6 tools (`radiant_possess`, `radiant_run_gate`, `radiant_possess_async`, `radiant_phase_status`, `radiant_skill_list`, `radiant_skill_load`) |
+| C | `go test ./cmd/radiant ./internal/...` | PASS (32 packages, 0 FAIL) |
+| D | `go test ./...` (full module) | PASS |
+| E | `make audit-docs` | PASS (46 doc refs / 57 real cmds) |
+| F | `make audit-skills` | PASS (6 hint map / 69 bundled skills) |
 
 | Step | Command | Result |
 |------|---------|--------|
@@ -101,34 +138,47 @@ Earlier in the session (v3.7.6 post-release validation):
 
 - `README.md` — public install and usage entrypoint.
 - `AGENTS-FOR-TASKS.md` — instructions for third-party host agents
-  (now lists all 6 MCP tools and the sync-host alternative workflow).
+  (now lists 8 MCP tools after v3.7.9: the original 6 +
+  `radiant_fleet_status` + `radiant_fleet_resume`).
 - `INSTALL.md` — install flow + 13-agent host table.
 - `cmd/radiant/cmd_mcp_runtime.go` — MCP tool registration +
   `mcpPhaseStatus` summary builder.
+- `cmd/radiant/cmd_mcp_fleet_async.go` — fleet MCP wrappers
+  (v3.7.9): `mcpFleetStatus` + `mcpFleetResume`.
+- `cmd/radiant/cmd_fleet_async_runner.go` — Hidden subcommand
+  for the dispatcher subprocess path (v3.7.9).
 - `cmd/radiant/cmd_mcp_possess_self_driven.go` — self-driven fallback.
 - `internal/hostdetect/hostdetect.go` — host fingerprints (13 agents).
+- `internal/fleet/pidfile.go` — pid file primitives for fleet
+  tasks + dispatcher (v3.7.9). Mirrors cmd_async_runner.go for loop.
+- `internal/fleet/coordinator.go` — `WithLivenessDir` +
+  `TaskCrashed` escalation (v3.7.9).
 - `internal/possess/async.go` — async gate primitives (interfaces;
   current impl is in-process, subprocess deferred).
 - `scripts/e2e/dropin_self_driven_e2e.py` — public install E2E.
 - `scripts/run.sh` — canonical validation entrypoint.
 - `scripts/test-agents.sh` — 13-agent cross-install matrix.
 - `scripts/audit-install.sh` — install-path audit (canonical
-  `curl | bash` will PASS once v3.7.6 is tagged).
-- `docs/ROADMAP.md` — remaining backlog (now organised around the
-  deferred async-subprocess work).
+  `curl | bash` will PASS once v3.7.9 is tagged).
+- `docs/ROADMAP.md` — remaining backlog (v3.7.10 = real-host
+  opt-in + `--watch` flag + recursive liveness).
 - `docs/PROPOSAL-v3.7.2-async-primitives.md` — async design + v3.7.6
-  deferral note.
+  deferral note (now resolved for fleet via v3.7.9).
 - `docs/STATE.md` — this file.
 
 ## Deferred ideas / backlog
 
-- Fleet-mode async primitives (same status/retry guarantees as loop).
-- Real host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — needs a
-  reproduction of a sampling-backed sync-host possess or fleet
-  cross-process worktree need. Without a real host need, the
-  inline path is correct.
+- Real host opt-in for `RADIANT_FLEET_ASYNC_SUBPROCESS=1` —
+  needs a reproduction of a sampling-backed fleet cross-process
+  need (CI host with hard MCP tool-call deadline against a
+  large fleet) before turning the subprocess path on by default.
+- Real host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — same
+  gating as fleet, but for the loop's own subprocess path.
 - `--watch` flag for `radiant_phase_status` — poll the pid file
   every N seconds and emit an MCP notification when liveness
   transitions alive → dead. Not strictly necessary (the host
   can poll), but useful for CI hosts that want to stream
   progress.
+- Per-task nested pid tracking (recursive liveness) for fleet
+  — distinguish "agent parent died" from "child helper died".
+  v3.7.9 only tracks the top-level per-task pid.
