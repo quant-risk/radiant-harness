@@ -41,6 +41,19 @@ const (
 	TaskDone     TaskStatus = "done"
 	TaskFailed   TaskStatus = "failed"
 	TaskConflict TaskStatus = "conflict"
+	// TaskCrashed (v3.7.9+) — the task's agent subprocess
+	// died without writing a terminal status (TaskDone or
+	// TaskFailed). Detected by reading the task pid file and
+	// running `kill -0` on it; if the pid is dead but the
+	// task is still TaskAssigned, the status is escalated to
+	// TaskCrashed so the operator can distinguish "agent is
+	// still running" from "agent died mid-execution".
+	//
+	// Set automatically by `Coordinator.Status()` when a
+	// livenessDir is configured. Persisted by callers via
+	// `Store.CrashTask` if they want the crashed state to
+	// survive across process restarts.
+	TaskCrashed TaskStatus = "crashed"
 )
 
 // Store is the persistent, mutex-protected shared context store.
@@ -142,6 +155,26 @@ func (s *Store) ResetTask(taskID string) error {
 			s.ctx.Tasks[i].Evidence = ""
 			s.ctx.Tasks[i].AgentID = ""
 			s.ctx.Tasks[i].WorktreeDir = ""
+			s.ctx.Tasks[i].UpdatedAt = time.Now().UTC()
+			s.ctx.UpdatedAt = time.Now().UTC()
+			return s.persist()
+		}
+	}
+	return fmt.Errorf("task %q not found", taskID)
+}
+
+// CrashTask (v3.7.9+) marks a task as TaskCrashed — the agent
+// subprocess died without writing a terminal status. Persists
+// the supplied evidence (typically the liveness probe result,
+// e.g. "pid 12345 not alive"). Idempotent: re-calling on an
+// already-crashed task updates the evidence + timestamp.
+func (s *Store) CrashTask(taskID, evidence string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.ctx.Tasks {
+		if s.ctx.Tasks[i].ID == taskID {
+			s.ctx.Tasks[i].Status = TaskCrashed
+			s.ctx.Tasks[i].Evidence = evidence
 			s.ctx.Tasks[i].UpdatedAt = time.Now().UTC()
 			s.ctx.UpdatedAt = time.Now().UTC()
 			return s.persist()

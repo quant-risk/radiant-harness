@@ -86,6 +86,9 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 			},
 			Required: []string{"name"},
 		}},
+		// ----- v3.7.9 fleet async primitives (parity with loop) ------
+		mcpFleetStatusTool,
+		mcpFleetResumeTool,
 	}
 
 	var encMu sync.Mutex
@@ -190,6 +193,10 @@ func callMCPToolLight(name string, args json.RawMessage, d *mcpDispatcher) mcpRe
 		return mcpSkillList(args)
 	case "radiant_skill_load":
 		return mcpSkillLoad(args)
+	case "radiant_fleet_status":
+		return mcpFleetStatus(args)
+	case "radiant_fleet_resume":
+		return mcpFleetResume(args)
 	}
 	return mcpResponse{JSONRPC: "2.0", Error: &mcpError{Code: -32602, Message: "unknown tool: " + name}}
 }

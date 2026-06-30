@@ -136,6 +136,7 @@ func main() {
 	registerMCPServeCmd(root) // the MCP server itself
 	registerHostInfoCmd(root) // show detected host agent
 	registerAsyncRunnerCmd(root) // async-runner subprocess primitive (v3.7.7+, opt-in via RADIANT_ASYNC_SUBPROCESS=1)
+	registerFleetAsyncRunnerCmd(root) // fleet-async-runner subprocess primitive (v3.7.9+, opt-in via RADIANT_FLEET_ASYNC_SUBPROCESS=1)
 
 	// Loop engine
 	registerLoopCmds(root)  // radiant loop (start, status, resume, …) + trace

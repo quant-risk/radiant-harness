@@ -1596,6 +1596,41 @@ func callMCPTool(name string, args json.RawMessage, d *mcpDispatcher) mcpRespons
 		if a.Plain {
 			argv = append(argv, "--plain")
 		}
+	// v3.7.9 fleet async primitives (parity with the loop's
+	// radiant_loop_* tools). The full-server path here shells
+	// out to the CLI; the light-server path (cmd_mcp_runtime.go)
+	// uses the in-process handlers in cmd_mcp_fleet_async.go.
+	case "radiant_fleet_status":
+		var a struct {
+			RunID   string `json:"run_id"`
+			Workdir string `json:"workdir"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"fleet", "status"}
+		if a.RunID != "" {
+			argv = append(argv, a.RunID)
+		}
+		if a.Workdir != "" {
+			argv = append(argv, "--cwd="+a.Workdir)
+		}
+	case "radiant_fleet_resume":
+		var a struct {
+			RunID     string `json:"run_id"`
+			Workdir   string `json:"workdir"`
+			Model     string `json:"model"`
+			AutoRoute bool   `json:"auto_route"`
+		}
+		_ = json.Unmarshal(args, &a)
+		argv = []string{"fleet", "resume"}
+		if a.RunID != "" {
+			argv = append(argv, a.RunID)
+		}
+		if a.Model != "" {
+			argv = append(argv, "--model="+a.Model)
+		}
+		if a.AutoRoute {
+			argv = append(argv, "--auto-route")
+		}
 	// v3.7.x: the legacy `radiant_run` MCP tool was removed. New code
 	// must call `mcp__radiant__possess` instead. Older hosts that
 	// still emit `radiant_run` get a clear, fast `unknown tool`

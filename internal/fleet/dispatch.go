@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +47,27 @@ type DispatchConfig struct {
 	// MaxRetries is the number of automatic retries per task on transient failure
 	// (non-zero exit when the process started successfully). 0 = no retries.
 	MaxRetries int
+
+	// AsyncSubprocess makes RunAll fork a detached subprocess
+	// (`radiant fleet-async-runner <run-id>`) instead of running the
+	// dispatch inline. The subprocess writes
+	// `.radiant-harness/fleet/pids/dispatcher-<runID>.pid` and runs
+	// to completion (or until MaxConcurrency/MaxRetries/Timeout
+	// limits are reached); the caller returns immediately with a
+	// (runID, dispatcherPid) pair and can poll status via
+	// `mcp__radiant__fleet_status`.
+	//
+	// Mirrors v3.7.7's loop subprocess gate for `radiant_run_gate`.
+	// Opt-in only — inline is the default and faster for small
+	// fleets. Turn this on when a real cross-process need
+	// reproduces (CI host with a hard MCP tool-call deadline, or
+	// a fleet that takes longer than the caller's wait window).
+	AsyncSubprocess bool
+
+	// Workdir is the project root the dispatcher should write pid
+	// files into. Defaults to os.Getwd() if empty. Required for
+	// pid-file tracking to function.
+	Workdir string
 }
 
 // AgentResult is the outcome of a single spawned agent process.
@@ -74,6 +96,9 @@ func NewDispatcher(iso *Isolator, cfg DispatchConfig) (*Dispatcher, error) {
 		}
 		cfg.Binary = self
 	}
+	if cfg.Workdir == "" {
+		cfg.Workdir, _ = os.Getwd()
+	}
 	return &Dispatcher{iso: iso, cfg: cfg}, nil
 }
 
@@ -88,7 +113,18 @@ func NewDispatcher(iso *Isolator, cfg DispatchConfig) (*Dispatcher, error) {
 // with RADIANT_WORKTREE_DIR=<worktree.Path> injected into the environment.
 // The agent writes its own loop state into the worktree's
 // .radiant-harness/ directory, keeping the main repo untouched.
+//
+// If cfg.AsyncSubprocess is true, RunAll instead forks a single detached
+// subprocess (`<binary> fleet-async-runner <run-id>`), writes a pid
+// file at `.radiant-harness/fleet/pids/dispatcher-<runID>.pid`, and
+// returns immediately with an empty results slice. The subprocess
+// re-invokes RunAll inline. Status can be polled via the
+// `mcp__radiant__fleet_status` MCP tool.
 func (d *Dispatcher) RunAll(ctx context.Context, extraArgs []string) ([]AgentResult, error) {
+	if d.cfg.AsyncSubprocess {
+		return d.runAsyncSubprocess(ctx, extraArgs)
+	}
+
 	type claimed struct {
 		task *Task
 		wt   worktree.Worktree
@@ -159,6 +195,73 @@ func (d *Dispatcher) RunAll(ctx context.Context, extraArgs []string) ([]AgentRes
 	return results, nil
 }
 
+// runAsyncSubprocess forks a detached `radiant fleet-async-runner`
+// subprocess that re-invokes RunAll inline. The parent (this
+// process) returns immediately. Pid tracking lives in the child —
+// it writes `dispatcher-<runID>.pid` at startup and removes it
+// on exit.
+//
+// Returns (nil, nil) on successful fork — the caller has no
+// results to surface yet. To observe progress, call
+// `mcp__radiant__fleet_status`.
+func (d *Dispatcher) runAsyncSubprocess(ctx context.Context, extraArgs []string) ([]AgentResult, error) {
+	runID := d.iso.store.Snapshot().RunID
+	if runID == "" {
+		return nil, fmt.Errorf("async subprocess: empty run id")
+	}
+
+	// Build the args the child will receive. The child re-runs
+	// the dispatch path but with AsyncSubprocess=false to avoid
+	// infinite recursion.
+	args := []string{"fleet-async-runner", runID}
+	if len(extraArgs) > 0 {
+		args = append(args, "--", strings.Join(extraArgs, "\x1f"))
+	}
+
+	cmd := exec.CommandContext(ctx, d.cfg.Binary, args...)
+	cmd.Dir = d.cfg.Workdir
+
+	env := d.cfg.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	env = append(env,
+		"RADIANT_FLEET_ASYNC_RUNNER=1",
+		fmt.Sprintf("RADIANT_RUN_ID=%s", runID),
+	)
+	cmd.Env = env
+
+	// Detach stdio so the child doesn't inherit our TTY.
+	if d.cfg.Stdout != nil {
+		cmd.Stdout = d.cfg.Stdout
+	}
+	if d.cfg.Stderr != nil {
+		cmd.Stderr = d.cfg.Stderr
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("fork fleet-async-runner: %w", err)
+	}
+
+	// Best-effort dispatcher pid write so a follow-up
+	// `mcp__radiant__fleet_status` can liveness-probe the child.
+	// The child ALSO writes its own pid file when it boots; if
+	// the parent races ahead, the child's write wins (same
+	// value). If the child crashes before booting, the parent's
+	// write gives the operator a real pid to inspect.
+	if err := ensureFleetPidDir(d.cfg.Workdir); err == nil {
+		_ = writePidFile(dispatcherPidPath(d.cfg.Workdir, runID), cmd.Process.Pid)
+	}
+
+	// Release the child — we don't wait. The child cleans up its
+	// own pid file on exit.
+	go func() {
+		_ = cmd.Wait()
+	}()
+
+	return nil, nil
+}
+
 // ResumeAll re-dispatches all failed tasks, leaving done/pending tasks untouched.
 // It resets each failed task back to pending, then calls RunAll so the normal
 // claim-isolate-spawn path handles them.
@@ -198,10 +301,12 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 	if env == nil {
 		env = os.Environ()
 	}
+	runID := d.iso.store.Snapshot().RunID
 	env = append(env,
 		fmt.Sprintf("RADIANT_WORKTREE_DIR=%s", wt.Path),
 		fmt.Sprintf("RADIANT_AGENT_ID=agent-%s", task.ID),
 		fmt.Sprintf("RADIANT_TASK_ID=%s", task.ID),
+		fmt.Sprintf("RADIANT_RUN_ID=%s", runID),
 	)
 	cmd.Env = env
 
@@ -212,7 +317,39 @@ func (d *Dispatcher) spawnAgent(ctx context.Context, task *Task, wt worktree.Wor
 		cmd.Stderr = d.cfg.Stderr
 	}
 
-	err := cmd.Run()
+	// Write the agent's pid file before Start so a follow-up
+	// `mcp__radiant__fleet_status` can liveness-probe the child
+	// while it's running. The file is removed via defer once
+	// cmd.Run returns (success, timeout, or non-zero exit).
+	//
+	// Best-effort: a failed write is logged but does NOT abort
+	// the agent — the spawn is the primary work, the pid file
+	// is just a probe handle. Same policy as the loop's
+	// `writeAsyncRunnerPid`.
+	pidPath := taskPidPath(d.cfg.Workdir, runID, task.ID)
+	if err := writePidFile(pidPath, 0); err == nil {
+		// pre-create empty so the path exists; we'll overwrite
+		// with the real pid after Start. Some status probes
+		// distinguish "no file" (task not started) from "empty
+		// file" (task in transition) — keep the path consistent.
+		_ = removePidFile(pidPath)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return AgentResult{
+			AgentID:  fmt.Sprintf("agent-%s", task.ID),
+			TaskID:   task.ID,
+			ExitCode: -1,
+			Err:      fmt.Errorf("start: %w", err),
+			Elapsed:  time.Since(started),
+		}
+	}
+
+	// Now that we have a real pid, write it.
+	_ = writePidFile(pidPath, cmd.Process.Pid)
+	defer removePidFile(pidPath)
+
+	err := cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

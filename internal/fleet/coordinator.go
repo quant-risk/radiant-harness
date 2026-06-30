@@ -16,6 +16,26 @@ type FleetStatus struct {
 	Resolutions []Resolution `json:"resolutions,omitempty"`
 	StartedAt   time.Time    `json:"started_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
+	// Liveness (v3.7.9+) — populated from pid files under
+	// `<workdir>/.radiant-harness/fleet/pids/`. DispatcherAlive
+	// reflects the optional async-subprocess dispatcher
+	// (`radiant fleet-async-runner <run-id>`); TaskLiveness
+	// is keyed by task ID and tracks each spawned agent. Both
+	// are populated only when the Coordinator was built with a
+	// non-empty LivenessDir; otherwise they're omitted.
+	DispatcherAlive bool                `json:"dispatcher_alive,omitempty"`
+	DispatcherPid   int                 `json:"dispatcher_pid,omitempty"`
+	TaskLiveness    map[string]TaskLive `json:"task_liveness,omitempty"`
+}
+
+// TaskLive describes the liveness of a single fleet task agent.
+// Alive=false with Pid=0 means "no pid file on disk" (the agent
+// hasn't started, or finished and the file was cleaned up).
+// Alive=false with Pid>0 means "the pid file points at a dead
+// process" — the agent crashed without writing terminal status.
+type TaskLive struct {
+	Alive bool `json:"alive"`
+	Pid   int  `json:"pid,omitempty"`
 }
 
 // AgentRecord tracks a single agent in the fleet.
@@ -43,9 +63,10 @@ type FleetState struct {
 // Real process spawning is handled by Dispatcher (dispatch.go),
 // which runs one OS process per task in an isolated git worktree.
 type Coordinator struct {
-	store *Store
-	state FleetState
-	roles map[AgentRole]RoleConfig
+	store       *Store
+	state       FleetState
+	roles       map[AgentRole]RoleConfig
+	livenessDir string // optional; populated for v3.7.9 liveness probes
 }
 
 // NewCoordinator creates a Coordinator backed by a Store.
@@ -63,6 +84,14 @@ func NewCoordinator(store *Store, agentCount int) *Coordinator {
 		state: state,
 		roles: DefaultRoleConfigs(),
 	}
+}
+
+// WithLivenessDir enables liveness probing on Status(). The
+// dir is the project workdir (the dispatcher resolves the pid
+// directory under it). An empty string disables probing.
+func (c *Coordinator) WithLivenessDir(workdir string) *Coordinator {
+	c.livenessDir = workdir
+	return c
 }
 
 // RegisterAgent adds an agent to the fleet.
@@ -99,7 +128,7 @@ func (c *Coordinator) Status() FleetStatus {
 	for _, conflict := range conflicts {
 		resolutions = append(resolutions, ResolveConflict(conflict, ctx.Tasks))
 	}
-	return FleetStatus{
+	out := FleetStatus{
 		RunID:       ctx.RunID,
 		Goal:        ctx.Goal,
 		AgentCount:  len(c.state.Agents),
@@ -109,6 +138,39 @@ func (c *Coordinator) Status() FleetStatus {
 		StartedAt:   c.state.StartedAt,
 		UpdatedAt:   ctx.UpdatedAt,
 	}
+
+	// v3.7.9 — populate liveness from pid files when a
+	// livenessDir was configured. Inline dispatchers have no
+	// dispatcher pid file (they ARE the process) — that's fine,
+	// `dispatcherLiveness` returns (false, 0) for missing
+	// files and we omit the fields via omitempty.
+	//
+	// The crashed-status escalation mirrors the loop's v3.7.8
+	// `phaseStatusSummary` logic: a task that the store still
+	// considers `assigned` but whose pid file points at a dead
+	// process is reported as `crashed` (the pid file is on disk,
+	// the process is gone, the dispatcher never got to call
+	// CompleteTask). This distinguishes "agent is still running"
+	// from "agent died mid-execution" without requiring the host
+	// to re-read every pid file.
+	if c.livenessDir != "" {
+		if alive, pid := dispatcherLiveness(c.livenessDir, ctx.RunID); pid > 0 || alive {
+			out.DispatcherAlive = alive
+			out.DispatcherPid = pid
+		}
+		out.TaskLiveness = make(map[string]TaskLive, len(ctx.Tasks))
+		for i := range ctx.Tasks {
+			t := &ctx.Tasks[i]
+			alive, pid := taskLiveness(c.livenessDir, ctx.RunID, t.ID)
+			out.TaskLiveness[t.ID] = TaskLive{Alive: alive, Pid: pid}
+			if t.Status == TaskAssigned && pid > 0 && !alive {
+				t.Status = TaskCrashed
+				t.Evidence = fmt.Sprintf("agent pid %d not alive (liveness probe)", pid)
+			}
+		}
+	}
+
+	return out
 }
 
 // RolePrompt returns the system prompt for a given role,
