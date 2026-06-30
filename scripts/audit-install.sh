@@ -136,7 +136,12 @@ run_path_go_install() {
   local version_ok="FAIL"
   if [[ -x "$installed_bin" ]]; then
     local v; v="$("$installed_bin" --version 2>&1)" || true
-    [[ "$v" == "v3."* || "$v" == "[v3]".* ]] && version_ok="OK"
+    # Accept any v3.x build (with or without leading `v`). The
+    # v0.7.x legacy line is what this whole gate exists to keep
+    # off the happy path.
+    if [[ "$v" == "v3."* || "$v" == "3."* ]]; then
+      version_ok="OK"
+    fi
   fi
 
   if [[ $setup_rc -eq 0 && $bin_ok == "OK" && $version_ok == "OK" ]]; then
