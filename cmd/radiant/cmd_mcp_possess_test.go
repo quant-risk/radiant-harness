@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/quant-risk/radiant-harness/v3/internal/hostdetect"
 	"github.com/quant-risk/radiant-harness/v3/internal/llm"
@@ -430,4 +432,236 @@ func TestSyncHostAutoRouting(t *testing.T) {
 	if st.RunMode == "" {
 		t.Errorf("RunMode not set; sync-host auto-route should tag the mode")
 	}
+}
+
+// TestPhaseStatusSummary_DoneRunShape locks the v3.7.6 summary contract:
+// a fully-run self-driven possess ends up with status="done", all
+// four phases ✓, an empty pending list, and a populated phases map.
+// Any field that an agent keys off of (next_step, resume_command,
+// phases) must keep this exact shape across future refactors.
+func TestPhaseStatusSummary_DoneRunShape(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Drive a real self-driven run end-to-end so the state shape is
+	// the same one a host agent sees in production.
+	resp := mcpPossessAsync(json.RawMessage(`{"task":"ship the feature","workdir":"` + dir + `","profile":"standard"}`))
+	if resp.Error != nil {
+		t.Fatalf("possess_async: %s", resp.Error.Message)
+	}
+	id := taskID(dir, "ship the feature")
+	st, err := loadPossessState(dir, id)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.TaskID != id {
+		t.Errorf("summary TaskID = %q, want %q", sum.TaskID, id)
+	}
+	if sum.Status != "done" {
+		t.Errorf("summary Status = %q, want done (run completed); next_step=%q", sum.Status, sum.NextStep)
+	}
+	if sum.CurrentPhase != "done" {
+		t.Errorf("summary CurrentPhase = %q, want done", sum.CurrentPhase)
+	}
+	for _, p := range []string{"discover", "plan", "execute", "verify"} {
+		mini, ok := sum.Phases[p]
+		if !ok {
+			t.Errorf("summary missing phase %q", p)
+			continue
+		}
+		if mini.Status != "done" {
+			t.Errorf("summary phase %q status = %q, want done", p, mini.Status)
+		}
+		if mini.Error != "" {
+			t.Errorf("summary phase %q error = %q, want empty", p, mini.Error)
+		}
+	}
+	if sum.NextStep == "" {
+		t.Errorf("summary NextStep is empty; agents key off this")
+	}
+}
+
+// TestPhaseStatusSummary_MidRunShape pins the contract for a host that
+// calls phase_status while phases are still pending. The summary must
+// say status=in_progress, surface a concrete next_step pointing at the
+// gate primitive, and the resume_command must be a syntactically valid
+// mcp__radiant__run_gate call.
+func TestPhaseStatusSummary_MidRunShape(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Run only discover so plan/execute/verify stay pending.
+	resp := mcpRunGate(json.RawMessage(`{"phase":"discover","task":"ship credit scoring","workdir":"` + dir + `"}`))
+	if resp.Error != nil {
+		t.Fatalf("run_gate discover: %s", resp.Error.Message)
+	}
+	id := taskID(dir, "ship credit scoring")
+	st, err := loadPossessState(dir, id)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if st.Phases["plan"].Status != "pending" {
+		t.Fatalf("test setup: expected plan pending, got %q", st.Phases["plan"].Status)
+	}
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.Status != "in_progress" {
+		t.Errorf("status = %q, want in_progress", sum.Status)
+	}
+	if !strings.Contains(sum.NextStep, "plan") {
+		t.Errorf("NextStep %q must mention the next phase (plan)", sum.NextStep)
+	}
+	if !strings.HasPrefix(sum.ResumeCommand, "mcp__radiant__run_gate") {
+		t.Errorf("ResumeCommand = %q, want mcp__radiant__run_gate(...) prefix", sum.ResumeCommand)
+	}
+	if !strings.Contains(sum.ResumeCommand, "phase=\"plan\"") {
+		t.Errorf("ResumeCommand = %q, want phase=\"plan\" inside the gate call", sum.ResumeCommand)
+	}
+	if mini := sum.Phases["discover"]; mini == nil || mini.Status != "done" {
+		t.Errorf("discover in summary = %+v, want done", mini)
+	}
+}
+
+// TestPhaseStatusSummary_ErrorShape confirms a phase recorded with
+// status=error surfaces clearly to the host with the failed phase
+// named, the error message carried, and a resume command the host
+// can issue to retry from that exact phase.
+func TestPhaseStatusSummary_ErrorShape(t *testing.T) {
+	dir := t.TempDir()
+	id := "deadbeefcafebabe"
+	st := &possessState{
+		TaskID:       id,
+		Workdir:      dir,
+		Task:         "ship error",
+		StartedAt:    time.Now().Add(-time.Minute),
+		UpdatedAt:    time.Now(),
+		CurrentPhase: "execute",
+		RunMode:      "self-driven",
+		Phases: map[string]*phaseResult{
+			"discover": {Status: "done"},
+			"plan":     {Status: "done"},
+			"execute":  {Status: "error", Error: "synthetic test failure"},
+			"verify":   {Status: "pending"},
+		},
+	}
+	if err := savePossessState(st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.Status != "error" {
+		t.Errorf("Status = %q, want error", sum.Status)
+	}
+	if !strings.Contains(sum.NextStep, "execute") {
+		t.Errorf("NextStep %q must name the failed phase (execute)", sum.NextStep)
+	}
+	if !strings.Contains(sum.NextStep, "synthetic test failure") {
+		t.Errorf("NextStep %q must surface the underlying error message", sum.NextStep)
+	}
+	if !strings.HasPrefix(sum.ResumeCommand, "mcp__radiant__possess") {
+		t.Errorf("ResumeCommand = %q, want mcp__radiant__possess(...) prefix", sum.ResumeCommand)
+	}
+	if mini := sum.Phases["execute"]; mini == nil || mini.Status != "error" {
+		t.Errorf("execute in summary = %+v, want error", mini)
+	} else if mini.Error != "synthetic test failure" {
+		t.Errorf("execute error in summary = %q, want synthetic test failure", mini.Error)
+	}
+}
+
+// TestPhaseStatusSummary_CancelledShape asserts the cancelled flag
+// short-circuits to status=cancelled and the resume command is the
+// full possess call (not a per-phase gate — the host must re-run from
+// the top after a cancel).
+func TestPhaseStatusSummary_CancelledShape(t *testing.T) {
+	dir := t.TempDir()
+	id := "feedfacedeadbeef"
+	st := &possessState{
+		TaskID:       id,
+		Workdir:      dir,
+		Task:         "cancelled test",
+		StartedAt:    time.Now().Add(-time.Minute),
+		UpdatedAt:    time.Now(),
+		CurrentPhase: "execute",
+		Cancelled:    true,
+		Phases: map[string]*phaseResult{
+			"discover": {Status: "done"},
+			"plan":     {Status: "done"},
+			"execute":  {Status: "in_progress"},
+			"verify":   {Status: "pending"},
+		},
+	}
+	if err := savePossessState(st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	sum := buildPhaseStatusSummary(st, dir)
+	if sum.Status != "cancelled" {
+		t.Errorf("Status = %q, want cancelled", sum.Status)
+	}
+	if !strings.HasPrefix(sum.ResumeCommand, "mcp__radiant__possess") {
+		t.Errorf("ResumeCommand = %q, want mcp__radiant__possess(...) prefix after cancel", sum.ResumeCommand)
+	}
+}
+
+// TestMCPPhaseStatus_ReturnsSummaryField pins the v3.7.6 wire contract:
+// the MCP response now carries a `summary` field with the structured
+// actionable view, in addition to the raw state.json dump that older
+// callers JSON-parse out of `content[0].text`.
+func TestMCPPhaseStatus_ReturnsSummaryField(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := runPossessWithBackend(context.Background(), dir, "summary field test", "standard", unsupportedSamplingBackend{}, io.Discard); err != nil {
+		t.Fatalf("run possess: %v", err)
+	}
+	id := taskID(dir, "summary field test")
+
+	resp := mcpPhaseStatus(json.RawMessage(`{"task_id":"` + id + `","workdir":"` + dir + `"}`))
+	if resp.Error != nil {
+		t.Fatalf("phase_status: %s", resp.Error.Message)
+	}
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Result is not a map; got %T", resp.Result)
+	}
+	if _, ok := result["summary"]; !ok {
+		t.Fatalf("Result is missing the v3.7.6 `summary` field; result keys = %v", keysOf(result))
+	}
+	// Two content blocks: raw state.json dump (back-compat) + rich
+	// summary text (new in v3.7.6).
+	content, ok := result["content"].([]map[string]string)
+	if !ok {
+		t.Fatalf("content is not []map[string]string; got %T", result["content"])
+	}
+	if len(content) != 2 {
+		t.Errorf("len(content) = %d, want 2 (raw + rich summary)", len(content))
+	}
+	// Raw state.json dump is still JSON-parseable by older callers.
+	var rawState possessState
+	if err := json.Unmarshal([]byte(content[0]["text"]), &rawState); err != nil {
+		t.Errorf("raw state dump is not parseable JSON: %v", err)
+	}
+	// Rich summary text contains the headline fields an agent keys on.
+	if !strings.Contains(content[1]["text"], "status:") {
+		t.Errorf("rich summary missing `status:` line: %q", content[1]["text"])
+	}
+	if !strings.Contains(content[1]["text"], "next step:") {
+		t.Errorf("rich summary missing `next step:` line: %q", content[1]["text"])
+	}
+}
+
+// keysOf returns sorted map keys for diagnostic messages.
+func keysOf(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -289,7 +290,331 @@ func countHostAgentMarkers(workdir string) int {
 	return count
 }
 
+// phaseStatusSummary is the v3.7.6 actionable view of a possess run.
+// It is included alongside the raw state.json dump so a host agent can
+// drive a single `radiant_phase_status` call without having to parse
+// the on-disk shape itself. Fields:
+//
+//   - Status: "done" | "in_progress" | "error" | "cancelled" | "pending"
+//   - NextStep: concrete next action the host should take.
+//   - ResumeCommand: an exact MCP call (mcp__radiant__possess) the
+//     host can issue to resume the run from the failed/pending phase.
+//   - PendingFiles: relative paths under workdir that the harness has
+//     templated but not yet filled (only populated for self-driven
+//     runs that left [host-agent: fill in] markers behind).
+//   - PendingMarkerCount: number of [host-agent: fill in] markers
+//     still on disk (drives the "host agent must fill before verify"
+//     decision).
+//   - LastGate: most recent gate (scripts/run.sh or any *_test.go
+//     exit) the harness ran. ExitCode + At let the host distinguish
+//     "ran green" from "ran red" without re-reading every output.
+//   - Phases: compact per-phase status, easier than re-parsing the
+//     raw state.json dump.
+type phaseStatusSummary struct {
+	TaskID             string                `json:"task_id"`
+	RunMode            string                `json:"run_mode,omitempty"`
+	CurrentPhase       string                `json:"current_phase"`
+	Status             string                `json:"status"`
+	NextStep           string                `json:"next_step"`
+	ResumeCommand      string                `json:"resume_command,omitempty"`
+	PendingFiles       []string              `json:"pending_files,omitempty"`
+	PendingMarkerCount int                   `json:"pending_marker_count,omitempty"`
+	LastGate           *phaseGateSummary     `json:"last_gate,omitempty"`
+	Phases             map[string]*phaseMini `json:"phases"`
+	StartedAt          string                `json:"started_at,omitempty"`
+	LastUpdateAt       string                `json:"last_update_at,omitempty"`
+}
+
+type phaseGateSummary struct {
+	Name     string `json:"name"`
+	ExitCode int    `json:"exit_code"`
+	At       string `json:"at,omitempty"`
+}
+
+type phaseMini struct {
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	EndedAt   string `json:"ended_at,omitempty"`
+}
+
+// phasePhaseOrder is the canonical discover→plan→execute→verify order
+// shared with the run-gate primitives. Kept in lock-step with
+// `internal/possess.Phase*` constants.
+var phasePhaseOrder = []string{"discover", "plan", "execute", "verify"}
+
+// buildPhaseStatusSummary derives an actionable summary from a
+// possessState. The summary is what `radiant_phase_status` returns to
+// a host agent so the host can drive a single call without re-parsing
+// the on-disk shape. Side-effect-free — no writes.
+func buildPhaseStatusSummary(st *possessState, workdir string) phaseStatusSummary {
+	if st == nil {
+		return phaseStatusSummary{Status: "unknown", NextStep: "no state on disk"}
+	}
+	out := phaseStatusSummary{
+		TaskID:       st.TaskID,
+		RunMode:      st.RunMode,
+		CurrentPhase: st.CurrentPhase,
+		Phases:       map[string]*phaseMini{},
+		StartedAt:    st.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		LastUpdateAt: st.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	for _, p := range phasePhaseOrder {
+		pr := st.Phases[p]
+		if pr == nil {
+			out.Phases[p] = &phaseMini{Status: "pending"}
+			continue
+		}
+		mini := &phaseMini{
+			Status:    pr.Status,
+			Error:     pr.Error,
+			StartedAt: pr.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+		if !pr.EndedAt.IsZero() {
+			mini.EndedAt = pr.EndedAt.Format("2006-01-02T15:04:05Z07:00")
+		}
+		out.Phases[p] = mini
+	}
+	// Composite status: cancelled > error > done > in_progress > pending.
+	switch {
+	case st.Cancelled:
+		out.Status = "cancelled"
+		out.NextStep = fmt.Sprintf(
+			"run was cancelled (phase=%s). Restart by re-calling `mcp__radiant__possess` with the same task + workdir.",
+			st.CurrentPhase)
+		out.ResumeCommand = fmt.Sprintf(
+			"mcp__radiant__possess(task=%q, workdir=%q)", st.Task, st.Workdir)
+	case hasPhaseError(st):
+		bad := firstErroredPhase(st)
+		pr := st.Phases[bad]
+		out.Status = "error"
+		out.NextStep = fmt.Sprintf(
+			"phase %q failed: %s. Inspect state.json then re-call `mcp__radiant__possess` to resume from %q.",
+			bad, pr.Error, bad)
+		out.ResumeCommand = fmt.Sprintf(
+			"mcp__radiant__possess(task=%q, workdir=%q)", st.Task, st.Workdir)
+	case st.CurrentPhase == "done":
+		out.Status = "done"
+		out.NextStep = "all four phases complete. Artifacts listed in state.json `artifacts`."
+		if len(st.Artifacts) > 0 {
+			out.PendingFiles = nil // explicit: nothing pending
+		}
+	case allPhasesDone(st):
+		out.Status = "done"
+		out.CurrentPhase = "done"
+		st.CurrentPhase = "done"
+		out.NextStep = "all four phases complete. Artifacts listed in state.json `artifacts`."
+	default:
+		out.Status = "in_progress"
+		next := nextPendingPhase(st)
+		out.NextStep = fmt.Sprintf(
+			"waiting on phase %q. Re-call `mcp__radiant__run_gate(phase=%q, ...)` or the full `mcp__radiant__possess` to advance.",
+			next, next)
+		out.ResumeCommand = fmt.Sprintf(
+			"mcp__radiant__run_gate(phase=%q, task=%q, workdir=%q)",
+			next, st.Task, st.Workdir)
+	}
+
+	// Self-driven runs surface pending files + marker count so the
+	// host agent knows exactly what to fill before verifying.
+	if st.RunMode == "self-driven" || strings.Contains(st.RunMode, "self-driven") ||
+		st.RunMode == "sync-host-async" || strings.HasPrefix(st.RunMode, "sync-host-async") {
+		out.PendingMarkerCount = countHostAgentMarkers(workdir)
+		out.PendingFiles = pendingSelfDrivenFiles(workdir, st)
+		if out.Status == "done" && out.PendingMarkerCount > 0 {
+			out.Status = "in_progress"
+			out.NextStep = fmt.Sprintf(
+				"all four phases scaffolded, but %d `[host-agent: fill in]` markers remain. Replace them, then re-run `scripts/run.sh` and `radiant_phase_status`.",
+				out.PendingMarkerCount)
+		}
+	}
+	// Last gate: scan executed phase Output for the gate marker the
+	// self-driven Execute phase emits at the end of scripts/run.sh.
+	if lastGate := extractLastGate(st); lastGate != nil {
+		out.LastGate = lastGate
+	}
+	return out
+}
+
+func hasPhaseError(st *possessState) bool {
+	for _, p := range phasePhaseOrder {
+		if pr := st.Phases[p]; pr != nil && pr.Status == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func firstErroredPhase(st *possessState) string {
+	for _, p := range phasePhaseOrder {
+		if pr := st.Phases[p]; pr != nil && pr.Status == "error" {
+			return p
+		}
+	}
+	return st.CurrentPhase
+}
+
+func allPhasesDone(st *possessState) bool {
+	for _, p := range phasePhaseOrder {
+		if pr := st.Phases[p]; pr == nil || pr.Status != "done" {
+			return false
+		}
+	}
+	return true
+}
+
+func nextPendingPhase(st *possessState) string {
+	for _, p := range phasePhaseOrder {
+		if pr := st.Phases[p]; pr == nil || pr.Status == "pending" || pr.Status == "in_progress" {
+			return p
+		}
+	}
+	return "done"
+}
+
+// pendingSelfDrivenFiles lists the canonical files the self-driven
+// scaffold writes that the host agent is expected to edit. We list the
+// files that exist on disk AND still contain at least one
+// [host-agent: fill in marker so a status caller sees only what is
+// actually pending, not the full template list.
+func pendingSelfDrivenFiles(workdir string, st *possessState) []string {
+	candidates := []string{
+		filepath.Join(workdir, ".radiant-harness", "CONTEXT.md"),
+		filepath.Join(workdir, ".radiant-harness", "handoff.md"),
+		filepath.Join(workdir, ".radiant-harness", "verify.md"),
+	}
+	if st.SpecDir != "" {
+		candidates = append(candidates,
+			filepath.Join(st.SpecDir, "spec.md"),
+			filepath.Join(st.SpecDir, "tasks.md"),
+		)
+	}
+	if st.Slug != "" {
+		candidates = append(candidates,
+			filepath.Join(workdir, "scripts", "run.sh"),
+			filepath.Join(workdir, "docs", "README.md"),
+		)
+	}
+	var out []string
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), "[host-agent: fill in") {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// extractLastGate scans the executed phase Output for the gate marker
+// the self-driven Execute phase emits at the end of scripts/run.sh.
+// Returns nil when no gate evidence is on disk (typical for runs that
+// never reached Execute, or for async/host-driven runs where the host
+// owns the gate step).
+func extractLastGate(st *possessState) *phaseGateSummary {
+	pr := st.Phases["execute"]
+	if pr == nil || pr.Output == "" {
+		return nil
+	}
+	out := pr.Output
+	// Self-driven Execute phase writes a sentinel line:
+	//   "[execute] gate: scripts/run.sh exit=<n> at=<RFC3339>"
+	// Parse it back out for the status summary.
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "[execute] gate:") {
+			continue
+		}
+		body := strings.TrimPrefix(line, "[execute] gate:")
+		body = strings.TrimSpace(body)
+		g := &phaseGateSummary{}
+		for _, kv := range strings.Fields(body) {
+			eq := strings.Index(kv, "=")
+			if eq < 0 {
+				continue
+			}
+			k := kv[:eq]
+			v := kv[eq+1:]
+			switch k {
+			case "name":
+				g.Name = v
+			case "exit":
+				n, _ := strconv.Atoi(v)
+				g.ExitCode = n
+			case "at":
+				g.At = v
+			}
+		}
+		if g.Name != "" {
+			return g
+		}
+	}
+	return nil
+}
+
+// formatPhaseStatusSummary renders a human-readable multi-line summary
+// suitable for `content[1].text`. Kept separate from the structured
+// JSON so the text format can evolve without breaking callers that
+// parse the JSON `summary` field.
+func formatPhaseStatusSummary(s phaseStatusSummary) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("status:       %s\n", s.Status))
+	if s.RunMode != "" {
+		b.WriteString(fmt.Sprintf("run mode:     %s\n", s.RunMode))
+	}
+	b.WriteString(fmt.Sprintf("current:      %s\n", s.CurrentPhase))
+	b.WriteString(fmt.Sprintf("next step:    %s\n", s.NextStep))
+	if s.ResumeCommand != "" {
+		b.WriteString(fmt.Sprintf("resume with:  %s\n", s.ResumeCommand))
+	}
+	if s.LastGate != nil {
+		b.WriteString(fmt.Sprintf("last gate:    %s (exit=%d", s.LastGate.Name, s.LastGate.ExitCode))
+		if s.LastGate.At != "" {
+			b.WriteString(fmt.Sprintf(", at=%s", s.LastGate.At))
+		}
+		b.WriteString(")\n")
+	}
+	if s.PendingMarkerCount > 0 {
+		b.WriteString(fmt.Sprintf("pending markers: %d\n", s.PendingMarkerCount))
+	}
+	if len(s.PendingFiles) > 0 {
+		b.WriteString("pending files:\n")
+		for _, p := range s.PendingFiles {
+			b.WriteString(fmt.Sprintf("  - %s\n", p))
+		}
+	}
+	b.WriteString("phases:\n")
+	for _, p := range phasePhaseOrder {
+		mini := s.Phases[p]
+		if mini == nil {
+			continue
+		}
+		icon := "○"
+		switch mini.Status {
+		case "done":
+			icon = "✓"
+		case "error":
+			icon = "✗"
+		case "in_progress":
+			icon = "▶"
+		}
+		fmt.Fprintf(&b, "  %s %-9s %s", icon, p, mini.Status)
+		if mini.Error != "" {
+			fmt.Fprintf(&b, "  (%s)", truncate(mini.Error, 80))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 // mcpPhaseStatus returns the persisted progress of a previous possess run.
+// v3.7.6: returns a `summary` field with the actionable view (next step,
+// resume command, pending files/markers, last gate, error/cancel state)
+// in addition to the raw state.json dump that earlier versions returned.
+// The raw dump is preserved in `content[0].text` for backwards
+// compatibility with callers that parse it directly.
 func mcpPhaseStatus(args json.RawMessage) mcpResponse {
 	var a struct {
 		TaskID  string `json:"task_id"`
@@ -308,10 +633,15 @@ func mcpPhaseStatus(args json.RawMessage) mcpResponse {
 			Message: fmt.Sprintf("no run with task_id %s in %s (have you run radiant_possess yet?)", a.TaskID, a.Workdir)}}
 	}
 	data, _ := json.MarshalIndent(st, "", "  ")
+	summary := buildPhaseStatusSummary(st, a.Workdir)
 	return mcpResponse{
 		JSONRPC: "2.0",
 		Result: map[string]interface{}{
-			"content": []map[string]string{{"type": "text", "text": string(data)}},
+			"content": []map[string]string{
+				{"type": "text", "text": string(data)},
+				{"type": "text", "text": formatPhaseStatusSummary(summary)},
+			},
+			"summary": summary,
 		},
 	}
 }
