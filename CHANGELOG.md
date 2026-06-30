@@ -101,7 +101,25 @@ Three backlog items closed in one sprint, all observability/lifecycle:
 
 ### Post-release validation
 
-TBD — pending release cut.
+2026-06-30 12:30 BRT — 12/12 PASS after `v3.7.10` tag + release:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, **8 tools** (same set as v3.7.9 — no new MCP tools in v3.7.10, the watch flag is CLI-side) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS — all reachable install paths land on a working binary |
+| E | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| F | `make test-dropin` | PASS, against v3.7.10 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
+| H | Clean rebuild from tag | PASS — `v3.7.10` clean version string (the docs commit happened BEFORE tagging, so no `-N-g<sha>` suffix; this is the ideal ordering the v3.7.7 process-learnings documented) |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`75cd34dc...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.10`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.10`, `mcp self-test` PASS with 8 tools |
+
+**Tag/build ordering note (v3.7.7 process-learnings in action):** unlike v3.7.9 where the docs commit landed between tag and build (forcing `v3.7.9-1-g<sha>`), v3.7.10 tagged AFTER the docs commit, so the clean rebuild reports `v3.7.10` with no suffix and the published SHA256SUMS matches the local rebuild bit-for-bit. This is the recommended flow going forward: tag + build in the same atomic step, before any subsequent commits.
 
 ## [3.7.9] — 2026-06-30 — Fleet async primitives (parity with loop)
 
