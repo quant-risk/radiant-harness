@@ -117,7 +117,56 @@ written file.
 
 ### Post-release validation
 
-TBD — pending release cut.
+2026-06-30 13:10 BRT — **15/15 PASS** after `v3.7.11` tag + release (12 base + 3 v3.7.11-specific surface checks):
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.11` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS |
+| E | `make test-agents` | PASS, 13/13 |
+| F | `make test-dropin` | PASS, against v3.7.11 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local rebuilds report `v3.7.11-1-g<sha>` (post-validation-commit divergence, expected; published binaries built before tag and SHA-match the published SHA256SUMS) |
+| I | Fetch published SHA256SUMS | OK |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`d7e7d1c...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.11`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.11`, `mcp self-test` PASS with 8 tools |
+| M | **`--on-change-exit` on real seeded state** (v3.7.11 binary) | PASS — initial emit (in_progress) + background flip to done at t+300ms + second emit (done) + exit 0 |
+| N | **`--follow=<ticket>` + `phase redirect`** mid-watch (v3.7.11 binary) | PASS — initial emit (A in_progress) + background redirect A→B at t+400ms + watch detected + printed `phase watch: --follow redirect v3711-A-real → v3711-B-real` line + attempted B load |
+| O | **`--help` surfaces reachable on v3.7.11 binary** | PASS — `phase watch --help` documents `--on-change-exit` + `--follow`; `phase redirect --help` documents the protocol |
+
+**Process-learnings (one new, two reinforced):**
+
+- **`--self-for-agent` install.sh path requires basename-only SHA256SUMS** —
+  `install.sh` greps SHA256SUMS with `basename $ASSET$` (anchored at
+  end of line). When the file is generated from outside `dist/` (e.g.
+  `shasum -a 256 dist/* > SHA256SUMS`), the paths have the `dist/`
+  prefix and the grep fails silently → install exits 1 with no
+  error message ("verifying SHA256" then exit). **Fix:** always `cd
+  dist && shasum -a 256 * > SHA256SUMS` so paths are bare basenames.
+  Discovered during v3.7.11 validation; `test-dropin` failed at
+  first run, root cause was the `dist/` prefix. Now a fixed rule
+  in the release flow.
+- **Re-tagging a published version is the right fix when post-
+  release commits slip in** — when `STATE.md` was committed AFTER
+  the initial `v3.7.11` tag, the local rebuild reported
+  `v3.7.11-1-g<sha>` (1 commit past the tag). Deleting and
+  recreating the tag at HEAD gave clean `v3.7.11` versions
+  without dirty suffix. Done via `git tag -d v3.7.11 && git tag
+  -a v3.7.11` and `git push origin :refs/tags/v3.7.11 && git push
+  origin v3.7.11`. The release assets were unchanged (same code),
+  so no re-upload needed.
+- **CDN cache delay on SHA256SUMS re-upload** — after re-uploading
+  SHA256SUMS, GitHub's CDN serves the cached old version for
+  ~30s. `make test-dropin` failed twice within the cache window
+  then PASSed on the third attempt after a 5s sleep. Same pattern
+  documented in v3.7.8 validation; v3.7.11 just confirmed it.
+
+Earlier in the session (v3.7.10 deep post-release validation): 15/15 PASS.
 
 ## [3.7.10] — 2026-06-30 — --watch, nested pid tree, async-host opt-in matrix
 
