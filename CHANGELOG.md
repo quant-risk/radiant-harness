@@ -4,6 +4,106 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.12] — 2026-06-30 — phase redirect --list + phase follow + grandchildren pid tree
+
+Three backlog items closed in one sprint, all closing the
+v3.7.11 follow-up work.
+
+### Added
+
+- **`radiant phase redirect --list`** — new flag on the existing
+  redirect subcommand. Scans `.radiant-harness/state/possess-*/`
+  for `redirect.json` files and emits either a formatted table
+  (default — columns: OLD, NEXT, CREATED_AT, PATH) or NDJSON
+  (`--list --json`, one object per line). Skips corrupt files
+  silently (defense against operator-edited files with bad
+  JSON) and skips non-`possess-*` directories (so a stray
+  `redirect.json` under another state subdir doesn't pollute
+  the listing). Empty state dir emits `(no redirects found)` so
+  the operator knows we looked.
+- **`radiant phase follow <anchor-ticket-id>`** — alias for
+  `radiant phase watch --follow=<ticket>` with the anchor as a
+  positional argument (easier to type + tab-complete in a
+  shell). Reuses the same flag set as `watchCmd` (`--interval`,
+  `--max-poll`, `--json`, `--on-change-exit`). The `RunE` is a
+  thin wrapper that calls `runPhaseWatch` directly with the
+  anchor as both the task_id and the follow value, so the
+  semantics are byte-identical to `--follow=<anchor>` on the
+  watch command.
+- **Recursive pid tree — grandchildren** (`internal/fleet/`) —
+  `PidTree` struct now exposes `GrandchildrenPids` +
+  `GrandchildrenAlive` + `GrandchildrenCount` in addition to
+  the v3.7.10 `Children*` fields. New helpers
+  `readGrandchildrenPids` + `writeGrandchildrenPids` +
+  `taskPidGrandchildrenPath` provide the on-disk format
+  (newline-separated integers at
+  `.radiant-harness/fleet/pids/agent-<...>.pid.grandchildren`).
+  `refreshChildAndGrandchildrenSidecars` (new helper) replaces
+  `refreshChildPidsLoop`'s body so each refresh writes BOTH
+  sidecars. `Coordinator.Status()` enriches the
+  crashed-evidence string:
+  `"agent pid 12345 not alive; 2 children recorded, 1 still
+  alive; 5 grandchildren recorded, 3 still alive"`. The
+  spawnAgent defer removes both sidecars on agent exit so a
+  follow-up `mcp__radiant__fleet_status` doesn't surface
+  stale child / grandchild pids from a previous run of the
+  same task id.
+
+### Changed
+
+- `phase watch --help` + `phase redirect --help` now document
+  the `--list` flag and the new `follow` subcommand.
+- `refreshChildPidsLoop` was renamed to `refreshChildAndGrandchildrenSidecars`
+  for clarity (still invoked as `refreshChildPidsLoop` from
+  spawnAgent — caller-side rename was intentionally skipped to
+  minimise diff churn).
+
+### Tests
+
+- 6 new tests in `cmd/radiant/v3_7_12_cli_test.go`:
+  - `TestPhaseRedirect_List_Empty` — empty state dir emits
+    `(no redirects found)`.
+  - `TestPhaseRedirect_List_WithEntries` — formatted table
+    output with 2 entries + `2 redirect(s)` count.
+  - `TestPhaseRedirect_List_JSON` — NDJSON parseable with
+    `old_ticket` + `next_ticket` + `created_at` fields.
+  - `TestPhaseRedirect_List_IgnoresCorrupt` — corrupt JSON
+    files are skipped, valid ones still listed.
+  - `TestPhaseRedirect_List_IgnoresNonPossessDirs` — only
+    `possess-*` dirs scanned.
+  - `TestPhaseFollow_HelpReachable` + `PassesAnchorToRunPhaseWatch`
+    — alias subcommand wired correctly + state read works.
+- 7 new tests in `internal/fleet/pidtree_grandchildren_test.go`:
+  - `TestPidTree_Grandchildren_NoGCSidecar` — vacuously true
+    when no `.grandchildren` file exists.
+  - `TestPidTree_Grandchildren_GrandchildDead` — `Alive=false`,
+    `Count=N-1` when one GC is stale (pid_max sentinel).
+  - `TestWriteGrandchildrenPids_Roundtrip` — write/read
+    symmetry.
+  - `TestTaskPidGrandchildrenPath_Layout` — pins the on-disk
+    path.
+  - `TestRefreshChildAndGrandchildrenSidecars_WritesBoth` —
+    single refresh call writes both sidecars.
+  - `TestRefreshChildAndGrandchildrenSidecars_DeadChildSkipped`
+    — confirms sidecar files exist even with no live children.
+  - `TestRefreshChildAndGrandchildrenSidecars_GrandchildrenFound`
+    — spawns shell → subshell, verifies pgrep finds the
+    grandchild relationship.
+
+### Backlog for v3.7.13 (post-release)
+
+- Real CI host reproducing fleet cross-process need (still
+  gated).
+- Per-task nested-pid-tree dashboard HTML report (operator
+  wants to click into a fleet task and see the full tree).
+- `radiant phase redirect --purge=<ticket>` for explicit
+  cleanup of stale redirects (vs. the current implicit
+  cleanup via `mavis-trash` of `.radiant-harness/state/`).
+
+### Post-release validation
+
+TBD — pending release cut.
+
 ## [3.7.11] — 2026-06-30 — --on-change-exit, --follow, docs/HOSTS.md
 
 Three backlog items closed — observability + offline docs for the

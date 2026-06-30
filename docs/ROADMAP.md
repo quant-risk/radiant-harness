@@ -6,6 +6,22 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.12 (2026-06-30)
+
+- **`radiant phase redirect --list`** — scan workdir for
+  `redirect.json` files + formatted table / NDJSON output.
+  Skips corrupt files + non-`possess-*` dirs silently.
+- **`radiant phase follow <anchor>`** — alias for `phase watch
+  --follow=<ticket>` with the anchor as a positional argument.
+  Reuses the watchCmd flag set; semantics byte-identical.
+- **Recursive pid tree — grandchildren** — `PidTree` now
+  exposes `GrandchildrenPids` + `GrandchildrenAlive` +
+  `GrandchildrenCount`. New `.pid.grandchildren` sidecar
+  (newline-separated integers) written alongside the
+  children sidecar. `Coordinator.Status()` enriches the
+  crashed-evidence string with grandchildren counts. 13 new
+  tests pin the contract (6 CLI + 7 pidtree).
+
 ## Shipped in v3.7.11 (2026-06-30)
 
 - **`radiant phase watch --on-change-exit`** — exit 0 immediately
@@ -147,9 +163,9 @@ state, and clear enough for another agent to complete real project work.
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| `radiant phase redirect --list` | Show all current redirects in the workdir | S | Maintainers | v3.7.11 redirect.json protocol | Operator can clean up after a long fleet run without manually finding each redirect.json |
-| `radiant phase follow` alias for `radiant phase watch --follow=<ticket>` | Shorter CLI surface for the follow use case | S | Maintainers | v3.7.11 --follow | Operator doesn't need to remember two flag spellings |
-| Recursive fleet pid tree (v3.7.10 nested pid tracking extended to grandchildren) | Distinguish grandchild death from child death | M | Maintainers | v3.7.10 pgrep -P refresh | Status surfaces which grandchild process died, not just that one did |
+| Per-task nested-pid-tree dashboard HTML report | Click into a fleet task and see the full parent→child→grandchild tree visually | M | Maintainers | v3.7.12 grandchildren pid tree | `radiant fleet status <run-id> --html` emits a self-contained HTML file with the tree |
+| `radiant phase redirect --purge=<ticket>` | Explicit cleanup of stale redirects (vs. the current implicit cleanup via `mavis-trash`) | S | Maintainers | v3.7.12 --list | Operator can `phase redirect --purge=old-anchor` to remove a specific redirect without nuking the whole state dir |
+| Recursive fleet pid tree (great-grandchildren) | Distinguish great-grandchild death from grandchild death | M | Maintainers | v3.7.12 grandchildren pid tree | Status surfaces which great-grandchild process died |
 
 ## Later
 
