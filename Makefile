@@ -48,7 +48,10 @@ install: build
 
 # Smoke test: builds, runs setup-mcp --help, host-info, verifies zero
 # HTTP-LLM symbols, checks size.
-smoke: build
+# Also runs make audit-skills + make audit-docs — drift detectors that
+# catch the doc-vs-binary class of bugs that v3.0.0 and v3.7.1 shipped.
+# A failure here means a docs-or-bundle reference is dangling.
+smoke: build audit-skills audit-docs
 	./scripts/smoke-test.sh
 
 # Cross-agent install matrix (Sprint 5). Builds first, then for each of

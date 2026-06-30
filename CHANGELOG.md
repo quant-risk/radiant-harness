@@ -4,12 +4,12 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [3.7.2-prep] — 2026-06-29 — Skill name drift fix + Hermes TUI workstream
+## [3.7.2-prep] — 2026-06-29 — Skill name drift + Hermes async primitives skeleton + audit-docs
 
-Two fixes ship together because both surfaced in the same Hermes TUI review
-session (2026-06-29 23:55).
+Four commits ship together because all three surfaced in the same
+Hermes TUI review session (2026-06-29 22:55–23:55).
 
-### Skill name drift in selfDrivenSkillHints (FIXED)
+### Skill name drift in selfDrivenSkillHints (FIXED — commit c830e3b)
 
 `cmd/radiant/cmd_mcp_possess_self_driven.go::selfDrivenSkillHints` listed
 4 skills that don't exist as bundled directories. When a user task
@@ -25,44 +25,85 @@ it, got nothing, and the scaffold was orphaned.
 | `compliance`, `regulatory`, `basel`, `ifrs` | `regulatory-compliance` | `regulatory` |
 
 **Fixed:** hints renamed to real bundled skill names. Updated
-`cmd_mcp_runtime.go` tool descriptions (lines 58, 67, 355) and
-`internal/casetest/canned.go` test data (lines 31, 33, 36) that
-mentioned the ghost names.
+`cmd_mcp_runtime.go` tool descriptions and `internal/casetest/canned.go`
+test data that mentioned the ghost names.
 
-### Drift detector (ADDED)
+### Doc-vs-binary drift (FIXED — commit b91a8bf)
 
-**`scripts/audit-skills.sh` + `make audit-skills`** — extracts every
-`{"keyword", "skill-name"}` pair from the hint map and asserts each
-skill name has a corresponding `internal/skill/skills/<name>/SKILL.md`.
-Closes the regression class — same pattern as `make audit-docs` from
-the v3.0.0 doc-drift fix.
+README.md line 610 said `` `radiant integrate` `` but the real command
+is `radiant integrations` (plural). Same drift class as v3.0.0 (docs
+promised 50+ cmds that didn't exist). Found by the new `audit-docs`
+drift detector; renamed in README.md.
 
-```
-$ make audit-skills
-audit-skills: 6 hint(s), 69 bundled skill(s)
-  ✓ present: camada-agentica credit-risk fraud-detection ml nova-feature regulatory
+### Drift detectors (ADDED — commits c830e3b + b91a8bf)
 
-✓ all hint map entries reference real bundled skills
-```
+- **`scripts/audit-skills.sh` + `make audit-skills`** — extracts every
+  `{"keyword", "skill-name"}` pair from `selfDrivenSkillHints` and
+  asserts each skill name has a corresponding
+  `internal/skill/skills/<name>/SKILL.md`. Closes the regression class.
 
-### Hermes TUI synchronous workstream (DOCUMENTED)
+- **`scripts/audit-docs.sh` + `make audit-docs`** — extracts every
+  inline `` `radiant <cmd>` `` reference from README/INSTALL/EXAMPLES
+  and asserts it appears in `radiant --help`. Catches the v3.0.0
+  doc-drift class before it ships.
+
+- **`Makefile`** — `make smoke` now chains `audit-skills audit-docs`
+  before `smoke-test.sh`, so CI detects drift automatically.
+
+### Async primitives skeleton for synchronous hosts (ADDED — commit 466ee89)
+
+v3.7.1 closes the *Codex* hollow-stub case but does NOT change the
+Hermes TUI deadlock — Hermes implements synchronous
+`wait_for_tool_result` and can't process `sampling/createMessage`
+callbacks while a tool call is in flight.
+
+v3.7.2-prep ships the **skeleton** (PR-A of the proposal):
+
+- **`internal/possess/async.go`** — `AsyncGate` + `PossessAsync`
+  interfaces, `Phase` enum, `GateTicket` (16-char crypto-random via
+  `crypto/rand` + time fallback), `GateHandle`, `Status`,
+  `StubAsyncGate` + `StubPossessAsync` returning
+  `ErrAsyncInDevelopment`. `StatePathFor(workdir, ticket)` helper.
+- **`internal/possess/async_test.go`** — 5 unit tests covering stub
+  error contract, phase validation, ticket uniqueness, state-path
+  format.
+- **`cmd/radiant/cmd_mcp_run_gate.go`** + **`cmd_mcp_possess_async.go`** —
+  MCP tool handlers. Validate input (phase required + valid via
+  `possess.ValidPhase`, task required). Return JSON-RPC `-32602` with
+  clear message on invalid input; return `isError: true` + structured
+  "v3.7.2 in-development" text on valid input (so callers can detect
+  "in dev" without parsing strings).
+- **`cmd/radiant/cmd_mcp_runtime.go`** — both tools registered in
+  `tools[]` array with full MCP input schemas + descriptions pointing
+  to the proposal doc. Cases added to `callMCPToolLight` dispatcher.
+- **`docs/PROPOSAL-v3.7.2-async-primitives.md`** — full design doc:
+  problem, fix matrix, design (2 primitives + refactor), trade-offs
+  table, plan PR-A → PR-B → PR-C → PR-D, "what's NOT in v3.7.2",
+  decision-needed section.
+
+**The 2 new tools (`radiant_run_gate`, `radiant_possess_async`) already
+appear in `radiant mcp self-test`'s `tools/list`** — calling them today
+returns the structured "in-development" stub. PR-B (next) wires real
+subprocess plumbing; PR-C refactors `radiant_possess` synchronous to
+auto-route via the async path on synchronous hosts; PR-D ships the
+release notes + AGENTS-FOR-TASKS final update.
+
+### Hermes TUI synchronous workstream (DOCUMENTED — commit 43c16a0)
 
 v3.7.1 release notes framed the fix as "closes Codex hollow-stub trap".
 In practice the user expectation was that Hermes TUI also worked. It
 doesn't — Hermes TUI implements synchronous tool calls (sync
 `wait_for_tool_result`), so the harness's `sampling/createMessage`
-callback never gets processed: Hermes is blocked waiting for
-`radiant_possess` to return while the harness waits for sampling to
-complete. Deadlock guaranteed at the execute phase, regardless of
-v3.7.1.
+callback never gets processed. Deadlock guaranteed at the execute
+phase, regardless of v3.7.1.
 
-**Recommended workstream for Hermes TUI hosts:**
+**Recommended workstream for Hermes TUI hosts (until PR-B/PR-C land):**
 
 ```
-1. radiant_skill_list    ← enumerates bundled skills (no round-trip)
-2. radiant_skill_load    ← reads SKILL.md content (no round-trip)
+1. radiant_skill_list                  ← enumerates bundled skills (no round-trip)
+2. radiant_skill_load                  ← reads SKILL.md content (no round-trip)
 3. radiant_init / radiant_create_spec  ← scaffolds the spec/tasks (no round-trip)
-4. Python / bash direto  ← fills the [host-agent: ...] markers
+4. Python / bash directly              ← fills the [host-agent: ...] markers
 ```
 
 Each tool is small, returns fast, doesn't trap the TUI. Hermes
@@ -72,25 +113,40 @@ hybrid pattern that solved the iFood Pago MenuFlex case (2026-06-29).
 
 **Operational rule (carried forward):** `radiant_possess` via MCP
 is a dead end on Hermes TUI. The supported path on synchronous
-hosts is the bounded primitive pattern above. Workstream v3.7.2 will
-add async primitives (`radiant_run_gate`, `radiant_possess_async`)
-so even `radiant_possess` doesn't trap the TUI — but until then,
-treat Hermes as a hybrid host.
+hosts is the bounded primitive pattern above. When v3.7.2 PR-C lands,
+the synchronous `radiant_possess` will auto-detect Hermes and route
+internally through the async path — until then, treat Hermes as a
+hybrid host.
 
 ### Verified
 
 - `go test ./...` — 31 packages PASS, 0 FAIL.
-- `make smoke` — 17/17 OK.
-- `make audit-skills` — 6/6 hints reference real bundled skills.
+- `go test ./... -race` — 31 packages PASS, 0 race conditions.
+- `make smoke` — 17/17 OK + audit-skills + audit-docs (now chained).
+- `make audit-skills` — 6 hint(s), 69 bundled skill(s), 0 drift.
+- `make audit-docs` — 46 doc reference(s), 57 real cmd(s), 0 drift.
+- `radiant mcp self-test` — PASS, 7 tools (2 new async primitives).
 - `go vet ./...` — clean.
+- Cross-platform release — linux/amd64, linux/arm64, darwin/amd64,
+  darwin/arm64, windows/amd64, windows/arm64 all build clean, ~11–12 MB each.
+- Handler sanity — 6/6 cases (4 error paths + 2 structured stubs).
 
-### Files changed (commit c830e3b)
+### Files changed (4 commits)
 
 - `cmd/radiant/cmd_mcp_possess_self_driven.go` — hint map renamed
-- `cmd/radiant/cmd_mcp_runtime.go` — tool descriptions updated
+- `cmd/radiant/cmd_mcp_runtime.go` — tool descriptions + 2 new async tools registered
 - `internal/casetest/canned.go` — test data updated
-- `Makefile` — added `audit-skills` + `audit-docs` PHONY targets
-- `scripts/audit-skills.sh` — new drift detector
+- `Makefile` — `audit-skills` + `audit-docs` PHONY targets, smoke chain
+- `scripts/audit-skills.sh` — new drift detector (bash 3.2 compatible)
+- `scripts/audit-docs.sh` — new drift detector (bash 3.2 compatible)
+- `README.md` — `integrate` → `integrations` typo fixed
+- `internal/possess/async.go` — interfaces + stubs + types
+- `internal/possess/async_test.go` — 5 unit tests
+- `cmd/radiant/cmd_mcp_run_gate.go` — MCP handler stub
+- `cmd/radiant/cmd_mcp_possess_async.go` — MCP handler stub
+- `docs/PROPOSAL-v3.7.2-async-primitives.md` — design doc
+- `CHANGELOG.md` — this entry
+- `AGENTS-FOR-TASKS.md` — 2 new heads-ups (Hermes synchronous + skill names)
 
 ## [3.7.1] — 2026-06-29 — Agentic driver -32601 fallback closes Codex hollow-stub
 

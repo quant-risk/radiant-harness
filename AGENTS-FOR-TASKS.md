@@ -105,9 +105,11 @@ Hermes TUI                          radiant mcp serve
 back to self-driven scaffold). It does NOT change the Hermes TUI
 flow because the deadlock is at the MCP protocol layer, before
 the driver even starts. The release notes framed the fix
-broader than the actual scope; v3.7.2+ will ship async
-primitives (`radiant_run_gate`, `radiant_possess_async`) to
-solve this properly.
+broader than the actual scope; v3.7.2-prep already exposes
+`radiant_run_gate` and `radiant_possess_async` in `tools/list`
+(returning structured "v3.7.2 in-development" stubs today), and
+PR-B/PR-C will wire real subprocess plumbing + auto-routing on
+synchronous hosts.
 
 **Until then, the supported workstream for Hermes TUI is:**
 
