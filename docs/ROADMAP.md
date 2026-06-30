@@ -6,6 +6,29 @@ Make radiant-harness a reliable drop-in governance layer for host agents:
 installable from GitHub, usable through MCP, auditable through persisted
 state, and clear enough for another agent to complete real project work.
 
+## Shipped in v3.7.11 (2026-06-30)
+
+- **`radiant phase watch --on-change-exit`** — exit 0 immediately
+  after the FIRST change observed AFTER the initial snapshot.
+  Useful for "wait until anything changes" notifications without
+  a full watch. Combine with `--max-poll` to bound the wait.
+- **`radiant phase watch --follow=<anchor-ticket-id>`** +
+  **`radiant phase redirect <old> <new>`** — `--follow` tracks
+  the anchor ticket's state initially; mid-watch, the operator
+  can write a `redirect.json` via `phase redirect` and the
+  watcher switches to the new ticket transparently. Use case:
+  resume re-dispatches with a new ticket id without losing
+  the watcher's stream.
+- **`docs/HOSTS.md`** — offline-readable per-host opt-in matrix
+  for all 13 Light-mode hosts + the "no agent detected" case.
+  Documents when to opt in, how to verify, when NOT to opt in,
+  and governance rules for flipping verdicts. Companion to
+  `radiant doctor --async-host` (which already shipped in v3.7.10).
+- **9 new tests pin the contract** — on-change-exit
+  transition/max-poll semantics, follow redirect file format
+  (write/read round-trip, missing/corrupt handling, RFC3339
+  payload shape).
+
 ## Shipped in v3.7.10 (2026-06-30)
 
 - **`radiant phase watch <task-id>` CLI** — polls the persisted
@@ -117,16 +140,16 @@ state, and clear enough for another agent to complete real project work.
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| Real CI host reproducing fleet cross-process need (gates default-flip of `RADIANT_FLEET_ASYNC_SUBPROCESS=1`) | Concrete reproduction (CI host with hard MCP tool-call deadline against a large fleet) | M | Maintainers | v3.7.10 opt-in machinery + diagnostic | Document the host, opt in by default, validate end-to-end |
-| Real sync host reproducing loop async need (gates default-flip of `RADIANT_ASYNC_SUBPROCESS=1`) | Concrete reproduction (Hermes TUI aside, no other known sync host yet) | M | Maintainers | v3.7.10 opt-in machinery + diagnostic | Document the host, opt in by default, validate end-to-end |
+| Real CI host reproducing fleet cross-process need (gates default-flip of `RADIANT_FLEET_ASYNC_SUBPROCESS=1`) | Concrete reproduction (CI host with hard MCP tool-call deadline against a large fleet) | M | Maintainers | v3.7.11 docs/HOSTS.md governance rules | Document the host, opt in by default, validate end-to-end |
+| Real sync host reproducing loop async need (gates default-flip of `RADIANT_ASYNC_SUBPROCESS=1`) | Concrete reproduction (Hermes TUI aside, no other known sync host yet) | M | Maintainers | v3.7.11 docs/HOSTS.md governance rules | Document the host, opt in by default, validate end-to-end |
 
 ## Next
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| `--watch --on-change-exit` flag | Exit on the first change after the initial snapshot | S | Maintainers | v3.7.10 phase watch | `radiant phase watch --on-change-exit <ticket>` for "wait until anything changes" notifications |
-| `radiant phase watch --follow=<ticket>` | Follow another ticket's state when a re-dispatched run gets a new ticket id | S | Maintainers | v3.7.10 phase watch | Operator can resume-then-watch without manually updating the ticket id |
-| Per-host opt-in matrix docs | Surface the v3.7.10 doctor recommendation in `docs/HOSTS.md` for offline reading | S | Maintainers | v3.7.10 doctor --async-host | A single table that lists all 13 hosts + their per-flag verdict |
+| `radiant phase redirect --list` | Show all current redirects in the workdir | S | Maintainers | v3.7.11 redirect.json protocol | Operator can clean up after a long fleet run without manually finding each redirect.json |
+| `radiant phase follow` alias for `radiant phase watch --follow=<ticket>` | Shorter CLI surface for the follow use case | S | Maintainers | v3.7.11 --follow | Operator doesn't need to remember two flag spellings |
+| Recursive fleet pid tree (v3.7.10 nested pid tracking extended to grandchildren) | Distinguish grandchild death from child death | M | Maintainers | v3.7.10 pgrep -P refresh | Status surfaces which grandchild process died, not just that one did |
 
 ## Later
 

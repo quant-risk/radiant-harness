@@ -4,6 +4,121 @@ All notable changes to `radiant-harness` (Light) are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.7.11] — 2026-06-30 — --on-change-exit, --follow, docs/HOSTS.md
+
+Three backlog items closed — observability + offline docs for the
+async opt-in matrix shipped in v3.7.10.
+
+### Added
+
+- **`radiant phase watch --on-change-exit`** — exit 0 immediately
+  after the FIRST change observed AFTER the initial snapshot.
+  Useful for "wait until anything changes" notifications without
+  a full watch. Combine with `--max-poll` to bound the wait
+  window (`--on-change-exit --max-poll=30s`). Refactored
+  `runPhaseWatch` to split read/emit into separate helpers
+  (`readPhaseWatchSnapshot` + `emitPhaseWatchSnapshotText`) so
+  the change-detection logic is explicit: compare the current
+  fingerprint against the initial fingerprint captured before
+  the loop starts.
+- **`radiant phase watch --follow=<anchor-ticket-id>`** — track
+  the anchor's state initially; if a `redirect.json` appears at
+  `.radiant-harness/state/possess-<anchor>/redirect.json` with
+  a `{next_ticket: "..."}` payload, the watch transparently
+  switches to the new ticket's `state.json`. Use case: resume
+  re-dispatches with a NEW ticket id; the operator wants to keep
+  watching without manually updating the CLI invocation. The
+  redirect path is checked on every poll, so the operator can
+  `phase redirect <old> <new>` mid-watch and the watcher
+  catches up at the next tick.
+- **`radiant phase redirect <old-ticket> <new-ticket>`** — new
+  subcommand that writes the `redirect.json` protocol file.
+  Atomic write via tmp + rename; includes a `created_at`
+  RFC3339 timestamp for forensics. Best-effort: creates the
+  parent state dir if missing (so a forward reference works
+  even before the new ticket's state.json exists).
+- **`docs/HOSTS.md`** — offline-readable counterpart of
+  `radiant doctor --async-host`. Per-host table for all 13
+  Light-mode hosts + the "no agent detected" case, with
+  per-flag verdict (Loop async subprocess / Fleet async
+  subprocess) + reason. Includes:
+  - **How to opt in** — env var (`RADIANT_ASYNC_SUBPROCESS=1`)
+    + CLI flag (`--async-subprocess`) with the CLI > env >
+    default-off precedence chain.
+  - **How to verify** — sample `radiant doctor --async-host`
+    output showing the verdicts and the "→ opt in:" hint line.
+  - **When to update this matrix** — governance rules for
+    flipping verdicts (real reproduction required, maintainer
+    sign-off, CHANGELOG entry).
+  - **When NOT to opt in** — inline is faster for small
+    workloads; subprocess mode is opt-in for a reason
+    (fork/exec overhead, harder to instrument with dlv/pprof).
+
+### Changed
+
+- `runPhaseWatch` signature gained two parameters
+  (`onChangeExit bool`, `follow string`). Existing callers
+  pass `false` and `""` to preserve behavior. New tests use
+  the new params.
+- `phase watch --help` now lists `--on-change-exit` and
+  `--follow` flags with example usage.
+
+### File protocol (v3.7.11)
+
+`.radiant-harness/state/possess-<oldTicket>/redirect.json`:
+
+```json
+{
+  "next_ticket": "new-ticket-id",
+  "created_at": "2026-06-30T12:34:56Z"
+}
+```
+
+Written by `radiant phase redirect <old> <new>`. Read by
+`phase watch --follow=<old>` on every poll. Atomic write via
+tmp + rename so concurrent readers never observe a half-
+written file.
+
+### Tests (9 new, 100% PASS)
+
+`cmd/radiant/v3_7_11_test.go`:
+
+- `TestPhaseWatch_OnChangeExit_ExitsOnTransition` — initial +
+  transition emits two snapshots and exits 0 in <2s.
+- `TestPhaseWatch_OnChangeExit_ExitsOneOnMaxPoll` — no
+  transition + `--max-poll` returns exit-1-style error
+  with descriptive message.
+- `TestPhaseWatch_FollowRedirect` — full integration:
+  redirect notice "A → B" appears in output before any error.
+- `TestFollowRedirectPath_Layout` — pins the on-disk path.
+- `TestPhaseRedirect_Write_AndRead` — round-trip the
+  `next_ticket` field.
+- `TestPhaseRedirect_Write_EmptyOldOrNewRejected` — input
+  validation (both old and new required).
+- `TestReadFollowRedirect_MissingFile` — `ok=false` for
+  missing redirect.
+- `TestReadFollowRedirect_CorruptJSON` — `ok=false` for
+  garbage payload.
+- `TestWriteFollowRedirect_PayloadShape` — `next_ticket` +
+  `created_at` (RFC3339) fields pinned.
+
+### Backlog for v3.7.12 (post-release)
+
+- Real CI host reproducing fleet cross-process need (still
+  gated). `docs/HOSTS.md` captures what would need to happen
+  to flip the matrix verdict from "Not recommended" to
+  "Recommended" for any given host.
+- `radiant phase redirect --list` — show all current
+  redirects in the workdir (useful for cleanup after a
+  long fleet run).
+- `radiant phase follow` — alias for
+  `radiant phase watch --follow=<ticket>` so the operator
+  doesn't have to remember two flag spellings.
+
+### Post-release validation
+
+TBD — pending release cut.
+
 ## [3.7.10] — 2026-06-30 — --watch, nested pid tree, async-host opt-in matrix
 
 Three backlog items closed in one sprint, all observability/lifecycle:
