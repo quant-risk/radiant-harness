@@ -6,34 +6,34 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 11:25 BRT by mavis during v3.7.8 release prep
+**Last updated:** 2026-06-30 11:35 BRT by mavis during v3.7.8 post-release validation
 
 ## Current sprint / active feature
 
-- Active: **v3.7.8 release prep — async gate pid/liveness probe.**
+- Active: **v3.7.8 post-release validation done; v3.7.9 kickoff.**
 - Sprint goal: surface subprocess alive-vs-crashed from
   `radiant_phase_status` so a host agent can tell the difference
   between "phase still running" and "subprocess crashed without
   writing an error".
-- Progress: (1) `phaseStatusSummary` extended with
-  `subprocess_alive` (bool) + `subprocess_pid` (int) fields
+- Progress (v3.7.8 closed): (1) `phaseStatusSummary` extended
+  with `subprocess_alive` (bool) + `subprocess_pid` (int) fields
   populated from `.radiant-harness/pids/<ticket>.pid`; (2) status
   escalation from `in_progress` to `crashed` when pid is dead;
   (3) next-step line annotated with pid + liveness; (4) format
   helper (`content[1].text`) gains a `subprocess:` line; (5) 3
   new tests pin the contract (SubprocessAlive / SubprocessCrashed
-  / NoPidFile); (6) full validation PASS
-  (`./scripts/run.sh` 8/8 + 2 SKIP; `go test ./cmd/radiant
-  ./internal/...` PASS).
+  / NoPidFile); (6) full validation 7/7 PASS (see below).
+- v3.7.8 GitHub release: tag `v3.7.8` + 7 release assets.
 
 ## Next concrete action
 
-- Tag v3.7.8 + build cross-platform binaries + GitHub release
-  with 7 assets (6 binaries + SHA256SUMS). Re-run
-  `make audit-install` to confirm canonical `curl | bash` resolves
-  v3.7.8.
-- After tag: continue with v3.7.9 backlog (fleet async primitives,
-  real-host opt-in for `RADIANT_ASYNC_SUBPROCESS=1`).
+- v3.7.9 work. Order: (1) Fleet async primitives — same
+  status/retry guarantees as loop but for fleet ops; (2) real
+  host opt-in for `RADIANT_ASYNC_SUBPROCESS=1` — needs a
+  reproduction of a sampling-backed sync-host possess need
+  before turning the subprocess path on by default for any
+  host; (3) `--watch` flag for `radiant_phase_status` (poll
+  pid file + emit MCP notifications on alive→dead transitions).
 
 ## Latest validation
 

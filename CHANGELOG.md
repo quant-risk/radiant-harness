@@ -68,6 +68,27 @@ No migration required. `subprocess_alive` and `subprocess_pid`
 are additive on the summary JSON. Hosts that don't care about
 subprocess liveness keep working unchanged.
 
+### Post-release validation (2026-06-30 11:30 BRT)
+
+End-to-end re-validation after the GitHub release was
+published (tag `v3.7.8` + 7 release assets at
+`github.com/quant-risk/radiant-harness/releases/tag/v3.7.8`):
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `radiant mcp self-test` | PASS, 6 tools |
+| C | `go test ./...` (full module) | PASS, 0 FAIL |
+| D | `make audit-install` | **PASS, 3/3, 0 SKIP** — canonical `curl \| bash` resolves v3.7.8, SHA256 verified, installed binary reports `v3.7.8` |
+| E | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| F | `make test-dropin` | PASS against v3.7.8 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
+
+The new `phase_status` summary fields (`subprocess_alive`,
+`subprocess_pid`) and the crashed-escalation behaviour are
+covered by the 7 contract tests (4 existing + 3 new), all of
+which PASS in the full module run.
+
 ## [3.7.7] — 2026-06-30 — Subprocess-backed async gate primitives
 
 The async gate primitives (`radiant_possess_async` +
