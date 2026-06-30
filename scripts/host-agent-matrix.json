@@ -200,6 +200,23 @@
       ],
       "config_file_relpath_global": ".MiniMax/mcp.json",
       "config_file_relpath_project": ".MiniMax/mcp.json"
+    },
+    {
+      "name": "gemini",
+      "env": {
+        "GEMINI_CLI": "1",
+        "GEMINI_CLI_HOME": "/tmp/sandbox/.gemini",
+        "GEMINI_PROJECT_ROOT": "/tmp/sandbox/proj",
+        "GEMINI_API_KEY": "stub-key-for-test"
+      },
+      "config_file_relpath": ".gemini/settings.json",
+      "config_format": "json",
+      "config_root_key": "mcpServers",
+      "verify_keys": [
+        ".gemini.settings.json.mcpServers"
+      ],
+      "config_file_relpath_global": ".gemini/settings.json",
+      "config_file_relpath_project": ".gemini/settings.json"
     }
   ]
 }

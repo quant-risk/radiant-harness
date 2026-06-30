@@ -331,8 +331,24 @@ func mcpConfigFor(agent, binaryPath, cwd string, global bool) (string, string, e
 		content, err := mergeClineConfig(target, entry)
 		return target, content, err
 
+	case "gemini":
+		// Google Gemini CLI (@google/gemini-cli). MCP config is a JSON
+		// file at ~/.gemini/settings.json (user-level) or
+		// ./.gemini/settings.json (project-level), with the standard
+		// `mcpServers` shape — same JSON layout as Claude/Cursor.
+		// Source: https://geminicli.com/docs/tools/mcp-server/.
+		var target string
+		if global {
+			home, _ := os.UserHomeDir()
+			target = filepath.Join(home, ".gemini", "settings.json")
+		} else {
+			target = filepath.Join(cwd, ".gemini", "settings.json")
+		}
+		content, err := mergeMCPJSON(target, entry)
+		return target, content, err
+
 	default:
-		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode, codex, opencode, hermes, kimi, openclaw, cline, MiniMax)", agent)
+		return "", "", fmt.Errorf("unknown agent %q (supported: claude, cursor, windsurf, zed, vscode, codex, opencode, hermes, kimi, openclaw, cline, MiniMax, gemini)", agent)
 	}
 }
 

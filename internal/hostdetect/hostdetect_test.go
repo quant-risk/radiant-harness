@@ -70,6 +70,28 @@ func TestDetect_Cursor(t *testing.T) {
 	}
 }
 
+// TestDetect_GeminiCLI covers the v3.7.6 wiring for Google Gemini CLI.
+// GEMINI_CLI / GEMINI_PROJECT_ROOT / GEMINI_API_KEY are the env-var
+// fingerprint; GEMINI_API_KEY is intentionally included because it's
+// set whenever the model-auth is configured, even if no MCP server is
+// yet wired up.
+func TestDetect_GeminiCLI(t *testing.T) {
+	d := stubDetector(
+		map[string]string{"GEMINI_CLI": "1", "GEMINI_PROJECT_ROOT": "/work"},
+		"", 1000, 999,
+	)
+	got := d.Detect()
+	if got.Agent != AgentGeminiCLI {
+		t.Errorf("got %q, want %q", got.Agent, AgentGeminiCLI)
+	}
+	if !got.SupportsSampling {
+		t.Error("Gemini CLI supports MCP sampling per vendor docs")
+	}
+	if got.DetectionSource != "env" {
+		t.Errorf("got source %q, want env", got.DetectionSource)
+	}
+}
+
 func TestDetect_Hermes(t *testing.T) {
 	d := stubDetector(
 		map[string]string{"HERMES_VERSION": "0.1.0"},

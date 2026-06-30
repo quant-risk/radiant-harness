@@ -305,6 +305,12 @@ func mcpConfigPath(agent, home, cwd string) string {
 		return filepath.Join(home, ".cline", "mcp.json")
 	case "MiniMax-code":
 		return filepath.Join(home, ".MiniMax", "mcp.json")
+	case "gemini-cli":
+		// Google Gemini CLI — `mcpServers` JSON in ~/.gemini/settings.json
+		// (user-level) or ./.gemini/settings.json (project-level). We
+		// always probe the user-level path for `radiant doctor --mcp`
+		// because that's what `radiant setup-mcp --global` writes to.
+		return filepath.Join(home, ".gemini", "settings.json")
 	}
 	return ""
 }
@@ -359,8 +365,9 @@ func probeRadiantEntry(agent string, data []byte) (bool, bool, string, string, e
 		return true, samplingEnabled, samplingTimeout, mcpTimeout, nil
 
 	case "claude-code", "cursor", "kimi-cli", "cline", "windsurf",
-		"vscode-copilot", "MiniMax-code":
-		// JSON: mcpServers.radiant
+		"vscode-copilot", "MiniMax-code", "gemini-cli":
+		// JSON: mcpServers.radiant. Gemini CLI uses the standard
+		// `mcpServers` shape (see geminicli.com/docs/tools/mcp-server/).
 		var root map[string]any
 		if err := json.Unmarshal(data, &root); err != nil {
 			return false, false, "", "", err

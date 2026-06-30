@@ -35,6 +35,7 @@ const (
 	AgentUnknown     AgentID = ""
 	AgentClaudeCode  AgentID = "claude-code"
 	AgentCursor      AgentID = "cursor"
+	AgentGeminiCLI   AgentID = "gemini-cli"
 	AgentHermes      AgentID = "hermes"
 	AgentKimiCLI     AgentID = "kimi-cli"
 	AgentOpenClaw    AgentID = "openclaw"
@@ -52,6 +53,7 @@ const (
 var knownAgents = []AgentID{
 	AgentClaudeCode,
 	AgentCursor,
+	AgentGeminiCLI,
 	AgentHermes,
 	AgentKimiCLI,
 	AgentOpenClaw,
@@ -118,6 +120,15 @@ var signatures = map[AgentID]agentSignature{
 		EnvVars:          []string{"CURSOR_TRACE_ID", "CURSOR_HOME", "CURSOR_USER_DATA_DIR"},
 		ParentBinaries:   []string{"cursor", "Cursor", "cursor-server", "Cursor.exe"},
 		SupportsSampling: true,
+	},
+	AgentGeminiCLI: {
+		// Google Gemini CLI (@google/gemini-cli). MCP config lives at
+		// ~/.gemini/settings.json or ./.gemini/settings.json with the
+		// standard `mcpServers` JSON shape. See geminicli.com/docs/tools/mcp-server/.
+		ID:               AgentGeminiCLI,
+		EnvVars:          []string{"GEMINI_CLI", "GEMINI_CLI_HOME", "GEMINI_PROJECT_ROOT", "GEMINI_API_KEY"},
+		ParentBinaries:   []string{"gemini", "gemini-cli", "gemini.cmd", "Gemini"},
+		SupportsSampling: true, // MCP-native per vendor docs
 	},
 	AgentHermes: {
 		ID:               AgentHermes,
