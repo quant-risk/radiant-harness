@@ -102,7 +102,33 @@ v3.7.11 follow-up work.
 
 ### Post-release validation
 
-2026-06-30 13:50 BRT — **15/15 PASS** after `v3.7.12` tag + release (12 base + 3 v3.7.12-specific surface checks):
+2026-06-30 14:15 BRT — **15/15 PASS** after `v3.7.12` tag + release (12 base + 3 v3.7.12-specific surface checks), second pass:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.12` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical SKIPs local-dirty) |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS, against v3.7.12 |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.12-1-g1e6bb8f` (post-validation-commit divergence, expected; published binaries built right after tag, SHA-match the published SHA256SUMS) |
+| I | Fetch published SHA256SUMS | OK — basename-only format confirmed |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`a376e7bc...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.12`, 8 tools, PASS |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.12`, `mcp self-test` PASS with 8 tools |
+| M | **`radiant phase redirect --list`** (canonical v3.7.12 binary, 3 redirects) | PASS — formatted table enumerates all 3 redirects with OLD/NEXT/CREATED_AT/PATH; NDJSON emits same 3 entries with parseable fields |
+| N | **`radiant phase follow --json --on-change-exit`** (canonical v3.7.12 binary) | PASS — `--follow` + `--json` + `--on-change-exit` combo works; `jq -r '.status + " \| " + .current_phase + " \| " + .task_id'` returns `done \| done \| v3712-follow-json-anchor` after the transition; exits 0 on first change |
+| O | **`--help` surfaces reachable on canonical v3.7.12 binary** | PASS — `phase --help` lists all 4 subcommands (status, watch, redirect, follow); `phase redirect --help` documents the protocol; `phase follow --help` describes the alias |
+
+**New combo validated in this round (N):** `radiant phase follow <ticket> --json --on-change-exit` is the canonical "wait until the new ticket reaches terminal state, then dump NDJSON" recipe. The `phase follow` alias (item B from this sprint) composes cleanly with the `--json` and `--on-change-exit` flags (items from v3.7.11), proving the three v3.7.11/v3.7.12 features stack without interference.
+
+Earlier in the session (first validation pass): 15/15 PASS — see commit `1e6bb8f`.
+
+## [3.7.11] — 2026-06-30 — --on-change-exit, --follow, docs/HOSTS.md
 
 | Step | Description | Result |
 |------|-------------|--------|

@@ -6,11 +6,11 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 13:40 BRT by mavis during v3.7.12 sprint
+**Last updated:** 2026-06-30 14:15 BRT by mavis during v3.7.12 deep post-release validation (second pass)
 
 ## Current sprint / active feature
 
-- Active: **v3.7.12 code-complete; release cut pending.**
+- Active: **v3.7.12 shipped + validated 15/15 twice; v3.7.13 kickoff pending.**
 
 ## Current sprint / active feature
 
