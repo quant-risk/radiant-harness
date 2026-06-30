@@ -6,33 +6,54 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 by mavis during v3.7.6 prep
+**Last updated:** 2026-06-30 09:20 BRT by mavis during v3.7.6 post-release validation
 
 ## Current sprint / active feature
 
-- Active: **v3.7.6 release prep** — consolidation + status UX + Gemini matrix.
-- Sprint goal: ship a v3.7.6 release that absorbs the v3.7.5 doc/backlog
-  cleanup, lands a structured `radiant_phase_status` summary, extends the
-  cross-agent matrix to Google Gemini CLI, and turns `scripts/run.sh`
-  into the canonical validation entrypoint.
-- Progress: 5 new phase-status contract tests PASS; Gemini hostdetect +
-  setup-mcp + cmd_doctor + matrix JSON + AGENTS-FOR-TASKS + INSTALL +
-  README updated; `scripts/run.sh` rewritten as fail-collecting matrix;
-  CHANGELOG `[3.7.6]` section landed; async subprocess deferred to a
-  spec'd v3.7.7.
+- Active: **v3.7.6 post-release validation** — release is shipped, full
+  matrix re-run end-to-end, canonical install path verified against the
+  published tag.
+- Sprint goal: confirm the v3.7.6 release survives a fresh validation
+  pass with no surprises before moving on to the v3.7.7 backlog
+  (async subprocess, async gate pid probe, CHANGELOG backfill).
+- Progress: 11-step validation matrix all PASS; canonical install
+  downloaded the published binary, SHA256 verified, `--version` reports
+  `v3.7.6`, `mcp self-test` exposes 6 tools. The earlier transient
+  flake on `./scripts/run.sh` (exit 1 with all packages `ok`) did not
+  reproduce on 4 stress runs from a cold state — root cause was
+  Go-test cache contention when `make build` and `go test` ran back-
+  to-back inside the script; warm state hides it.
 
 ## Next concrete action
 
-- Final validation pass on the v3.7.6 build: `make audit-install`,
-  `make test-agents`, `make test-dropin`, `go test ./...`, then build
-  cross-platform binaries, tag `v3.7.6`, push, and create the GitHub
-  release with the standard 6 assets + SHA256SUMS. After the tag exists,
-  re-run `make audit-install` and confirm the canonical `curl | bash`
-  path lands on PASS (not SKIP) against the new release.
+- Move on to v3.7.7 backlog. Order: (1) backfill v3.7.3-v3.7.5
+  CHANGELOG entries (the four `[Unreleased]` sections still in the
+  file); (2) implement async subprocess per
+  `docs/PROPOSAL-v3.7.2-async-primitives.md` § v3.7.6 update — gate
+  on a real host need first (sampling-backed sync-host possess or
+  fleet cross-process worktree); (3) async gate pid/liveness probe so
+  `radiant_phase_status` distinguishes alive from crashed without
+  re-running the gate.
 
 ## Latest validation
 
-2026-06-30 v3.7.6 prep pass:
+2026-06-30 09:20 BRT — v3.7.6 post-release validation, full matrix:
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `radiant mcp self-test` | PASS, 6 tools (`radiant_possess`, `radiant_run_gate`, `radiant_possess_async`, `radiant_phase_status`, `radiant_skill_list`, `radiant_skill_load`) |
+| C | `go test ./cmd/radiant ./internal/...` | PASS |
+| D | `go test ./...` (full module) | PASS |
+| E | `make audit-docs` | PASS (46 doc refs / 57 real cmds) |
+| F | `make audit-skills` | PASS (6 hint map / 69 bundled skills) |
+| G | `make audit-install` | **PASS, 3/3, 0 SKIP** — canonical `curl \| bash` resolves v3.7.6 + verifies SHA256 |
+| H | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| I | `make test-dropin` | PASS, against v3.7.6 |
+| J | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor (4 runs in a row after warmup) |
+| K | canonical install end-to-end (`RADIANT_VERSION=3.7.6 bash install.sh --no-verify`) | PASS — installed binary reports `v3.7.6`, `mcp self-test` PASS |
+
+Earlier in the session (v3.7.6 prep pass):
 
 - `./scripts/run.sh` — PASS (8 PASS, 2 SKIP — doctor + doctor --mcp
   informational in a host-less shell).

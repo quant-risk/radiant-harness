@@ -129,6 +129,31 @@ Hosts running v3.7.6 inside a Gemini CLI session: run
 `radiant setup-mcp --agent=gemini --global` once, then `relaunch
 gemini-cli` for the MCP server entry to land.
 
+### Post-release validation (2026-06-30 09:20 BRT)
+
+End-to-end matrix re-run after the GitHub release was published
+(tag `v3.7.6` + 7 release assets on
+`github.com/quant-risk/radiant-harness/releases/tag/v3.7.6`):
+
+- `go build ./...` clean.
+- `radiant mcp self-test` PASS, 6 tools.
+- `go test ./cmd/radiant ./internal/...` PASS.
+- `go test ./...` PASS.
+- `make audit-docs` PASS (46/57).
+- `make audit-skills` PASS (6/69).
+- `make audit-install` **PASS, 3/3, 0 SKIP** — canonical
+  `curl | bash` resolves v3.7.6, SHA256 verified, installed
+  binary reports `v3.7.6`.
+- `make test-agents` PASS, 13/13 (incl. `gemini`).
+- `make test-dropin` PASS against v3.7.6.
+- `./scripts/run.sh` PASS, 8/8 + 2 SKIP doctor (4 consecutive
+  runs from cold state).
+- `RADIANT_VERSION=3.7.6 bash install.sh --no-verify` end-to-end
+  — downloaded, SHA256 checked, `radiant --version` reports
+  `v3.7.6`, `radiant mcp self-test` PASS.
+
+See `docs/STATE.md` § Latest validation for the full table.
+
 ## [Unreleased] — drop-in CLI auto-route
 
 `radiant loop start`, `radiant run`, and `radiant fleet start` from a
