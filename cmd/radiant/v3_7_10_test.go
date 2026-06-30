@@ -113,7 +113,7 @@ func TestPhaseStatus_Watch_StopsOnTerminalState(t *testing.T) {
 	}()
 
 	var buf strings.Builder
-	err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 0, false, &buf)
+	err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 0, false, false, "", &buf)
 	if err != nil {
 		t.Fatalf("runPhaseWatch: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPhaseStatus_Watch_MaxPollEnforced(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 200*time.Millisecond, false, &buf)
+	err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 200*time.Millisecond, false, false, "", &buf)
 	if err == nil {
 		t.Fatalf("expected error from max-poll enforcement, got nil (buf: %s)", buf.String())
 	}
@@ -183,7 +183,7 @@ func TestPhaseStatus_Watch_JSONMode(t *testing.T) {
 	}()
 
 	var buf strings.Builder
-	if err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 0, true, &buf); err != nil {
+	if err := runPhaseWatch(dir, st.TaskID, 50*time.Millisecond, 0, true, false, "", &buf); err != nil {
 		t.Fatalf("runPhaseWatch json: %v", err)
 	}
 	// Each emitted object must be a parseable JSON document.
@@ -225,7 +225,7 @@ func TestPhaseStatus_Watch_NoReemitWhenUnchanged(t *testing.T) {
 	// Use a tight 100ms interval but only 250ms max-poll — the
 	// state never changes so we should get exactly 1 emission
 	// (the initial) before max-poll kicks in.
-	if err := runPhaseWatch(dir, st.TaskID, 100*time.Millisecond, 250*time.Millisecond, false, &buf); err == nil {
+	if err := runPhaseWatch(dir, st.TaskID, 100*time.Millisecond, 250*time.Millisecond, false, false, "", &buf); err == nil {
 		t.Fatalf("expected max-poll error, got nil")
 	}
 	out := buf.String()
