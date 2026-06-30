@@ -78,7 +78,19 @@ work for the loop.
   reproduce shows a need for nested liveness, v3.7.10 will
   promote this to a recursive pid namespace.
 
-### Post-release validation (TBD — pending release cut)
+### Post-release validation
+
+2026-06-30 12:30 BRT — 7/7 PASS after `v3.7.9` tag + release:
+
+| Step | Command | Result |
+|------|---------|--------|
+| A | `go build ./...` | clean |
+| B | `radiant mcp self-test` (published darwin-arm64 binary) | PASS, **8 tools** — the original 6 + `radiant_fleet_status` + `radiant_fleet_resume` |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS, 3/3, 0 SKIP — canonical `curl \| bash` resolves v3.7.9, SHA256 verified, installed binary reports `v3.7.9` |
+| E | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| F | `make test-dropin` | PASS, against v3.7.9 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
 
 ## [3.7.8] — 2026-06-30 — Async gate pid/liveness probe
 
