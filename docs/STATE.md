@@ -6,7 +6,11 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 12:50 BRT by mavis during v3.7.10 sprint
+**Last updated:** 2026-06-30 12:45 BRT by mavis during v3.7.10 deep post-release validation
+
+## Current sprint / active feature
+
+- Active: **v3.7.10 shipped + validated 15/15; v3.7.11 kickoff pending.**
 
 ## Current sprint / active feature
 
@@ -59,14 +63,66 @@ alwaysApply: true
   (8) full validation 7/7 PASS — see below.
 - v3.7.9 GitHub release: tag `v3.7.9` + 7 release assets (TBD).
 
-## Next concrete action
+## Latest validation
 
-- v3.7.11 backlog. Order: (1) `--watch --on-change-exit` flag
-  for "wait until anything changes" notifications; (2)
-  `--follow=<ticket>` for resume-then-watch without manually
-  updating the ticket id; (3) Per-host opt-in matrix in
-  `docs/HOSTS.md` for offline reading; (4) Real CI host
-  reproducing fleet cross-process need (still gated).
+2026-06-30 12:40 BRT — v3.7.10 deep post-release validation, **15/15 PASS**:
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.10` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS v3.7.10 |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.10-1-gdc41cad`, published `v3.7.10` |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 verify | MATCH (`75cd34dc...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.10`, 8 tools, PASS |
+| K3 | **New v3.7.10 surfaces reachable** | PASS — phase status/watch, doctor --async-host, mcp serve --async-subprocess, mcp serve --fleet-async-subprocess all present in --help |
+| L | Canonical install (`curl install.sh@tag`) | PASS end-to-end |
+| M | **`phase watch` actually streams** | PASS — formatted output + exit 1 on max-poll |
+| N | **`phase watch --json` + transition detection** | PASS — initial emission + transition emission + exit 0 |
+| O1 | **`doctor --async-host` real output** | PASS — header, agent row, env vars, NOT RECOMMENDED verdicts |
+| O3 | **`.pid.children` sidecar format** | PASS — newline-separated integers at `.radiant-harness/fleet/pids/agent-<...>-<...>.pid.children` |
+
+**Process-learnings:**
+
+- `RADIANT_INTERNAL=1` is the correct override for testing internal helper commands outside the MCP host contract. The phase watch / status commands refuse without it; the error message points the operator at `mcp__radiant__possess` instead of panicking.
+- `phase watch` --max-poll contract (exit 1) is distinct from Ctrl-C (exit 130). Both work as designed.
+
+Earlier in the session (12-step validation, first pass):
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` | PASS (RC=0) |
+| A2 | `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.10` |
+| B3b | hidden `fleet-async-runner --help` | reachable (Hidden cobra flag) |
+| B3c | `publicCommands` gate blocks without `RADIANT_INTERNAL=1` | PASS (defense-in-depth) |
+| C | `go test ./...` | PASS (32 packages, 0 FAIL, 683 tests) |
+| D | `make audit-install` | PASS 2/3 + 1 SKIP (canonical SKIPs local-dirty) |
+| E | `make test-agents` | PASS 13/13 |
+| F | `make test-dropin` | PASS v3.7.9 |
+| G | `./scripts/run.sh` | PASS 8/8 + 2 SKIP |
+| H | Clean rebuild from tag | PASS — local `v3.7.9-1-gda91bd7`, published `v3.7.9` |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 uploaded |
+| K | Download published darwin-arm64, SHA256 verify | MATCH (`9379fcadf...`) |
+| K2 | Published binary version + self-test | `v3.7.9`, 8 tools, PASS |
+| L | Canonical install from `curl install.sh@tag` | PASS end-to-end |
+
+**Process learnings:**
+
+- **Build BEFORE post-release commits** for clean `v3.7.X` version strings in release binaries. After the first post-release commit, local `make release` produces `v3.7.X-1-g<sha>` and different SHA256s. To verify a published release, **download from GitHub and re-check** — not regenerate locally.
+- **`make clean` deletes `dist/`** including the published SHA256SUMS. Recovery = `curl https://api.github.com/.../releases/tags/vX.Y.Z | jq` + download.
+- **Hidden cobra subcommands** are reachable by direct invocation even though they don't appear in default `--help`. This is the intended surface for the async subprocess primitive (`radiant fleet-async-runner`, `radiant async-runner`).
+
+## Decisions log
 
 ## Latest validation
 

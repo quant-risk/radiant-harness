@@ -101,7 +101,55 @@ Three backlog items closed in one sprint, all observability/lifecycle:
 
 ### Post-release validation
 
-2026-06-30 12:30 BRT — 12/12 PASS after `v3.7.10` tag + release:
+2026-06-30 12:40 BRT — **15/15 PASS** after `v3.7.10` tag + release (12 base + 3 v3.7.10-specific surface checks):
+
+| Step | Description | Result |
+|------|-------------|--------|
+| A | `go build ./...` + `go vet ./...` | PASS (RC=0) |
+| B | `radiant mcp self-test` (published darwin-arm64) | PASS, 8 tools |
+| B2 | `--version` check | `v3.7.10` (clean tag) |
+| C | `go test ./...` (full module) | PASS (32 packages, 0 FAIL) |
+| D | `make audit-install` | PASS — all reachable install paths land on a working binary |
+| E | `make test-agents` | PASS, 13/13 (incl. `gemini`) |
+| F | `make test-dropin` | PASS, against v3.7.10 |
+| G | `./scripts/run.sh` | PASS, 8/8 + 2 SKIP doctor |
+| H | Clean rebuild from tag | PASS — local `v3.7.10-1-gdc41cad` (post-validation-commit divergence, expected) |
+| I | Fetch published SHA256SUMS | OK (recovered from GitHub) |
+| J | REST API asset inventory | 7/7 `state=uploaded` |
+| K | Download published darwin-arm64, SHA256 vs SHA256SUMS | MATCH (`75cd34dc...`) |
+| K2 | Published binary `--version` + `mcp self-test` | `v3.7.10`, 8 tools, PASS |
+| K3 | **New v3.7.10 surfaces reachable on published binary** | PASS — `phase status\|watch`, `doctor --async-host`, `mcp serve --async-subprocess`, `mcp serve --fleet-async-subprocess` all present in `--help` output of the published darwin-arm64 |
+| L | Canonical install end-to-end (`curl install.sh@tag`) | PASS — installed `~/.local/bin/radiant` reports `v3.7.10`, `mcp self-test` PASS with 8 tools |
+| M | **`radiant phase watch` actually streams** (real seeded state, no transition) | PASS — emitted formatted summary (status/curr phase/next-step/resume command/4 phase icons), exited 1 after `--max-poll 4s` with descriptive error |
+| N | **`radiant phase watch --json` + transition detection** | PASS — emitted initial JSON, background mutation flipped state to done, watch emitted second JSON object (`status=done, current_phase=done, last_update_at` correctly bumped), exited 0 |
+| O1 | **`radiant doctor --async-host`** real output | PASS — produces the expected header, agent row, env vars, NOT RECOMMENDED verdicts with reasons, exits 0 |
+| O3 | **`.pid.children` sidecar format on disk** | PASS — `agent-<runID>-<taskID>.pid.children` exists at `.radiant-harness/fleet/pids/`, newline-separated integers (2 children recorded in test seed) |
+
+**Key surfaces verified end-to-end on the published binary:**
+
+- `radiant phase watch <task-id> --interval=500ms --max-poll=4s` →
+  real formatted stream output (✓ done, ▶ in_progress, ○ pending icons
+  + next-step hint + resume command), correct exit codes (0 on
+  terminal, 1 on max-poll)
+- `radiant phase watch ... --json` → valid NDJSON, parseable with
+  `jq -c`, transition detection working
+- `radiant doctor --async-host` → produces the diagnostic the way
+  the CHANGELOG advertises (NOT RECOMMENDED / ALREADY ON /
+  RECOMMENDED / OPTED-IN verdicts + exact CLI flag to flip)
+- `.radiant-harness/fleet/pids/agent-<...>-<...>.pid.children`
+  sidecar exists with newline-separated integer format
+
+**Process-learnings confirmed:**
+
+- `RADIANT_INTERNAL=1` is the correct override for testing internal
+  helper commands (`radiant phase watch`, `radiant phase status`)
+  outside the MCP host contract. Without it the command exits
+  cleanly with a "you should use the MCP tool" hint rather than
+  hanging or panicking. Good defense-in-depth.
+- The `phase watch` --max-poll contract (exit 1 after timeout) is
+  distinct from Ctrl-C (exit 130). Both work as designed.
+
+Earlier in the session (12-step validation, first pass):
 
 | Step | Description | Result |
 |------|-------------|--------|
