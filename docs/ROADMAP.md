@@ -10,9 +10,9 @@ state, and clear enough for another agent to complete real project work.
 
 | Item | Value | Effort | Owner | Dependencies | Done when |
 |------|-------|--------|-------|--------------|-----------|
-| Close placeholder specs | Removes false open work | S | Maintainers | Current repo audit | No tracked spec contains unfilled host-agent markers |
-| Align async docs with code | Prevents wrong operational guidance | S | Maintainers | Existing tests | Tool descriptions no longer say shipped primitives are prep stubs |
-| Stabilize root validation | Gives agents one command to trust | S | Maintainers | Local binary installed | `./scripts/run.sh` passes |
+| Close placeholder specs | Removes false open work | S | Maintainers | Current repo audit | Done: no tracked spec/doc placeholders remain |
+| Align async docs with code | Prevents wrong operational guidance | S | Maintainers | Existing tests | Done: MCP descriptions match shipped offline primitives |
+| Stabilize root validation | Gives agents one command to trust | S | Maintainers | Local binary installed | Done: `./scripts/run.sh` passes |
 
 ## Next
 

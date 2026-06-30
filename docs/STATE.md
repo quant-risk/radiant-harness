@@ -6,20 +6,37 @@ alwaysApply: true
 
 # STATE — Living Project Memory
 
-**Last updated:** 2026-06-30 by Codex via radiant-guided cleanup
+**Last updated:** 2026-06-30 by Codex after final validation pass
 
 ## Current sprint / active feature
 
-- Active: docs/backlog consolidation after v3.7.5 drop-in validation.
+- Active: final validation of docs/backlog consolidation after v3.7.5.
 - Sprint goal: remove stale task scaffolds, align docs with shipped behavior,
   and keep the repo ready for another agent to install and use.
 - Progress: MenuFlex noise removed; self-driven drop-in flow validated;
-  placeholder specs closed into explicit status records.
+  placeholder specs closed into explicit status records; final validation
+  passed.
 
 ## Next concrete action
 
 - Review the remaining roadmap item with the highest value: broader
   host-agent matrix coverage or release tagging for the cleanup build.
+
+## Latest validation
+
+2026-06-30 final pass:
+
+- `./scripts/run.sh` — PASS.
+- `radiant doctor` — PASS.
+- `radiant mcp self-test` — PASS, 6 MCP tools listed.
+- `go test ./cmd/radiant ./internal/...` — PASS.
+- `go test ./...` — PASS.
+- `make test-dropin` — PASS against `v3.7.5`.
+- `make test-agents` — PASS; matrix regenerated under local
+  `.radiant-harness/`.
+- `make audit-install` — PASS for reachable paths; canonical `curl|bash`
+  path skipped only because the local tree was dirty before this validation
+  commit, so no matching release tag existed for that transient build.
 
 ## Decisions log
 
