@@ -301,10 +301,15 @@ if [ "$SELF_FOR_AGENT" = 1 ]; then
   RST=""
   case "${TARGET_AGENT:-}" in
     hermes)        RST="send /reload-mcp in this chat" ;;
-    claude)        RST="restart the shell session that runs `claude`" ;;
+    claude)        RST="restart the shell session that runs \`claude\`" ;;
     codex)         RST="re-launch codex (exit the current and run again)" ;;
     cursor)        RST="reopen the Cursor window" ;;
+    gemini)        RST="exit and re-launch \`gemini\` in the same shell" ;;
     opencode)      RST="reopen the OpenCode editor" ;;
+    kimi)          RST="exit and re-launch \`kimi\`" ;;
+    openclaw)      RST="restart the OpenClaw gateway (\`openclaw gateway stop && openclaw gateway start\`)" ;;
+    cline)         RST="reconnect Cline (the VS Code extension reloads MCP on reconnect)" ;;
+    MiniMax)        RST="restart MiniMax Code (Command Palette > 'Developer: Reload Window' or restart the CLI)" ;;
     windsurf)      RST="reopen Windsurf" ;;
     vscode-copilot) RST="reload the VS Code window (Command Palette > 'Reload Window')" ;;
     zed)           RST="restart Zed" ;;
