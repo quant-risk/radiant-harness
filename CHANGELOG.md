@@ -154,7 +154,17 @@ End-to-end matrix re-run after the GitHub release was published
 
 See `docs/STATE.md` § Latest validation for the full table.
 
-## [Unreleased] — drop-in CLI auto-route
+## [3.7.3] — 2026-06-30 — Drop-in CLI auto-route, profile-aware budgets, sync-host auto-routing, drop `radiant_run` alias
+
+Four long-standing gaps in the v3.7.x line close in one release.
+The drop-in CLI auto-route (`radiant loop start` / `radiant run` /
+`radiant fleet start` from a fresh shell) is the headline; profile-
+aware budgets bound unbounded runs; sync-host auto-routing closes
+the Hermes TUI 120 s tool-call deadlock; and the `radiant_run`
+legacy alias is finally retired. See each subsection below for the
+full description, behaviour change, and verification matrix.
+
+### Drop-in CLI auto-route
 
 `radiant loop start`, `radiant run`, and `radiant fleet start` from a
 fresh shell (no MCP-wired host, no API key) now auto-route to the
@@ -171,7 +181,7 @@ CLI surface in v3.7.1 (a fresh shell calling the documented
 commands would exit `critical_failure` with no artefacts; the
 auto-route produces the canonical scaffold in the working directory).
 
-### What changed
+#### What changed
 
 - `cmd/radiant/main.go::publicCommands` extended to include
   `loop`, `run`, `fleet`, `worktree`, `state`, `handoff`, `improve`
@@ -191,7 +201,7 @@ auto-route produces the canonical scaffold in the working directory).
 `RADIANT_FORCE_SAMPLING=1` and explicit API keys continue to bypass
 the auto-route and surface the real `loop.Run` / engine error path.
 
-## [Unreleased] — profile-aware budgets
+### Profile-aware budgets
 
 `radiant loop start --profile X` now resolves all four budget caps
 (tokens, iterations, wall-clock, dollar cost) from a per-profile
@@ -259,7 +269,7 @@ A new internal helper `internal/loop.ProfleDefaultsForProfile()`
   `TestBudget_NewFromExplicit`, etc.) all still PASS — the
   behaviour change is additive when explicit caps are set.
 
-## [Unreleased] — sync-host auto-routing closes the Hermes TUI deadlock
+### Sync-host auto-routing closes the Hermes TUI deadlock
 
 `mcp__radiant__possess` is now safe to call from a synchronous TUI
 host (e.g. Hermes) without producing the 120 s tool-call deadlock.
@@ -317,7 +327,7 @@ for progress.
   Document any vendor confirmation in the AGENTS-FOR-TASKS.md
   header so the path stays explicit.
 
-## [Unreleased] — drop the `radiant_run` legacy alias
+### Drop the `radiant_run` legacy alias
 
 The `mcp__radiant__run` MCP tool — kept as a **DEPRECATED** alias of
 `radiant_possess(task=goal)` since v3.7.2 — is **removed**. New code
@@ -356,6 +366,94 @@ key from `goal` to `task`. Behaviour is otherwise identical
 - Calling the deleted `mcp__radiant__run` server-side returns the
   expected `-32602 unknown tool: radiant_run` (test added to
   `cmd_mcp_possess_test.go`).
+
+### Sprint-7 wrap-up + smoke test allow-list + post-seal E2E rehearsal
+
+The v3.7.3 release lands with the full sprint-7 proof:
+
+- `d656f6f` bump version string after drop-in auto-route lands.
+- `f5afd84` smoke-test allow-list tracks the v3.7.x release
+  (`scripts/smoke-test.sh` now skips the v3.7.0/v3.7.1 tools that
+  the auto-route retired).
+- `3edf949` README hollow-stub trap closed — the README's
+  `curl | bash` example now lands on a real binary, not the
+  v3.7.1 hollow stub.
+- `594e7bb` `TestRadPossessJSONRPCRegression` locks the README
+  drop-in flow with a real JSON-RPC rehearsal.
+- `c6fc887` sprint-7 sealed with the definitive E2E proof
+  committed.
+- `d40359d` `scripts/e2e/`: real LLM-driven MCP rehearsal
+  (genuine 4-phase sampling flow, no stub mode).
+- `ff54384` post-seal E2E — real LLM-driven sampling
+  round-trips 6 phases end-to-end (the seal itself).
+
+## [3.7.4] — 2026-06-30 — Drop-in self-driven install flow + project scaffold + Codex handoff
+
+After v3.7.3 closed the canonical `curl | bash` end of the install
+path, v3.7.4 turns that into the path the host agent actually
+walks. Three commits:
+
+- `e6950c3` **Codex self-driven possess handoff.** The self-driven
+  scaffold path detects a Codex host (via the `RADIANT_HARNESS_AGENT`
+  probe in `cmd_mcp_runtime.go`) and writes a Codex-flavoured
+  handoff so a Codex CLI session lands on `.codex/AGENTS.md` +
+  `.codex/config.toml` rather than the generic scaffold. Test
+  added: `cmd_mcp_possess_test.go::TestCodexSelfDrivenHandoff`.
+- `62096da` **Project scaffold packaged.** `radiant run` from a
+  fresh workdir now lands a full project layout — `CONVENTIONS.md`,
+  `docs/architecture/{adr,context-map,diagrams,overview}.md`,
+  `docs/engineering/{agentic-layer,metrics,TESTING}.md` with
+  `_templates/` for adr/agent-contract/integrations/skill/subagent,
+  `docs/product/_templates/{features,journeys}.md`, `docs/glossary.md`,
+  plus the `.agent-context/`, `.codex/`, and `.github/workflows/`
+  config the harness needs to operate. `docs/README.md` indexes
+  the new docs tree.
+- `501f272` **Drop-in self-driven install flow.** `INSTALL.md`
+  and `README.md` rewritten so the drop-in `curl | bash` path
+  points at a real self-driven scaffold, not the v3.7.0 hollow
+  stub. `install.sh` adds the `--self-for-agent` bootstrap that
+  writes `INIT.json` + `AGENTS.md` + `NEXT.txt` to the next agent's
+  working directory so a Codex/Claude/Hermes/Cursor session that
+  opens the directory knows exactly what to call. `scripts/run.sh`
+  extended with the canonical validation steps; `specs/0001-<slug>/`
+  carries a sample `spec.md` + `tasks.md` for the host agent to
+  fill in.
+
+### Verified
+
+- `scripts/run.sh` PASS in the new shape.
+- `make audit-install` PASS — the canonical `curl | bash` line
+  resolves and SHA256s against the new release.
+- `make test-agents` 12/12.
+- E2E rehearsal (`scripts/e2e/dropin_self_driven_e2e.py`)
+  introduced in v3.7.5 — see the next section.
+
+## [3.7.5] — 2026-06-30 — Drop-in self-driven E2E test + validation docs
+
+The v3.7.4 install flow ships the scaffold; v3.7.5 ships the E2E
+that proves it works end-to-end.
+
+- `f0f8186` **Add drop-in self-driven E2E test.** New
+  `scripts/e2e/dropin_self_driven_e2e.py` (307 lines) walks the
+  canonical `curl | bash` flow: downloads the released binary,
+  SHA256s it, runs `radiant mcp possess` from a fresh shell, and
+  asserts the workdir ends with `specs/0001-<slug>/spec.md`,
+  `scripts/run.sh`, `.radiant-harness/CONTEXT.md`, and
+  `radiant_phase_status` returning the canonical self-driven
+  handoff. Hooked into `make test-dropin`.
+- `f706801` **Document drop-in E2E validation.** README +
+  AGENTS-FOR-TASKS updated to point at the drop-in E2E as the
+  proof-of-canonical-install; STATE.md records the E2E run
+  results (PASS against v3.7.5).
+
+### Verified
+
+- `make test-dropin` PASS against the v3.7.5 release.
+- Canonical `curl | bash` lands a working `radiant v3.7.5`
+  binary with all 6 MCP tools wired (verified end-to-end via
+  the new E2E).
+- `make audit-install` PASS — Path A (`curl | bash`) lands on
+  PASS, no longer SKIPs because the local tree matches a tag.
 
 ## [3.7.2] — 2026-06-30 — Close the drop-in install gap
 
