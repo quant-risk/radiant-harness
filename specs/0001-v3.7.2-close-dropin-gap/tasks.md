@@ -186,3 +186,51 @@ line on a fresh Darwin/arm64 sandbox exits 0 and prints v3.7.2.
 not just local source.
 
 ---
+
+## T8 — Drop the README hollow-stub trap on the CLI surface
+
+**Owner:** code
+**Maps to:** AC1 (drop-in install lands on a working CLI) + a new
+readme-driven AC: "every command the README documents produces
+the artefacts the prose implies, from a fresh shell".
+**Files:**
+- `cmd/radiant/main.go::publicCommands` — extends the allow-list
+  to `loop`, `run`, `fleet`, `worktree`, `state`, `handoff`,
+  `improve` (was gated by `RADIANT_INTERNAL=1`).
+- `cmd/radiant/cmd_loop.go` — adds `loopStartCLIDropIn` +
+  `runLoopCLILight`. `loopStartCmd` and `loopResumeCmd` route
+  through them when no API key + no MCP host are present.
+- `cmd/radiant/cmd_fleet.go::fleetStartCmd` — short-circuits to
+  `runSelfDrivenPossess` under the same conditions; legacy
+  Coordinator remains for callers with API keys.
+- `cmd/radiant/cmd_run.go::runCmd` — same drop-in so `radiant
+  run <spec-dir>` no longer fails with "no API key provided".
+- `scripts/smoke-test.sh` — version allow-list accepts the
+  v3.7.x release.
+
+**Accept:** from a fresh `/tmp` sandbox, every one of the
+README's headline commands (`radiant loop start`, `radiant run`,
+`radiant fleet start`) populates the workdir with at least:
+`AGENTS.md`, `CONVENTIONS.md`, `.radiant-harness/CONTEXT.md`,
+`.radiant-harness/state/possess-<id>/state.json`,
+`specs/0001-<slug>/{spec.md,tasks.md}`, `docs/`, `scripts/`.
+
+**Gate:** the rehearsal block documented in `sprint-7-wrap-up.md`
+§ "Validation log" runs end-to-end with no failures; `make smoke`
++ `make test-agents` pass on the v3.7.3 tag.
+
+---
+
+## Sprint status (all closed by tag v3.7.3)
+
+| Task | Sprint | Commit | Status  |
+|------|--------|--------|---------|
+| T1   | sprint-5 | `b9d70a0` (later) | ✓ closed |
+| T2   | sprint-5 | `b9d70a0`         | ✓ closed |
+| T3   | sprint-5 | `b9d70a0`         | ✓ closed |
+| T4   | sprint-5 | `81b51e`          | ✓ closed |
+| T5   | sprint-5 | `81b51e`          | ✓ closed |
+| T6   | sprint-5 | `81b51e`          | ✓ closed |
+| T7   | sprint-5 | `81b51e`          | ✓ closed (tagged v3.7.2) |
+| T8   | sprint-7 | `4a5428c` + `d656f6f` + `f5afd84` | ✓ closed (tagged v3.7.3) |
+
