@@ -47,6 +47,25 @@ func runMCPServe(in io.Reader, out io.Writer, samplingMode bool, samplingTimeout
 			},
 			Required: []string{"task"},
 		}},
+		// ----- v3.7.2 async primitives (stubs, real impl in PR-B) ------
+		{Name: "radiant_run_gate", Description: "Run ONE possess phase (discover | plan | execute | verify) asynchronously and return immediately with a ticket the host polls via radiant_phase_status. NO sampling/createMessage round-trip — phase runs offline, state persisted to .radiant-harness/state/<ticket>/state.json. Designed to unblock synchronous TUI hosts (Hermes) where the full radiant_possess deadlocks on sampling callbacks. v3.7.2-prep: stub returns structured 'in development' response; real subprocess plumbing lands in v3.7.2 PR-B.", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"phase":   {Type: "string", Description: "Phase to run: discover | plan | execute | verify. Required."},
+				"task":    {Type: "string", Description: "The user's original task prompt (verbatim). Required."},
+				"workdir": {Type: "string", Description: "Project directory. Defaults to agent's CWD."},
+			},
+			Required: []string{"phase", "task"},
+		}},
+		{Name: "radiant_possess_async", Description: "Fire-and-forget wrapper around the full 4-phase possess loop. Returns a ticket in <500ms; host polls radiant_phase_status(ticket=…) until done. Replaces radiant_possess for synchronous TUI hosts (Hermes) where the synchronous version deadlocks. v3.7.2-prep: stub returns structured 'in development' response; real subprocess plumbing lands in v3.7.2 PR-B.", InputSchema: mcpInputSchema{
+			Type: "object",
+			Properties: map[string]mcpPropertyDef{
+				"task":    {Type: "string", Description: "The user's original task prompt (verbatim). Required."},
+				"workdir": {Type: "string", Description: "Project directory. Defaults to agent's CWD."},
+				"profile": {Type: "string", Description: "Execution profile: lean | standard | thorough (default: standard)."},
+			},
+			Required: []string{"task"},
+		}},
 		{Name: "radiant_phase_status", Description: "Return the current state of a radiant_possess run by task_id (the 16-char prefix shown in the harness trace).", InputSchema: mcpInputSchema{
 			Type: "object",
 			Properties: map[string]mcpPropertyDef{
@@ -175,6 +194,12 @@ func callMCPToolLight(name string, args json.RawMessage, d *mcpDispatcher) mcpRe
 	switch name {
 	case "radiant_possess":
 		return mcpPossessWithBackend(args, d.backend())
+	case "radiant_possess_async":
+		// v3.7.2-prep stub. Real subprocess wiring in PR-B.
+		return mcpPossessAsync(args)
+	case "radiant_run_gate":
+		// v3.7.2-prep stub. Real subprocess wiring in PR-B.
+		return mcpRunGate(args)
 	case "radiant_run":
 		// back-compat: treat `goal` and `task` interchangeably
 		return mcpRunWithBackendLight(args, d.backend())
